@@ -271,6 +271,16 @@ export class FrameMetrics {
     return this.warmupWorst;
   }
 
+  /**
+   * Post-warmup seconds — the same clock A12's `atSeconds` uses. External
+   * events (focus, blur, occlusion) are logged against this so a stall can be
+   * correlated with something that happened, rather than attributed by guess.
+   */
+  get elapsedSeconds(): number {
+    if (this.startedAt === null || this.lastPresent === null) return 0;
+    return (this.lastPresent - this.startedAt - this.warmupMs) / 1000;
+  }
+
   report(): MetricsReport {
     const n = this.count;
     const validity = validateNominal(this.nominalMs);

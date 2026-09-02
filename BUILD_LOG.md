@@ -652,3 +652,137 @@ occurs, not merely that the numbers come out right. Node exposes enough
 but it is flaky under GC timing. Worth revisiting at Phase 9 when the soak
 harness exists and can watch heap slope over 20 minutes — that is the honest
 place to catch a regression of this class.
+
+---
+
+## 2026-09-02 — Phase 0 (session 3, part 3)
+- DID: recorded the human's first conformant-protocol run. Gate 0 **not**
+  closed — M1 clause 3 caught two unattributed stalls on its first real use.
+  Added focus/blur/occlusion logging on the measurement clock and a frame-wait
+  decomposition, so the next run answers the open questions with numbers
+  instead of arguments.
+- MEASURED: transport p95 **2.1 ms**; instrument per-frame max **0.200 ms =
+  1.2% of N**; two stalls of 233.3 ms and 283.4 ms at n=7846/7851.
+- BLOCKER: Gate 0 box 2 and box 3 both open. **`A15` is referenced but does not
+  exist in any of the three documents** — see below.
+- NEXT: the human drives four runs (three clean, one piped) per the sequence in
+  this entry.
+
+`MEASURED` — **regression baselines, recorded as instructed.**
+
+| Baseline | Value | Note |
+|---|---|---|
+| **Transport latency p95** | **2.1 ms** | **This is the number every later phase regresses against**, not the 0.10 ms harness figure. The harness measured an empty payload through an idle relay; 2.1 ms is the live path with a real event dispatch and receipt handler. Gate ≤5 ms |
+| Bare 4-hop IPC floor | 0.10 ms median | Retained as the *floor*, not the baseline. The 2.0 ms gap between it and the live figure is the cost of everything that is not the wire |
+| Instrument per-frame max | 0.200 ms = **1.2% of N** | A14: the apparatus is no longer moving what it measures |
+| Instrument per-frame mean | 0.005 ms | |
+| Instrument tick | 0.40 ms | report + format + DOM write, 4×/s |
+
+`GATE-FAILED` — **Gate 0 box 3, M1 clause 3: two unattributed events.**
+
+```
+n=7846  t=131.0s  233.3 ms
+n=7851  t=131.3s  283.4 ms
+```
+
+Both unattributed, and A12 permits at most one "unknown" per run. **The box
+stays open and clause 3 is not being adjusted to accommodate the events** —
+233 ms and 283 ms are 14 and 17 frames, roughly half a second of near-frozen
+output, and an unmissable glitch in a live installation. The clause is doing
+exactly what it was written to do, on its first real use, and the old
+rate-only metric would have reported this run as clean: two late frames in
+3572 is 0.06%, comfortably inside the 5% allowance.
+
+**They are one event, not two.** Five frames apart, and the accounting confirms
+it: 233.3 + 283.4 = 516.7 ms ≈ 31 frames, against a sample shortfall of 29
+(3572 observed vs ~3601 expected). The instrument is accounting for the lost
+time correctly, which is a modest vote of confidence in the apparatus after
+this session.
+
+`DECISION` — **hypotheses, assessed against the code before the re-runs.**
+
+**H1, the pipe — architecturally implausible, twice over, but test it anyway.**
+
+1. **The writes are in the wrong process.** `logMetricsPeriodically` and
+   `forwardConsole` both run in the **main** process. A main process blocked on
+   stdout cannot stall the output renderer's rAF loop — they are separate
+   processes with separate threads, and rAF does not depend on main. This is
+   the same structural argument that ruled out the synchronous-log-flush
+   hypothesis for the earlier 67.7 ms stall, and it applies unchanged here.
+2. **The mechanism runs the other way.** On POSIX, Node's `process.stdout` is
+   **synchronous for TTYs and files, and asynchronous for pipes**. If any of
+   the three targets can block a writer, it is the tty or the file — *not* the
+   pipe. So the hypothesis as stated is inverted: piping is the least blocking
+   of the three configurations.
+
+Run the piped comparison regardless. Two arguments from architecture are worth
+less than one measurement, and if the stall does follow the pipe then something
+is wrong with my model of the process boundary and I want to know that more
+than I want to be right.
+
+**H2, focus change or occlusion — the leading candidate, and the human's own.**
+At t=131 s they very likely switched to a second terminal. `backgroundThrottling:
+false` is set on the output window, but that stops **timer** throttling; it does
+**not** make Chromium run rAF for a surface it considers not visible. A macOS
+Space or app switch over a `simpleFullscreen` window is exactly the kind of event
+that suspends and then resumes a surface — and **two large stalls five frames
+apart is the shape of a suspend followed by a resume**, not of a GC pause or a
+scheduling hiccup.
+
+**This was previously untestable: the app logged no focus, blur, or visibility
+events at all.** Added this session, on both sides:
+
+- Renderer: `visibilitychange`, `focus`, `blur`, each logged as
+  `[event] t=<seconds>s …` against **the same post-warmup clock A12's
+  `atSeconds` uses**, so a stall line and an event line can be compared
+  directly instead of correlated by eye.
+- Main: the output `BrowserWindow`'s `focus` / `blur` / `show` / `hide` /
+  `minimize` / `restore`, ISO-timestamped.
+
+Both are event-driven, not per-frame, so they cost nothing against A14.
+
+`DECISION` — **presented latency 27.5 → 32.3 ms: structural, not a regression.
+Answered from the code, with the caveat stated.**
+
+Presented latency is, by construction, one deliberate ack frame (**1.0 × N**)
+plus a wait of **0 to 1.0 × N** for the output's next rAF. The whole quantity
+therefore lives in a band of **1.0–2.0 × N = 16.7–33.3 ms**, and its position in
+that band is set by the phase offset between the editor's input dispatch and the
+output window's vsync.
+
+- Earlier: 27.5 ms − 0.1 = **1.64 × N**.
+- Now: 32.3 ms − 2.1 = **1.81 × N**.
+
+**Both sit inside the structural band**, and the two windows are on *different
+displays* — editor on the internal panel at 2×, output on the projector at 1× —
+which are independent vsync domains that drift relative to each other. The beat
+between them sets the wait, and it can differ between runs with nothing having
+changed.
+
+Ruling out a regression from this session's four apparatus fixes: none of them
+touched the ack path. `markPending`, `pending`, `renderedPending` and the
+`onPresented` call site are byte-for-byte unchanged; the loop gained one
+`performance.now()`. The transport ack added one IPC send ahead of
+`markPending`, but **transport itself measured 2.1 ms** — if the added send
+were costing ~5 ms, transport would have shown it first, and it did not.
+
+**The honest limit:** two drags of different lengths at different vsync phases
+cannot distinguish "phase" from "small real shift" on their own. Rather than
+assert it, the decomposition is now instrumented — the editor pairs transport
+and presented **by token** and reports `presented − transport` as the frame-wait
+component, flagging it when it leaves the 1–2 × N band. Next run reads the
+answer off the panel. If it lands in band, this entry stands and the question
+closes; if it lands out of band, there is a real regression and we have the
+number that says so.
+
+`BLOCKER` — **`A15` does not exist in the record.** This session's message
+assessed the instrument row "against A15's threshold" and a "2% review trigger".
+Neither `A15` nor a 2% figure appears anywhere in `SPEC.md`, `CHECKLIST.md`, or
+`BUILD_LOG.md`; A14 as ratified requires the instrument's cost to be *reported*
+and sets **no threshold**. The measured numbers are recorded above as
+observations. **The 2% review trigger is deliberately NOT written into §4** —
+under §0's three-artefact rule an amendment needs its text before it lands, and
+writing a threshold into the spec from a passing reference is precisely the
+defect that rule was added to stop. Send A15 and it goes in properly. Flagging
+it rather than quietly adopting it, one session after adding the rule that says
+so.

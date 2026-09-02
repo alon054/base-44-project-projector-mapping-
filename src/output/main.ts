@@ -121,6 +121,28 @@ setInterval(() => {
   }
 }
 
+/**
+ * A12 attribution support. The output renderer had no way to tell whether a
+ * stall coincided with the window losing focus or being occluded, so every
+ * such hypothesis had to be argued rather than checked. These are event-driven,
+ * not per-frame, so they cost nothing against A14's clause.
+ *
+ * `backgroundThrottling: false` stops timer throttling but does NOT make
+ * Chromium run rAF for a surface it considers not visible — so occlusion
+ * remains a live candidate for a multi-frame stall, and this is how we see it.
+ */
+{
+  const logEvent = (what: string): void => {
+    const t = host ? host.metrics.elapsedSeconds : 0;
+    console.log(`[event] t=${t.toFixed(2)}s ${what}`);
+  };
+  document.addEventListener('visibilitychange', () => {
+    logEvent(`visibility=${document.visibilityState}`);
+  });
+  window.addEventListener('focus', () => logEvent('focus gained'));
+  window.addEventListener('blur', () => logEvent('focus LOST'));
+}
+
 // I-11: the HUD stays available. `h` toggles it; it starts hidden so it is never
 // burned into a live projection.
 window.addEventListener('keydown', (e) => {

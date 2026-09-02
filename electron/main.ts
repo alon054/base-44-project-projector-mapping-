@@ -253,6 +253,18 @@ function openOutputWindow(): void {
     if (!outputWin) releasePowerSaveBlocker();
   });
 
+  // A12 attribution: the main-process half of the same correlation trail. A
+  // stall at t=131s is only attributable if something else is timestamped too.
+  const logWinEvent = (ev: string): void => {
+    console.log(`[event] output window ${ev} @ ${new Date().toISOString()}`);
+  };
+  win.on('focus', () => logWinEvent('focus'));
+  win.on('blur', () => logWinEvent('blur'));
+  win.on('show', () => logWinEvent('show'));
+  win.on('hide', () => logWinEvent('hide'));
+  win.on('minimize', () => logWinEvent('minimize'));
+  win.on('restore', () => logWinEvent('restore'));
+
   forwardConsole(win, 'output');
   currentDisplay = d;
   outputSignature = signatureOf(d, goFullscreen);

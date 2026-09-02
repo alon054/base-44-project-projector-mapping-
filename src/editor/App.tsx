@@ -32,6 +32,15 @@ export function App(): React.JSX.Element {
   // A11: two figures, never conflated. Transport is what moves under load.
   const [transport, setTransport] = useState<number[]>([]);
   const [presented, setPresented] = useState<number[]>([]);
+  /**
+   * presented - transport for the SAME token: the frame-cadence component,
+   * isolated. Structurally this must land between 1xN and 2xN — one deliberate
+   * ack frame plus a 0-1 frame wait for the output's next rAF — so a shift
+   * inside that band is vsync phase, and a shift outside it is a regression.
+   * Without this, telling those apart needed an argument instead of a number.
+   */
+  const [frameWait, setFrameWait] = useState<number[]>([]);
+  const transportByToken = useRef(new Map<number, number>());
   const token = useRef(0);
 
   const refreshDisplays = useCallback(() => {
@@ -54,13 +63,23 @@ export function App(): React.JSX.Element {
       refreshDisplays();
     });
     const offWarn = window.engine.onWarning((w) => setWarning(w.level === 'info' ? '' : w.text));
-    const offRecv = window.engine.onParamRecv(({ t0 }) => {
+    const offRecv = window.engine.onParamRecv(({ token, t0 }) => {
       const rtt = performance.now() - t0;
       setTransport((prev) => [...prev.slice(-299), rtt]);
+      const m = transportByToken.current;
+      m.set(token, rtt);
+      // Not every token gets an ack — a drag supersedes pending values — so the
+      // map is bounded rather than trusted to drain.
+      if (m.size > 512) for (const k of m.keys()) { m.delete(k); if (m.size <= 256) break; }
     });
-    const offAck = window.engine.onParamAck(({ t0 }) => {
+    const offAck = window.engine.onParamAck(({ token, t0 }) => {
       const rtt = performance.now() - t0;
       setPresented((prev) => [...prev.slice(-299), rtt]);
+      const t = transportByToken.current.get(token);
+      if (t !== undefined) {
+        transportByToken.current.delete(token);
+        setFrameWait((prev) => [...prev.slice(-299), rtt - t]);
+      }
     });
     return () => {
       offMetrics();
@@ -89,6 +108,7 @@ export function App(): React.JSX.Element {
   };
   const tStat = useMemo(() => stat(transport), [transport]);
   const pStat = useMemo(() => stat(presented), [presented]);
+  const wStat = useMemo(() => stat(frameWait), [frameWait]);
 
   return (
     <div style={{ display: 'flex', gap: 20, padding: 20, alignItems: 'flex-start' }}>
@@ -188,7 +208,16 @@ presented  median ${pStat.median.toFixed(1)}  p95 ${pStat.p95.toFixed(1)} ms  ${
               } (<=${PRESENTED_GATE_MS} ms)  n=${pStat.n}
 implied one-way presented ≈ ${
                 nominalMs > 0 ? (pStat.median - nominalMs).toFixed(1) : '—'
-              } ms${nominalMs > 0 ? ` = ${((pStat.median - nominalMs) / nominalMs).toFixed(2)}× N` : ''}`}
+              } ms${nominalMs > 0 ? ` = ${((pStat.median - nominalMs) / nominalMs).toFixed(2)}× N` : ''}
+frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
+                wStat && nominalMs > 0
+                  ? ` = ${(wStat.median / nominalMs).toFixed(2)}× N  ${
+                      wStat.median >= nominalMs && wStat.median <= nominalMs * 2
+                        ? '(in the structural 1–2× N band)'
+                        : 'OUT OF BAND — investigate'
+                    }`
+                  : ''
+              }`}
             </pre>
           ) : (
             <p style={{ margin: 0, color: '#8b939b' }}>Move the slider to sample.</p>
