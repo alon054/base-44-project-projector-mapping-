@@ -91,6 +91,8 @@ export interface ProbeOptions {
   dev: { width: number; height: number };
   target: { width: number; height: number };
   iterations?: number;
+  /** Which resolution is measured first. Exists to expose order bias. */
+  order?: 'dev-first' | 'target-first';
 }
 
 /**
@@ -103,14 +105,16 @@ export function runRenderMultiplierProbe(
   opts: ProbeOptions,
 ): KReport {
   const iterations = opts.iterations ?? PROBE_ITERATIONS;
-  const devMs = measure(renderer, container, opts.dev.width, opts.dev.height, iterations);
-  const targetMs = measure(
-    renderer,
-    container,
-    opts.target.width,
-    opts.target.height,
-    iterations,
-  );
+  const devFirst = (opts.order ?? 'dev-first') === 'dev-first';
+  let devMs: number;
+  let targetMs: number;
+  if (devFirst) {
+    devMs = measure(renderer, container, opts.dev.width, opts.dev.height, iterations);
+    targetMs = measure(renderer, container, opts.target.width, opts.target.height, iterations);
+  } else {
+    targetMs = measure(renderer, container, opts.target.width, opts.target.height, iterations);
+    devMs = measure(renderer, container, opts.dev.width, opts.dev.height, iterations);
+  }
   const dev = computeK(opts.nominalMs, devMs);
   const target = computeK(opts.nominalMs, targetMs);
   return {

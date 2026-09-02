@@ -7,3 +7,4 @@ out/
 
 # app/installation prefs are machine-local, not shared state (SPEC.md §7)
 config/settings.json
+measurements/*.log

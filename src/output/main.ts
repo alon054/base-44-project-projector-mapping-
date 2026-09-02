@@ -8,7 +8,7 @@ import {
   TARGET_RESOLUTION,
   type OutputConfig,
 } from '@shared/ipc';
-import { Hud, formatReport } from '../debug/hud';
+import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
@@ -24,6 +24,8 @@ let config: OutputConfig = {
   uncapped: false,
   role: 'output',
   hudVisible: false,
+  measureLabel: '',
+  measureCues: [],
 };
 
 const hud = new Hud(document.body);
@@ -131,16 +133,146 @@ setInterval(() => {
  * Chromium run rAF for a surface it considers not visible — so occlusion
  * remains a live candidate for a multi-frame stall, and this is how we see it.
  */
+interface RunEvent {
+  t: number;
+  what: string;
+  disturbing: boolean;
+}
+const runEvents: RunEvent[] = [];
+
+/**
+ * The output window has no cursor and draws black, so "does this window have
+ * keyboard focus?" is otherwise unanswerable by looking at the wall. Shown only
+ * when focus is LOST, so a clean run draws nothing extra.
+ */
+const focusBadge = document.createElement('div');
+focusBadge.style.cssText = [
+  'position:fixed',
+  'left:0',
+  'right:0',
+  'bottom:0',
+  'padding:10px 14px',
+  'font:600 16px/1.3 ui-monospace,Menlo,monospace',
+  'color:#111',
+  'background:#ffcc00',
+  'text-align:center',
+  'z-index:20',
+  'display:none',
+].join(';');
+focusBadge.textContent =
+  'OUTPUT WINDOW NOT FOCUSED — click anywhere on this display; h / r / k need focus';
+document.body.appendChild(focusBadge);
+
 {
-  const logEvent = (what: string): void => {
+  const logEvent = (what: string, disturbing: boolean): void => {
     const t = host ? host.metrics.elapsedSeconds : 0;
-    console.log(`[event] t=${t.toFixed(2)}s ${what}`);
+    runEvents.push({ t, what, disturbing });
+    console.log(`[event] t=${t.toFixed(2)}s ${what}${disturbing ? '  [DISTURBING]' : ''}`);
   };
   document.addEventListener('visibilitychange', () => {
-    logEvent(`visibility=${document.visibilityState}`);
+    const hidden = document.visibilityState !== 'visible';
+    logEvent(`visibility=${document.visibilityState}`, hidden);
   });
-  window.addEventListener('focus', () => logEvent('focus gained'));
-  window.addEventListener('blur', () => logEvent('focus LOST'));
+  window.addEventListener('focus', () => {
+    focusBadge.style.display = 'none';
+    logEvent('focus gained', false);
+  });
+  window.addEventListener('blur', () => {
+    focusBadge.style.display = 'block';
+    logEvent('focus LOST', true);
+  });
+  if (!document.hasFocus()) focusBadge.style.display = 'block';
+}
+
+/**
+ * The on-wall cue for the operator-driven disturbance run. Large, centred, and
+ * only ever built when cues are configured — an interactive or gate run never
+ * constructs it, so it cannot cost anything it is not asked to cost.
+ */
+function showCue(text: string, holdMs: number): void {
+  let el = document.querySelector<HTMLDivElement>('#cue');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'cue';
+    el.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'font:700 92px/1 ui-monospace,Menlo,monospace',
+      'color:#ff3b30',
+      'pointer-events:none',
+      'z-index:30',
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.display = 'flex';
+  const target = el;
+  window.setTimeout(() => {
+    target.style.display = 'none';
+  }, holdMs);
+}
+
+/**
+ * One full §4 protocol window, unattended: reset, wait out warmup + window
+ * untouched, emit a structured summary, probe k, quit. Emits a machine-readable
+ * JSON block so the report is assembled from the app's own numbers rather than
+ * from anything retyped.
+ */
+function startMeasurementRun(label: string, cues: readonly number[]): void {
+  const totalMs = WARMUP_MS + WINDOW_MS;
+  console.log(
+    `[run] START label=${label} warmupMs=${WARMUP_MS} windowMs=${WINDOW_MS} ` +
+      `cues=[${cues.join(',')}] — measurement ends in ${(totalMs / 1000).toFixed(0)}s`,
+  );
+  host?.metrics.reset();
+
+  for (const cue of cues) {
+    // Countdown on the wall so the operator acts on a signal, not a stopwatch.
+    for (let k = 5; k >= 1; k--) {
+      window.setTimeout(
+        () => showCue(String(k), 900),
+        WARMUP_MS + (cue - k) * 1000,
+      );
+    }
+    window.setTimeout(() => {
+      showCue('SWITCH NOW', 1500);
+      console.log(`[run] CUE at t=${cue}s — operator action due now`);
+    }, WARMUP_MS + cue * 1000);
+  }
+
+  window.setTimeout(() => {
+    if (!host) return;
+    const r = host.metrics.report();
+    const k = host.probe(); // resets the window; the report above is already taken
+    const disturbing = runEvents.filter((e) => e.disturbing && e.t >= 0);
+    const summary = {
+      label,
+      disturbed: disturbing.length > 0,
+      nominalMs: r.nominalMs,
+      valid: r.valid,
+      samples: r.samples,
+      fps: r.fps,
+      m1Pass: passesPresentation(r),
+      lateFraction: r.lateFraction,
+      worstLateRun: r.worstLateRun,
+      worstIntervalMs: r.worstIntervalMs,
+      clause3: r.magnitudeEvents,
+      m2Pass: passesHeadroom(r),
+      renderP99Ms: r.renderP99Ms,
+      renderP99OfNominal: r.renderP99OfNominal,
+      renderP95Ms: r.renderP95Ms,
+      instrument: r.instrument,
+      scale: r.scale,
+      k,
+      events: runEvents,
+    };
+    console.log('[run] SUMMARY ' + JSON.stringify(summary));
+    console.log(`[run] END label=${label} disturbed=${summary.disturbed}`);
+    window.engine.measureDone();
+  }, totalMs + 500);
 }
 
 // I-11: the HUD stays available. `h` toggles it; it starts hidden so it is never
@@ -168,3 +300,25 @@ window.addEventListener('keydown', (e) => {
     );
   }
 });
+
+// A8 diagnostic: the probe reported k_target CHEAPER than k_dev, which is
+// physically impossible for real fill work. Alternating the order isolates
+// warm-up bias (first-measured pays for framebuffer/pipeline creation) from a
+// genuine result. Not a gate path — a bench for the instrument itself.
+if (config.measureLabel === 'probe-only') {
+  const orders = ['dev-first', 'target-first', 'dev-first', 'target-first'] as const;
+  for (const o of orders) {
+    const k = host.probe(o);
+    console.log(
+      `[probe] order=${o} k_dev=${k.dev.toFixed(1)}x (${k.devMs.toFixed(4)}ms) ` +
+        `k_target=${k.target.toFixed(1)}x (${k.targetMs.toFixed(4)}ms) ratio=${k.ratio.toFixed(3)}`,
+    );
+  }
+  window.engine.measureDone();
+}
+
+// Kick off the unattended run last, so every listener, the HUD and the focus
+// trail are already live when the window opens (SPEC.md §4).
+if (config.measureLabel !== '' && config.measureLabel !== 'probe-only' && config.measureLabel !== 'latency') {
+  startMeasurementRun(config.measureLabel, config.measureCues);
+}

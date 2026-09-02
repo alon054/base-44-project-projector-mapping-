@@ -43,6 +43,8 @@ export const CH = {
   hudState: 'hud:state',
   /** main -> renderer: a warning banner the operator must see. */
   warning: 'warning:show',
+  /** output -> main: an unattended measurement run has finished; quit. */
+  measureDone: 'measure:done',
 } as const;
 
 /** SPEC.md I-8: hierarchical key. Registered in `parameters.ts` in Phase 1 (§0.2). */
@@ -87,6 +89,17 @@ export interface OutputConfig {
   role: 'output' | 'preview';
   /** Persisted HUD visibility (SPEC.md §7 `config/`). Off by default (C4). */
   hudVisible: boolean;
+  /**
+   * Unattended measurement run: a label, or '' for normal interactive use.
+   * The run enables the HUD, resets the window, waits out §4's warmup plus
+   * measurement window untouched, emits a structured summary, probes k, quits.
+   */
+  measureLabel: string;
+  /**
+   * Post-warmup seconds at which to show an on-wall cue. Used only by the
+   * operator-driven disturbance run, where the point is a timed interruption.
+   */
+  measureCues: number[];
 }
 
 /**

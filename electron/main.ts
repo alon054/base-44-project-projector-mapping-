@@ -25,6 +25,19 @@ import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './co
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
 
+/**
+ * Unattended measurement run (SPEC.md §4). Set `PROJENGINE_MEASURE=<label>` to
+ * make the app run one full protocol window by itself and quit. This exists
+ * because a run driven by a human pressing keys cannot be repeated identically,
+ * and because a run disturbed halfway must be discarded rather than reported
+ * with a caveat — which requires the app to notice the disturbance itself.
+ */
+const MEASURE_LABEL = process.env['PROJENGINE_MEASURE'] ?? '';
+const MEASURE_CUES = (process.env['PROJENGINE_CUES'] ?? '')
+  .split(',')
+  .map((x) => Number(x.trim()))
+  .filter((x) => Number.isFinite(x) && x > 0);
+
 // ---------------------------------------------------------------------------
 // ADD-2: uncapped measurement mode. Chromium switches must be appended before
 // the app is ready, so this is decided from persisted settings (or an env
@@ -108,7 +121,10 @@ function outputConfigFor(display: Electron.Display, role: 'output' | 'preview'):
     scaleFactor: display.scaleFactor,
     uncapped: uncappedRequested,
     role,
-    hudVisible: loadSettings().hudVisible,
+    // §4 requires the HUD enabled for a measurement run.
+    hudVisible: MEASURE_LABEL !== '' ? true : loadSettings().hudVisible,
+    measureLabel: MEASURE_LABEL,
+    measureCues: role === 'output' ? MEASURE_CUES : [],
   };
 }
 
@@ -170,7 +186,8 @@ function createEditorWindow(): void {
   void editorWin.loadURL(rendererUrl('editor'));
 }
 
-function openOutputWindow(): void {
+function openOutputWindow(why: string): void {
+  console.log(`[trace] openOutputWindow(${why}) windows=${BrowserWindow.getAllWindows().length}`);
   if (outputWin && !outputWin.isDestroyed()) {
     outputWin.destroy();
     outputWin = null;
@@ -222,6 +239,10 @@ function openOutputWindow(): void {
   if (goFullscreen && process.platform === 'darwin') {
     outputWin.setSimpleFullScreen(true);
   }
+
+  // An unattended run must own the keyboard focus it is measuring under,
+  // otherwise "was this run disturbed?" is unanswerable from the log.
+  if (MEASURE_LABEL !== '') outputWin.focus();
 
   const win = outputWin;
   win.webContents.once('did-finish-load', () => {
@@ -310,7 +331,7 @@ function watchDisplays(): void {
         return;
       }
       console.log(`[display] ${why} — output display changed, reopening`);
-      openOutputWindow();
+      openOutputWindow(`display:${why}`);
     }, 250);
   };
   screen.on('display-added', reconcile('display-added'));
@@ -341,7 +362,14 @@ function wireIpc(): void {
   });
 
   ipcMain.on(CH.hudState, (_e: IpcMainEvent, visible: boolean) => {
-    saveSettings({ hudVisible: assertJsonOnly(visible) });
+    // A measurement run forces the HUD on; that must not overwrite the
+    // operator's stored preference for the next interactive launch.
+    if (MEASURE_LABEL === '') saveSettings({ hudVisible: assertJsonOnly(visible) });
+  });
+
+  ipcMain.on(CH.measureDone, () => {
+    console.log('[run] renderer reported done; quitting');
+    setTimeout(() => app.exit(0), 250);
   });
 
   ipcMain.handle(CH.outputConfigRequest, (e): OutputConfig | null => {
@@ -375,7 +403,7 @@ function wireIpc(): void {
     const d = screen.getAllDisplays().find((x) => x.id === id);
     if (!d) return false;
     saveSettings({ outputDisplay: fingerprint(d) });
-    openOutputWindow();
+    openOutputWindow('displaysSelect');
     return true;
   });
 
@@ -423,12 +451,13 @@ app.whenReady().then(() => {
   wireIpc();
   watchDisplays();
   createEditorWindow();
-  openOutputWindow();
+  openOutputWindow('whenReady');
 
   app.on('activate', () => {
+    console.log(`[trace] activate windows=${BrowserWindow.getAllWindows().length}`);
     if (BrowserWindow.getAllWindows().length === 0) {
       createEditorWindow();
-      openOutputWindow();
+      openOutputWindow('activate');
     }
   });
 });

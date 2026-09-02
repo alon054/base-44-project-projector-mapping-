@@ -41,6 +41,10 @@ export function App(): React.JSX.Element {
    */
   const [frameWait, setFrameWait] = useState<number[]>([]);
   const transportByToken = useRef(new Map<number, number>());
+  const transportRef = useRef<number[]>([]);
+  const presentedRef = useRef<number[]>([]);
+  const frameWaitRef = useRef<number[]>([]);
+  const [measureLabel, setMeasureLabel] = useState('');
   const token = useRef(0);
 
   const refreshDisplays = useCallback(() => {
@@ -54,11 +58,13 @@ export function App(): React.JSX.Element {
     void window.engine.getOutputConfig().then((c) => {
       if (!c) return;
       setUncapped(c.uncapped);
+      setMeasureLabel(c.measureLabel);
       if (c.displayFrequency > 0) setNominalMs(1000 / c.displayFrequency);
     });
     const offMetrics = window.engine.onMetrics(setMetrics);
     const offConfig = window.engine.onOutputConfig((c) => {
       setUncapped(c.uncapped);
+      setMeasureLabel(c.measureLabel);
       if (c.displayFrequency > 0) setNominalMs(1000 / c.displayFrequency);
       refreshDisplays();
     });
@@ -66,6 +72,7 @@ export function App(): React.JSX.Element {
     const offRecv = window.engine.onParamRecv(({ token, t0 }) => {
       const rtt = performance.now() - t0;
       setTransport((prev) => [...prev.slice(-299), rtt]);
+      transportRef.current.push(rtt);
       const m = transportByToken.current;
       m.set(token, rtt);
       // Not every token gets an ack — a drag supersedes pending values — so the
@@ -75,10 +82,12 @@ export function App(): React.JSX.Element {
     const offAck = window.engine.onParamAck(({ token, t0 }) => {
       const rtt = performance.now() - t0;
       setPresented((prev) => [...prev.slice(-299), rtt]);
+      presentedRef.current.push(rtt);
       const t = transportByToken.current.get(token);
       if (t !== undefined) {
         transportByToken.current.delete(token);
         setFrameWait((prev) => [...prev.slice(-299), rtt - t]);
+        frameWaitRef.current.push(rtt - t);
       }
     });
     return () => {
@@ -89,6 +98,53 @@ export function App(): React.JSX.Element {
       offAck();
     };
   }, [refreshDisplays]);
+
+  /**
+   * A11 latency bench. A gate run must not carry a slider drag — the IPC and
+   * React work would land inside the measurement window — so the latency
+   * figures are taken in their own short run instead. Sweeps the parameter at
+   * frame cadence, then reports transport, presented, and the frame-cadence
+   * component isolated by pairing them on the token.
+   */
+  const benchRan = useRef(false);
+  useEffect(() => {
+    if (benchRan.current || measureLabel !== 'latency' || nominalMs <= 0) return;
+    benchRan.current = true;
+    let i = 0;
+    const SAMPLES = 240;
+    const id = window.setInterval(() => {
+      if (i >= SAMPLES) {
+        window.clearInterval(id);
+        window.setTimeout(() => {
+          const fmt = (xs: readonly number[]) => {
+            if (xs.length === 0) return 'none';
+            const s2 = [...xs].sort((a, b) => a - b);
+            return `median ${percentile(s2, 0.5).toFixed(2)} p95 ${percentile(s2, 0.95).toFixed(2)} n=${s2.length}`;
+          };
+          console.log(`[latency] transport ${fmt(transportRef.current)}`);
+          console.log(`[latency] presented ${fmt(presentedRef.current)}`);
+          console.log(`[latency] frameWait ${fmt(frameWaitRef.current)}  N=${nominalMs.toFixed(4)}ms`);
+          const fw = [...frameWaitRef.current].sort((a, b) => a - b);
+          const med = fw.length ? percentile(fw, 0.5) : 0;
+          console.log(
+            `[latency] frameWait median = ${(med / nominalMs).toFixed(3)}x N  ` +
+              `${med >= nominalMs && med <= nominalMs * 2 ? 'IN BAND (1-2x N)' : 'OUT OF BAND'}`,
+          );
+          window.engine.measureDone();
+        }, 1500);
+        return;
+      }
+      i++;
+      token.current += 1;
+      window.engine.setParam({
+        key: PARAM_TEST_PATTERN_SPEED,
+        value: 1 + Math.sin(i / 10) * 0.5,
+        token: token.current,
+        t0: performance.now(),
+      });
+    }, 16);
+    return () => window.clearInterval(id);
+  }, [measureLabel, nominalMs]);
 
   const push = useCallback((value: number) => {
     setSpeed(value);

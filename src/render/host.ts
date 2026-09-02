@@ -35,7 +35,7 @@ export interface RenderHost {
   /** A3: current backing-store vs CSS geometry, so a scaler cannot hide. */
   scaleReport(): ScaleReport;
   /** A8: run the render-multiplier probe. Hitches by design; resets metrics. */
-  probe(): KReport;
+  probe(order?: 'dev-first' | 'target-first'): KReport;
   destroy(): void;
 }
 
@@ -174,11 +174,12 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       metrics.setScale(readScale());
     },
     scaleReport: readScale,
-    probe() {
+    probe(order = 'dev-first' as 'dev-first' | 'target-first') {
       const k = runRenderMultiplierProbe(app.renderer, app.stage, {
         nominalMs: metrics.nominal,
         dev: DEV_RESOLUTION,
         target: TARGET_RESOLUTION,
+        order,
       });
       metrics.setK(k);
       // The probe deliberately saturates the GPU. Anything measured across it

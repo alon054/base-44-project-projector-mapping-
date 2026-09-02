@@ -786,3 +786,126 @@ writing a threshold into the spec from a passing reference is precisely the
 defect that rule was added to stop. Send A15 and it goes in properly. Flagging
 it rather than quietly adopting it, one session after adding the rule that says
 so.
+
+---
+
+## 2026-09-02 — Phase 0 (session 3, part 4)
+- DID: ratified A15 (three artefacts). Built an unattended measurement harness
+  and drove runs 1, 2 and 4 plus a probe bench and a latency bench. Full report
+  in `measurements/GATE0-RUNS.md`, written for a reader with no context.
+- MEASURED: three valid runs, **zero intervals over 3 × N in 10,802 samples**.
+  Transport p95 1.80 ms, presented p95 33.30 ms, frame wait **1.434 × N, in
+  band**. A8's k probe found **defective**.
+- BLOCKER: Gate 0 open. Clause-3 event unattributed; run 3 outstanding; k probe
+  defective; run 5 is the operator's.
+- NEXT: operator runs run 5 (script in the report) and redoes run 3 on an idle
+  machine. Ruling wanted on the k-probe fix and on A15's statistic.
+
+`SPEC-CHANGE-PROPOSED` — approved verbatim in the message that requested it.
+
+| # | Change | Reason | Alternative rejected |
+|---|---|---|---|
+| A15 | §4: the HUD's DOM write is an **accepted apparatus cost with an expiry** — accepted through Phase 2, reviewed at Phase 3's gate against the measured instrument row, with a 2%-of-N trigger **at Phase 3's layer load**. Added to the Gate 3 checklist as a due item | "An accepted cost with a review date is engineering; an accepted cost without one is a defect with good manners." The A14 audit surfaced the HUD draw as on-thread-but-outside-the-timed-call, which is a real cost that had no owner and no expiry | Moving the HUD draw off the render thread now — rejected: Phase 0's instrument cost is a 0.034% mean and the work has no payoff until the budget tightens |
+
+Phase 0's 1.2% reading is explicitly **not** backfilled as a pass against A15.
+It was taken on a trivial scene with no layer load; A15's trigger is a Phase 3
+measurement.
+
+`DECISION` — **standing correction to the human's reasoning, recorded as
+requested and not scoped to one hypothesis.**
+
+> **The human repeatedly proposes main-process causes for render-thread stalls;
+> check the process boundary before accepting one.**
+
+Twice in two sessions: the synchronous-log-flush hypothesis for the 67.7 ms
+stall, and the stdout-pipe hypothesis for the 233/283 ms stall. Both located the
+cause in the Electron **main** process; both were refuted by the same structural
+fact — main and the output renderer are separate processes, and rAF in the
+renderer does not depend on main. Recorded here as a standing check to apply
+before accepting such a hypothesis, not as a note about two particular ones.
+
+The pipe hypothesis was additionally inverted on mechanism: on POSIX, Node's
+`process.stdout` is synchronous for TTYs and files and **asynchronous for
+pipes**, so a pipe is the least blocking of the three targets. Both facts were
+recorded before the run, and the run then confirmed them — which is the right
+order.
+
+`MEASURED` — **three valid unattended runs. Full detail in
+`measurements/GATE0-RUNS.md`.**
+
+| | run1-sync | run2-sync | run4-pipe |
+|---|---|---|---|
+| samples | 3600 | 3601 | 3601 |
+| M1 rate | PASS 0.0000% late, worst run 0 | PASS 0.0000%, 0 | PASS 0.0000%, 0 |
+| worst interval | 17.70 ms | 17.80 ms | 17.70 ms |
+| **M1 clause 3** | **none** | **none** | **none** |
+| M2 p99 | 0.800 ms = 4.80% of N | 0.800 ms = 4.80% | 0.500 ms = 3.00% |
+| M2 p95 (info) | 0.500 ms | 0.500 ms | 0.400 ms |
+| instrument max / mean | 0.700 / 0.0056 ms | 0.500 / 0.0057 ms | 0.300 / 0.0044 ms |
+| scale | 1:1 to panel | 1:1 | 1:1 |
+
+`DECISION` — **H1, the stdout pipe: ELIMINATED.** The piped run was the cleanest
+of the three. Eliminated empirically, and on the two architectural grounds
+recorded above.
+
+`DECISION` — **plain keyboard focus loss: RULED OUT as sufficient.** The two
+discarded runs contain several genuine `focus LOST` events and four full window
+teardowns, and **none coincided with an interval over 3 × N** — worst interval
+stayed 17.70 ms throughout. So H2 survives only in its stronger form: surface
+suspend/resume (Mission Control, Spaces, occlusion). Run 5 provokes cmd-tab,
+Mission Control and a drag at three cued times to separate them.
+
+`DECISION` — **A11's frame-wait question is CLOSED.** Presented latency had
+moved 27.5 → 32.3 ms with no explanation. Presented is structurally one
+deliberate ack frame plus a 0–1 frame wait, so it must live in 1–2 × N. Measured
+`presented − transport`, paired by token: **23.90 ms = 1.434 × N, IN BAND**.
+Three independent readings now sit at 1.64, 1.81 and 1.434 × N. The variation is
+vsync phase between two windows on two displays with independent vsync domains.
+Not a regression.
+
+`GATE-FAILED` — **A8's k probe is defective; no k value in this session is
+usable.** Every run reported `k_target` **cheaper per render** than `k_dev` —
+ratio 0.38–0.56, where fill-bound work must give ≈2.25 and CPU-bound ≈1.0. A
+1080p framebuffer cannot be cheaper to fill than a 720p one.
+
+An order-alternating bench, four probes back to back on one unchanged scene:
+ratios **2.800, 0.696, 1.273, 1.500**. Two compounding faults:
+
+1. **Order bias** — the first resolution measured absorbs framebuffer and
+   pipeline creation for its size; one discarded warm-up render is not enough.
+   The cold dev-first probe gives 2.800, near theory; the target-first probe
+   immediately after gives 0.696, the same bias reversed.
+2. **Signal below noise** — on a trivial scene, per-render cost at either
+   resolution (~0.05–0.14 ms) is the same order as the GPU-sync readback the
+   two-burst subtraction exists to cancel. What survives is mostly noise.
+
+Proposed, not applied, pending a ruling: more warm-up renders per resolution; a
+wider iteration spread (8 vs 128); repeat with alternating order and take the
+median; and **report a spread/confidence figure alongside k so an unstable probe
+declares itself rather than emitting a plausible number** — the same principle
+already ratified for N in A9. Note A8 first *matters* at Phase 3's layer load;
+the probe may be measurable there and genuinely unmeasurable on a Phase 0 scene.
+
+`DECISION` — **A15's statistic is probably wrong, raised not changed.** A15 as
+ratified triggers on per-frame instrument **max**. That is a single-sample
+extreme over 3600 frames and it read 0.300 / 0.500 / 0.700 ms across three
+identical runs — **1.8% to 4.2% of N, straddling A15's own 2% threshold on noise
+alone**. The **mean** was 0.0044–0.0057 ms (**0.034% of N**), stable to two
+significant figures across all three. A trigger that fires or not depending on
+which of three identical runs you look at cannot govern a Phase 3 decision.
+Recommend A15 read against mean or p99. **Not changed** — A15 is ratified as
+written and this is a proposal, one session after adding the rule that says so.
+
+`MEASURED` — **environment, reported rather than assumed.** The machine was
+**not quiet** during this session. Both attempts at run 3 logged
+`openOutputWindow(displaysSelect)` about 2 s after launch, and `displaysSelect`
+has exactly one caller: the editor's display-picker button. The operator was
+working at the machine concurrently. Runs 1, 2 and 4 each opened exactly one
+window and recorded no events; run 3 is **outstanding** and needs an idle
+machine.
+
+`IDEAS` — parked. `displaysSelect` destroys and recreates a live output window
+even when the requested display is the one already in use. Harmless in the
+editor, a hazard in a show — the same class as the self-triggering reopen fixed
+in session 2. A guard making the select idempotent is a small fix, deliberately
+**not** applied mid-measurement-series so that runs 1, 2 and 4 share one binary.

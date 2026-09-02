@@ -65,6 +65,9 @@ const api = {
     ipcRenderer.on(CH.warning, h);
     return () => ipcRenderer.off(CH.warning, h);
   },
+  measureDone(): void {
+    ipcRenderer.send(CH.measureDone);
+  },
   setHudState(visible: boolean): void {
     ipcRenderer.send(CH.hudState, assertJsonOnly(visible));
   },
