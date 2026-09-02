@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "node18",
+    "rootDir": "electron",
+    "outDir": "dist-electron",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "composite": true,
+    "declaration": true,
+    "declarationDir": "dist-electron/types",
+    "sourceMap": true,
+    "tsBuildInfoFile": "dist-electron/.tsbuildinfo"
+  },
+  "include": ["electron/**/*.ts"]
+}

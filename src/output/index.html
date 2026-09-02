@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' ws://localhost:5173 http://localhost:5173; object-src 'none'; base-uri 'none';" />
+    <title>Projection Engine — Output</title>
+    <style>
+      /* Gate 0: no chrome, no cursor. */
+      html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }
+      body { cursor: none; }
+      #stage {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: #000;
+      }
+      /* The canvas is exactly DEV_RESOLUTION pixels and is never upscaled by
+         CSS when the window matches it, so nothing sits between our pixels and
+         the panel. */
+      #stage > canvas { max-width: 100%; max-height: 100%; }
+      #banner {
+        position: fixed; left: 0; right: 0; bottom: 0;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 10px 14px; background: #6b1b1b; color: #fff; display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="banner"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
