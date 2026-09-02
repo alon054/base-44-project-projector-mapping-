@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CAPTURE_CAPACITY,
   DEFAULT_CAPACITY,
   FrameMetrics,
   LATE_FACTOR,
@@ -439,5 +440,86 @@ describe('A14 — the instrument is subject to its own budget', () => {
     expect(b.samples).toBe(a.samples);
     expect(b.renderP99Ms).toBe(a.renderP99Ms);
     expect(b.lateFraction).toBe(a.lateFraction);
+  });
+});
+
+describe('FrameMetrics — attribution support for unattended provocations', () => {
+  it('captures exactly the armed number of following intervals', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    m.armCapture(4);
+    feed(m, [1, 2, 3, 4, 5, 6]);
+    expect(m.takeCapture()).toEqual([1, 2, 3, 4]);
+  });
+
+  it('a capture is single-use — reading it disarms', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    m.armCapture(3);
+    feed(m, [1, 2, 3]);
+    expect(m.takeCapture()).toEqual([1, 2, 3]);
+    feed(m, [9, 9, 9]);
+    expect(m.takeCapture()).toEqual([]);
+  });
+
+  it('never captures more than its preallocated capacity (A14: no growth)', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    m.armCapture(CAPTURE_CAPACITY + 50);
+    feed(m, Array.from({ length: CAPTURE_CAPACITY + 100 }, () => N60));
+    expect(m.takeCapture().length).toBe(CAPTURE_CAPACITY);
+  });
+
+  it('reset disarms a pending capture', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    m.armCapture(4);
+    m.reset();
+    feed(m, [1, 2, 3, 4]);
+    expect(m.takeCapture()).toEqual([]);
+  });
+
+  it('holds the suspend gap and the frames after it, in order', () => {
+    // The shape a provocation produces: normal frames, one long gap while the
+    // surface is suspended, then the recovery. Only what follows the gap can
+    // attribute a stall to resume — the gap itself is what we asked for.
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    m.armCapture(6);
+    feed(m, [N60, N60, 2000, N60, N60, N60]);
+    const trace = m.takeCapture();
+    const peak = Math.max(...trace);
+    expect(peak).toBe(2000);
+    const after = trace.slice(trace.indexOf(peak) + 1);
+    expect(after).toHaveLength(3);
+    // Intervals are differences of an accumulated clock, so compare by value,
+    // not by exact float identity.
+    after.forEach((ms) => expect(ms).toBeCloseTo(N60, 6));
+  });
+
+  it('scopes max interval and clause-3 count to a post-warmup time range', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    // A 300 ms stall at about t=1.0 s, everything else nominal.
+    const intervals = Array.from({ length: 120 }, (_, i) => (i === 60 ? 300 : N60));
+    feed(m, intervals);
+    const around = m.intervalsInElapsedRange(0.9, 1.4);
+    expect(around.maxIntervalMs).toBe(300);
+    expect(around.clause3).toBe(1);
+    const before = m.intervalsInElapsedRange(0, 0.5);
+    expect(before.clause3).toBe(0);
+    expect(before.maxIntervalMs).toBeCloseTo(N60, 5);
+  });
+
+  it('an empty range reports zeroes rather than NaN', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 20 }, () => N60));
+    expect(m.intervalsInElapsedRange(500, 600)).toEqual({
+      maxIntervalMs: 0,
+      samples: 0,
+      clause3: 0,
+    });
+  });
+
+  it('A9: an invalid N yields no clause-3 count from a range scan', () => {
+    const m = new FrameMetrics(0, { warmupMs: 0 });
+    feed(m, Array.from({ length: 60 }, (_, i) => (i === 30 ? 500 : N60)));
+    const r = m.intervalsInElapsedRange(0, 10);
+    expect(r.maxIntervalMs).toBe(500);
+    expect(r.clause3).toBe(0);
   });
 });

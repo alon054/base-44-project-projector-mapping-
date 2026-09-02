@@ -1,7 +1,8 @@
 # Gate 0 measurement runs — Phase 0
 
 **Date:** 2026-09-02 · **Commit:** see `git log` for `P0: A-series amendments…` and
-following · **Verdict: Gate 0 does not close.**
+following · **Verdict: Gate 0's measurement box closes; the gate's remaining
+boxes are the operator's physical checks.**
 
 This report is self-contained. It assumes no prior context.
 
@@ -298,6 +299,108 @@ undisturbed — with the caveat that the cue overlay was drawing a countdown
 inside the window. That overlay cost nothing measurable: this run had the
 *lowest* p99 (2.40% of N) and the *lowest* instrument max (1.20%) of any run.
 
+## 4.6 Runs 6 and 7 — the provocation matrix, driven by the machine
+
+Run 5's three attempts all failed as experiments for the same two reasons: the
+timing depended on a human pressing a key at a cued moment, and the result
+depended on a human reporting what the wall did. run5-mc then produced a null
+that **could not be interpreted at all** — whether macOS `Displays have separate
+Spaces` was on decided whether the run had tested its mechanism, and the run did
+not record it. That is the same defect class as A9 and A14, and it was fixed
+before these runs: every run now captures its own conditions.
+
+Runs 6 and 7 drive the OS events from the harness. `PROJENGINE_PROVOKE=kind@t`
+fires each provocation off the same post-warmup clock every other timestamp uses.
+**Ground truth is the renderer's `visibilitychange`** — the listener that
+demonstrably fires on a real surface hide — so "did the surface actually
+suspend?" is answered by the machine, not by an eye.
+
+**Conditions, captured by the app, identical in both runs:**
+
+```
+separateSpaces=true (spans-displays=absent)   hiddenInMissionControl=true
+displays=2   output="T749-fHD720"   fullscreen=true   pin=PINNED (pinned-exact-id)
+```
+
+### 4.6.1 Run 6 — four provocations in the shipping configuration
+
+| Provocation | Surface suspended? | max interval | clause 3 | first intervals after |
+|---|---|---|---|---|
+| `hide` — window hidden 2 s | **no** | 18.7 ms | 0 | 15.4 16.5 18.1 16.6 … |
+| `apphide` — whole app hidden 2 s | **no** | 18.7 ms | 0 | 15.0 16.7 16.4 16.6 … |
+| `mc` — Mission Control, shipping flags | **no** | 18.7 ms | 0 | 16.7 16.7 16.6 16.7 … |
+| `mcvisible` — Mission Control, `hiddenInMissionControl` cleared | **no** | 18.7 ms | 0 | 16.6 14.8 17.3 18.0 … |
+
+Run totals: n=3601, 60.000 fps, M1 **PASS** (0.0000% late, worst run 0), M2
+**PASS** (p99 0.400 ms = 2.40% of N), **zero clause-3 events**, worst interval
+**18.8 ms**. The main process logged `output window hide` for the first two, so
+the window really was hidden — and the renderer presented straight through it at
+~16.7 ms with no visibility change and no gap.
+
+**On its own this is a null, and a null proves nothing.** It could equally mean
+the instrument is blind. Run 7 is the control that settles which.
+
+### 4.6.2 Run 7 — the control that isolates the variable
+
+`backgroundThrottling: false` is set on the output window at creation and has
+been there since the first scaffold commit `6f9c724`. The installed Electron 44
+typings state what it does: *"Controls whether or not this WebContents will
+throttle animations and timers when the page becomes backgrounded. **This also
+affects the Page Visibility API.**"* That is a candidate explanation for all four
+nulls, and it is testable at runtime via `webContents.setBackgroundThrottling`.
+
+| Provocation | Surface suspended? | max interval | clause 3 | first intervals after resume |
+|---|---|---|---|---|
+| `hidethrottled` — throttling re-enabled, window hidden 2 s | **YES** | **2016.1 ms** | 1 | 16.9 16.6 **32.8** 17.6 16.1 17.2 … |
+| `mcthrottled` — throttling re-enabled **and** `hiddenInMissionControl` cleared, Mission Control | **no** | 17.8 ms | 0 | 16.6 |
+| `hide` — shipping configuration again | **no** | 17.7 ms | 0 | 16.7 16.6 |
+
+`hidethrottled` logged `[event] t=15.00s visibility=hidden [DISTURBING]`,
+produced a 2016.1 ms gap — the 2000 ms hold plus one frame — and a clause-3
+event at n=901. Run 7 is therefore **an attribution run, not a gate run**: its
+one clause-3 event was caused deliberately by the harness and its M1 numbers
+describe the provocation.
+
+### 4.6.3 What this establishes
+
+1. **The instrument is not blind.** When the surface genuinely suspends, the
+   `visibilitychange` fires, the gap appears, and clause 3 catches it. Run 6's
+   four nulls are real nulls.
+2. **In the shipping configuration the output surface cannot be suspended** by
+   hiding the window, hiding the app, or Mission Control — with or without
+   `hiddenInMissionControl`. Five provocations across two runs, zero visibility
+   changes, worst interval 18.8 ms.
+3. **Mission Control does not reach this surface even stripped of both
+   immunities.** `mcthrottled` ran with throttling re-enabled *and* the window
+   not excluded from Mission Control — the maximally suspendable configuration —
+   and the surface still did not suspend. Worst interval 17.8 ms.
+4. **A forced suspend costs one 32.8 ms frame on resume.** That is the only
+   measured resume cost in the set: 2.0 × N, *below* clause 3's 3 × N threshold.
+   The event under investigation is 233.3 ms and 283.4 ms — 14 and 17 frames.
+   **Suspend/resume on this hardware is an order of magnitude too cheap to
+   produce it**, which is a stronger result than the non-reproduction: it says
+   the mechanism is the wrong size, not merely absent.
+
+Both immunity flags — `backgroundThrottling: false` and
+`hiddenInMissionControl: true` — have been present since `6f9c724`, so they were
+in the binary that produced the 233/283 ms event. The configuration under which
+that event occurred is the configuration these runs show to be immune.
+
+**Surface suspend/resume is eliminated.** Not by failing to reproduce it, but by
+four positive measurements.
+
+### 4.6.4 Two side findings
+
+- **`hide`/`show` preserves `simpleFullScreen`.** Checked on every hide
+  provocation and reported in the note; the window came back fullscreen on the
+  projector every time. Had it not, that would have been a live-show hazard of
+  the same family as the picker teardown.
+- **A8's k probe, two more samples: ratio 5.000 (run 6) and 0.923 (run 7).**
+  With run5-mc's 1.037 that is three more points on an unchanged probe, against
+  a theoretical 2.25 / 1.0. The probe source has not been touched since the
+  defective runs, so **1.037 was not evidence of a fix** and 5.000 is the same
+  instrument saying so. Still `[!]`, still non-blocking, still awaiting a ruling.
+
 ## 5. Findings
 
 **Did an interval over 3 × N recur?** **No.** Zero in four valid runs, 14,402
@@ -338,7 +441,8 @@ is a third untested candidate.
 | stdout pipe blocking the writer | **eliminated** — empirically and architecturally |
 | instrument allocation churn (earlier 67.7 ms stall) | fixed; **unconfirmed**, never observed in a conformant run |
 | plain keyboard focus loss / app switch | **ruled out** — performed deliberately at cue 1 in six separate cycles of run 5 attempt 1, and observed again at t≈37.6 s inside attempt 2's live window, with an app `activate`. Not one interval over 3 × N in any of them |
-| surface suspend/resume: Mission Control, Spaces switch, occlusion | **open, leading, still unperformed** — the one provocation never actually executed |
+| surface suspend/resume: Mission Control, Spaces switch, occlusion | **eliminated** — §4.6. In the shipping configuration the surface cannot be suspended at all (5 provocations, 0 visibility changes); Mission Control cannot suspend it even with both immunity flags stripped; and a *forced* suspend costs one 32.8 ms frame on resume, against an event of 233/283 ms. Wrong size, not merely absent |
+| the output window being suspendable at all | **answered** — `backgroundThrottling: false`, set since `6f9c724`, "also affects the Page Visibility API" (Electron 44 typings). It is why the surface stays live when hidden, and it was in the binary that produced the original event |
 | parameter drag concurrent with a switch | **eliminated** — the operator confirms the speed slider was never touched, in run 5 or in the original run that produced the stall. It was one of the two possibilities originally offered for t=131 s; it is now out |
 | output window teardown from a picker re-select | **found and fixed** — not the original stall (it postdates it), but a real live-show hazard uncovered by run 5 |
 
@@ -346,25 +450,35 @@ is a third untested candidate.
 
 ## 6. Gate 0 status
 
-**Does not close.**
+**The measurement box closes. The gate does not, and what remains is physical.**
 
 | Box | Status |
 |---|---|
 | Output truly fullscreen on the projector, no chrome, no cursor | pass |
 | Both latency figures (transport ≤5 ms, presented ≤66 ms) | pass — 1.80 ms / 33.30 ms p95 |
-| **Both §4 gate metrics under protocol** | **open** — M1 rate and M2 pass in all three runs, but the original clause-3 event is still unattributed. Three clean runs cannot attribute a stall they did not reproduce |
+| **Both §4 gate metrics under protocol** | **closed** — five runs pass both metrics; the 233/283 ms event is recorded **`unknown`**, which A12 permits at one per run, after its last named candidate was eliminated by the §4.6 provocation matrix |
 | App relaunches without manual display reconfiguration | operator's — pin resolved as `PINNED (pinned-exact-id)` in every run here, which is evidence, not the operator's own verification |
 | Never fullscreens the primary display without confirmation | pass |
 | Both §4 metrics recorded, labelled DEV_RESOLUTION | pass |
 | Projector keystone / auto-focus disable to passthrough | operator's physical check |
 | Projector-panel latency by phone video | informational, operator's |
 
-**Four clean runs are not an attribution.** They eliminate one hypothesis and
-narrow a second. The clause-3 event needs a positive identification, which needs
-a run that deliberately provokes it. That run is §7, and it needs a human.
+**Clean runs were never going to be an attribution**, which is why §4.6 stopped
+running them and started provoking instead. The event is recorded `unknown` on
+the strength of an exhausted candidate list, not on the strength of
+non-reproduction — and the strongest single fact in that list is that a forced
+suspend costs 32.8 ms where the event cost 233 and 283 ms.
 
-**M1 clause 3 has not been adjusted.** It is doing exactly what it was written to
-do: this run set would have been declared clean by any rate-only metric.
+**M1 clause 3 has not been adjusted, and this is the outcome it was written for.**
+A rate-only metric would have called the original run clean; clause 3 held the
+gate open for four sessions, forced the instrument to grow the ability to answer
+the question, and then permitted exactly the one `unknown` it always allowed.
+Nothing was weakened to close this box.
+
+**What one `unknown` costs, stated plainly.** A12 permits one per run and this
+uses it. A second unexplained stall in any future run is a gate failure with no
+allowance left, and the honest reading of this box is "not reproduced in 18,003
+samples, mechanism eliminated, cause unidentified" — not "explained".
 
 ---
 
@@ -459,16 +573,25 @@ cause**, and the cue it belongs to names the mechanism:
 
 ### 7.4 Still outstanding
 
-- **Run 3** — effectively satisfied by run 5 attempt 3 (same configuration,
-  clean, undisturbed), with the cue-overlay caveat noted in §4.5.
-- **The Mission Control provocation** — now the *only* remaining named
-  candidate, and the one arm of run 5 that has never actually been executed.
-  With focus loss ruled out by provocation and the drag eliminated by the
-  operator's own account, the named-candidate list is nearly exhausted: if
-  Mission Control also comes back clean, the honest outcome is that the original
-  event stays **unknown**, which clause 3 permits for a single event. It is a single
-  90-second run: launch with the cues, then at cue 2 press F3, wait two seconds,
-  press Esc. Cues 1 and 3 can be skipped; cue 1 is now answered.
-- **A8's k probe** — defective, awaiting a ruling on the proposed fix.
+§7's operator-driven script is **superseded** by the unattended provocation
+harness in §4.6 and should not be run again. It is kept here as the record of
+what was attempted and why it failed as an experiment: it depended on a human
+for both its timing and its observation, and it could not record the one
+condition needed to interpret its own null.
+
+- **Run 3** — satisfied by run 5 attempt 3 (same configuration, clean,
+  undisturbed), with the cue-overlay caveat noted in §4.5.
+- **The Mission Control arm** — closed by §4.6, without a human at the keyboard.
+- **The one untested corner, stated rather than hidden:** every run in this
+  report was made with macOS `Displays have separate Spaces` **ON** — its
+  untouched default, now recorded in each run's conditions block. A Spaces
+  switch driven on the projector's *own* display with that setting OFF has never
+  been exercised. It is not load-bearing for the conclusion: the shipping
+  window's immunity comes from `backgroundThrottling: false`, which is a
+  WebContents property and display-independent, and `mcthrottled` failed to
+  suspend the surface even with that immunity removed.
+- **A8's k probe** — defective, three further samples (1.037, 5.000, 0.923) on
+  unchanged source, awaiting a ruling on the proposed fix.
 - **The 67.70 ms stall from the earlier session** — origin recorded as instrument
   allocation churn, fixed, never confirmed.
+

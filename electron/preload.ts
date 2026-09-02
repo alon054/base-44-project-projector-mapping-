@@ -12,6 +12,7 @@ import type {
   ParamAck,
   ParamRecv,
   ParamSet,
+  ProvocationKind,
 } from './ipc';
 
 export interface WarningMessage {
@@ -67,6 +68,10 @@ const api = {
   },
   measureDone(): void {
     ipcRenderer.send(CH.measureDone);
+  },
+  /** Attribution runs only: ask main to drive one real OS provocation. */
+  provoke(kind: ProvocationKind): Promise<string> {
+    return ipcRenderer.invoke(CH.provoke, assertJsonOnly(kind)) as Promise<string>;
   },
   setHudState(visible: boolean): void {
     ipcRenderer.send(CH.hudState, assertJsonOnly(visible));

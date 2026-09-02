@@ -27,6 +27,8 @@ export const MAX_LATE_RUN = 2;
 export const MAGNITUDE_FACTOR = 3;
 /** A12: keep the report bounded; a run with more than this is failing anyway. */
 export const MAX_MAGNITUDE_EVENTS = 32;
+/** Intervals captured after a provocation resume. More than this is not a hitch. */
+export const CAPTURE_CAPACITY = 32;
 /** SPEC.md §4 gate metric 2: render p99 must sit at or under 60% of N (A10). */
 export const MAX_RENDER_FRACTION = 0.6;
 
@@ -112,6 +114,15 @@ export class FrameMetrics {
   private kReport: KReport | null = null;
   private scaleReport: ScaleReport | null = null;
 
+  /**
+   * Attribution support: the first intervals after a provocation's surface
+   * resume. Preallocated and armed on demand, so it costs one comparison per
+   * frame and allocates nothing (A14).
+   */
+  private readonly capture = new Float64Array(CAPTURE_CAPACITY);
+  private captureWant = 0;
+  private captureLen = 0;
+
   // A14: the instrument's own cost, tracked without allocating.
   private instrumentMax = 0;
   private instrumentSum = 0;
@@ -171,6 +182,8 @@ export class FrameMetrics {
     this.instrumentSum = 0;
     this.instrumentCount = 0;
     this.instrumentTick = 0;
+    this.captureWant = 0;
+    this.captureLen = 0;
   }
 
   /** Pixi CPU render duration for the frame about to be presented. */
@@ -223,6 +236,12 @@ export class FrameMetrics {
 
     if (interval > this.worstInterval) this.worstInterval = interval;
     this.postWarmupCount++;
+
+    // Attribution: one comparison per frame, and only ever active for the few
+    // frames after a provocation resume.
+    if (this.captureLen < this.captureWant) {
+      this.capture[this.captureLen++] = interval;
+    }
 
     // A12: magnitude is a separate fact from rate. A low late-rate does not
     // license an unexplained stall, so every interval over 3 x N is kept with
@@ -279,6 +298,55 @@ export class FrameMetrics {
   get elapsedSeconds(): number {
     if (this.startedAt === null || this.lastPresent === null) return 0;
     return (this.lastPresent - this.startedAt - this.warmupMs) / 1000;
+  }
+
+  /**
+   * Arm a capture of the next `n` presentation intervals.
+   *
+   * A deliberate suspend of D ms yields one interval of ~D by construction, so
+   * the gap itself attributes nothing. What follows it is the only thing that
+   * can show a resume cost, and this is how that is read off the machine rather
+   * than eyeballed from a log.
+   */
+  armCapture(n: number): void {
+    this.captureWant = Math.min(Math.max(0, Math.floor(n)), CAPTURE_CAPACITY);
+    this.captureLen = 0;
+  }
+
+  /** Read back an armed capture. Allocates once, on demand, never per frame. */
+  takeCapture(): number[] {
+    const out = Array.from(this.capture.subarray(0, this.captureLen));
+    this.captureWant = 0;
+    this.captureLen = 0;
+    return out;
+  }
+
+  /**
+   * Worst interval and clause-3 count inside a post-warmup time range, so a
+   * provocation window can be judged without re-deriving it from the log.
+   * Scans the live ring; called a handful of times per run, never per frame.
+   */
+  intervalsInElapsedRange(fromSeconds: number, toSeconds: number): {
+    maxIntervalMs: number;
+    samples: number;
+    clause3: number;
+  } {
+    let maxIntervalMs = 0;
+    let samples = 0;
+    let clause3 = 0;
+    if (this.startedAt === null) return { maxIntervalMs, samples, clause3 };
+    const valid = validateNominal(this.nominalMs).valid;
+    const threshold = this.nominalMs * MAGNITUDE_FACTOR;
+    for (let i = 0; i < this.count; i++) {
+      const slot = (this.head + i) % this.capacity;
+      const at = (this.ts[slot]! - this.startedAt - this.warmupMs) / 1000;
+      if (at < fromSeconds || at > toSeconds) continue;
+      const iv = this.intervals[slot]!;
+      samples++;
+      if (iv > maxIntervalMs) maxIntervalMs = iv;
+      if (valid && iv > threshold) clause3++;
+    }
+    return { maxIntervalMs, samples, clause3 };
   }
 
   report(): MetricsReport {

@@ -7,6 +7,8 @@ import {
   PARAM_TEST_PATTERN_SPEED,
   TARGET_RESOLUTION,
   type OutputConfig,
+  type ProvocationSpec,
+  type ProvocationVerdict,
 } from '@shared/ipc';
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
@@ -26,6 +28,8 @@ let config: OutputConfig = {
   hudVisible: false,
   measureLabel: '',
   measureCues: [],
+  provocations: [],
+  conditions: null,
 };
 
 const hud = new Hud(document.body);
@@ -216,12 +220,93 @@ function showCue(text: string, holdMs: number): void {
 }
 
 /**
+ * Intervals captured across one provocation: a couple before it lands, the
+ * suspend gap itself, and the frames after the resume.
+ */
+const PROVOKE_TRACE_FRAMES = 24;
+/** Time allowed after the provoked state is released for frames to resume. */
+const PROVOKE_SETTLE_MS = 1200;
+
+const provocationVerdicts: ProvocationVerdict[] = [];
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * Drive one provocation and let the machine decide what it did.
+ *
+ * The whole point is that nothing here needs a human: the harness causes the
+ * OS event, `visibilitychange` says whether the surface genuinely suspended,
+ * and the interval trace says whether the resume cost anything beyond the gap
+ * we deliberately asked for. A suspend of D ms produces one interval of ~D by
+ * construction — that attributes nothing on its own — so the frames *after*
+ * the longest interval are the evidence.
+ */
+async function runProvocation(spec: ProvocationSpec): Promise<void> {
+  if (!host) return;
+  const firstEvent = runEvents.length;
+  const tStart = host.metrics.elapsedSeconds;
+  console.log(`[provoke] t=${tStart.toFixed(2)}s ${spec.kind} START`);
+
+  // Armed BEFORE the event, so the trace contains the approach, the gap, and
+  // the recovery rather than starting after the interesting part.
+  host.metrics.armCapture(PROVOKE_TRACE_FRAMES);
+  let note = '';
+  try {
+    note = await window.engine.provoke(spec.kind);
+  } catch (err) {
+    note = `provoke failed: ${String(err)}`;
+  }
+  await delay(PROVOKE_SETTLE_MS);
+
+  const tEnd = host.metrics.elapsedSeconds;
+  const trace = host.metrics.takeCapture();
+  const range = host.metrics.intervalsInElapsedRange(tStart - 0.5, tEnd + 0.5);
+  const seen = runEvents.slice(firstEvent);
+
+  // The gap is the longest interval in the trace; everything after it is the
+  // resume cost, which is the number that can attribute a stall.
+  let peak = -1;
+  let peakIdx = -1;
+  trace.forEach((ms, i) => {
+    if (ms > peak) {
+      peak = ms;
+      peakIdx = i;
+    }
+  });
+  const after = peakIdx >= 0 ? trace.slice(peakIdx + 1) : [];
+
+  const verdict: ProvocationVerdict = {
+    kind: spec.kind,
+    requestedAtSeconds: spec.atSeconds,
+    visibilityHidden: seen.some((e) => e.what.startsWith('visibility=') && e.what !== 'visibility=visible'),
+    focusLost: seen.some((e) => e.what === 'focus LOST'),
+    maxIntervalMs: range.maxIntervalMs,
+    clause3InWindow: range.clause3,
+    intervalsAfterResume: after,
+    note,
+  };
+  provocationVerdicts.push(verdict);
+  console.log(
+    `[provoke] t=${tEnd.toFixed(2)}s ${spec.kind} END  ` +
+      `surfaceSuspended=${String(verdict.visibilityHidden)}  focusLost=${String(verdict.focusLost)}  ` +
+      `maxInterval=${range.maxIntervalMs.toFixed(1)}ms  clause3=${range.clause3}  ` +
+      `afterResume=[${after.map((x) => x.toFixed(1)).join(' ')}]  ${note}`,
+  );
+}
+
+/**
  * One full §4 protocol window, unattended: reset, wait out warmup + window
  * untouched, emit a structured summary, probe k, quit. Emits a machine-readable
  * JSON block so the report is assembled from the app's own numbers rather than
  * from anything retyped.
  */
-function startMeasurementRun(label: string, cues: readonly number[]): void {
+function startMeasurementRun(
+  label: string,
+  cues: readonly number[],
+  provocations: readonly ProvocationSpec[],
+): void {
   const totalMs = WARMUP_MS + WINDOW_MS;
   console.log(
     `[run] START label=${label} warmupMs=${WARMUP_MS} windowMs=${WINDOW_MS} ` +
@@ -241,6 +326,14 @@ function startMeasurementRun(label: string, cues: readonly number[]): void {
       showCue('SWITCH NOW', 1500);
       console.log(`[run] CUE at t=${cue}s — operator action due now`);
     }, WARMUP_MS + cue * 1000);
+  }
+
+  // Unattended provocations. No countdown and no cue overlay — nothing here is
+  // for a human to see or act on.
+  for (const spec of provocations) {
+    window.setTimeout(() => {
+      void runProvocation(spec);
+    }, WARMUP_MS + spec.atSeconds * 1000);
   }
 
   window.setTimeout(() => {
@@ -268,6 +361,10 @@ function startMeasurementRun(label: string, cues: readonly number[]): void {
       scale: r.scale,
       k,
       events: runEvents,
+      // The conditions the run actually ran in, so no later reader has to
+      // reconstruct them with `defaults read` after the fact.
+      conditions: config.conditions,
+      provocations: provocationVerdicts,
     };
     console.log('[run] SUMMARY ' + JSON.stringify(summary));
     console.log(`[run] END label=${label} disturbed=${summary.disturbed}`);
@@ -320,5 +417,15 @@ if (config.measureLabel === 'probe-only') {
 // Kick off the unattended run last, so every listener, the HUD and the focus
 // trail are already live when the window opens (SPEC.md §4).
 if (config.measureLabel !== '' && config.measureLabel !== 'probe-only' && config.measureLabel !== 'latency') {
-  startMeasurementRun(config.measureLabel, config.measureCues);
+  if (config.conditions) {
+    const c = config.conditions;
+    console.log(
+      `[conditions] separateSpaces=${String(c.separateSpaces)} (spans-displays=${c.spansDisplaysRaw})  ` +
+        `hiddenInMissionControl=${String(c.hiddenInMissionControl)}  displays=${c.displayCount}  ` +
+        `output="${c.outputDisplay?.label ?? '?'}" fullscreen=${String(c.outputFullscreen)}  pin=${c.pin}`,
+    );
+  } else {
+    console.warn('[conditions] NOT CAPTURED — this run cannot say what it ran under');
+  }
+  startMeasurementRun(config.measureLabel, config.measureCues, config.provocations);
 }

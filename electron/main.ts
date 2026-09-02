@@ -10,6 +10,7 @@ import {
   screen,
   type IpcMainEvent,
 } from 'electron';
+import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import {
   CH,
@@ -20,6 +21,9 @@ import {
   type OutputConfig,
   type ParamAck,
   type ParamSet,
+  type ProvocationKind,
+  type ProvocationSpec,
+  type RunConditions,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
 
@@ -37,6 +41,37 @@ const MEASURE_CUES = (process.env['PROJENGINE_CUES'] ?? '')
   .split(',')
   .map((x) => Number(x.trim()))
   .filter((x) => Number.isFinite(x) && x > 0);
+
+const PROVOCATION_KINDS: readonly ProvocationKind[] = [
+  'hide',
+  'apphide',
+  'mc',
+  'mcvisible',
+  'hidethrottled',
+  'mcthrottled',
+];
+
+/**
+ * Unattended provocations, `kind@postWarmupSeconds`, comma separated. An
+ * attribution run drives real OS events from the harness so that neither the
+ * timing nor the observation depends on a human — run5-mc failed as an
+ * experiment on exactly those two counts.
+ */
+const MEASURE_PROVOKE: ProvocationSpec[] = (process.env['PROJENGINE_PROVOKE'] ?? '')
+  .split(',')
+  .map((tok) => tok.trim())
+  .filter((tok) => tok !== '')
+  .map((tok) => {
+    const [kind, at] = tok.split('@');
+    return { kind: kind as ProvocationKind, atSeconds: Number(at) };
+  })
+  .filter(
+    (p) =>
+      PROVOCATION_KINDS.includes(p.kind) && Number.isFinite(p.atSeconds) && p.atSeconds > 0,
+  );
+
+/** How long each provocation holds the machine in the provoked state. */
+const PROVOKE_HOLD_MS = 2000;
 
 // ---------------------------------------------------------------------------
 // ADD-2: uncapped measurement mode. Chromium switches must be appended before
@@ -74,6 +109,28 @@ let outputSignature: string | null = null;
 /** The display the output window is currently on, so a renderer can pull config. */
 let currentDisplay: Electron.Display | null = null;
 let displayDebounce: NodeJS.Timeout | null = null;
+/** Captured once per output-window open, reported in the run summary. */
+let currentConditions: RunConditions | null = null;
+
+/**
+ * macOS `Displays have separate Spaces`. The checkbox writes
+ * `com.apple.spaces spans-displays`; an absent key means the setting has never
+ * been touched and the macOS default (separate Spaces ON) applies. Read once,
+ * in main, at window open — synchronous, but nowhere near the render thread,
+ * and it is exactly the fact run5-mc's null result turned on.
+ */
+function readSpansDisplays(): string {
+  if (process.platform !== 'darwin') return 'n/a';
+  try {
+    return execFileSync('defaults', ['read', 'com.apple.spaces', 'spans-displays'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    // `defaults read` exits non-zero when the key does not exist.
+    return 'absent';
+  }
+}
 
 function signatureOf(d: Electron.Display, fullscreen: boolean): string {
   return [
@@ -125,6 +182,8 @@ function outputConfigFor(display: Electron.Display, role: 'output' | 'preview'):
     hudVisible: MEASURE_LABEL !== '' ? true : loadSettings().hudVisible,
     measureLabel: MEASURE_LABEL,
     measureCues: role === 'output' ? MEASURE_CUES : [],
+    provocations: role === 'output' ? MEASURE_PROVOKE : [],
+    conditions: role === 'output' ? currentConditions : null,
   };
 }
 
@@ -212,6 +271,14 @@ function openOutputWindow(why: string): void {
   // window carrying a visible warning.
   const goFullscreen = !pick.needsConfirmation;
 
+  // A13: "via pinned" vs "via heuristic" is the line that distinguishes a real
+  // persistence test from an exercise of the auto-picker. Do not merge them.
+  const how = pick.pinned
+    ? `PINNED (${pick.reason})`
+    : pick.stalePin
+      ? `HEURISTIC after STALE PIN (${pick.reason})`
+      : `HEURISTIC, no pin stored (${pick.reason})`;
+
   outputWin = new BrowserWindow({
     x: d.bounds.x + (goFullscreen ? 0 : 40),
     y: d.bounds.y + (goFullscreen ? 0 : 40),
@@ -289,16 +356,40 @@ function openOutputWindow(why: string): void {
   forwardConsole(win, 'output');
   currentDisplay = d;
   outputSignature = signatureOf(d, goFullscreen);
+
+  // Captured from the window itself rather than assumed, and before the config
+  // is pushed, so the summary reports the conditions the run actually ran in.
+  const spans = readSpansDisplays();
+  currentConditions = {
+    platform: process.platform,
+    spansDisplaysRaw: spans,
+    separateSpaces: process.platform === 'darwin' ? spans !== '1' : null,
+    hiddenInMissionControl:
+      process.platform === 'darwin' ? win.isHiddenInMissionControl() : null,
+    displayCount: displays.length,
+    outputDisplay: {
+      id: d.id,
+      label: d.label,
+      width: d.size.width,
+      height: d.size.height,
+      scaleFactor: d.scaleFactor,
+      displayFrequency: d.displayFrequency,
+      internal: d.internal,
+      isPrimary: d.id === primaryId,
+    },
+    outputFullscreen: goFullscreen,
+    pin: how,
+  };
+  console.log(
+    `[conditions] separateSpaces=${String(currentConditions.separateSpaces)} ` +
+      `(spans-displays=${spans})  hiddenInMissionControl=` +
+      `${String(currentConditions.hiddenInMissionControl)}  displays=${displays.length}  ` +
+      `output="${d.label}" fullscreen=${goFullscreen} pin=${how}`,
+  );
+
   holdPowerSaveBlocker();
   void win.loadURL(rendererUrl('output'));
 
-  // A13: "via pinned" vs "via heuristic" is the line that distinguishes a real
-  // persistence test from an exercise of the auto-picker. Do not merge them.
-  const how = pick.pinned
-    ? `PINNED (${pick.reason})`
-    : pick.stalePin
-      ? `HEURISTIC after STALE PIN (${pick.reason})`
-      : `HEURISTIC, no pin stored (${pick.reason})`;
   console.log(
     `[output] display "${d.label}" id=${d.id} ${d.size.width}x${d.size.height} ` +
       `@${d.displayFrequency}Hz scale=${d.scaleFactor} via ${how} ` +
@@ -367,6 +458,22 @@ function wireIpc(): void {
     if (MEASURE_LABEL === '') saveSettings({ hudVisible: assertJsonOnly(visible) });
   });
 
+  // ---------------------------------------------------------------------------
+  // Unattended provocations (attribution runs only).
+  //
+  // Every prior attempt at cue 2 depended on a human pressing F3 at a cued
+  // moment and reporting what the wall did. That made the experiment
+  // unrepeatable and its null result uninterpretable. These drive the same OS
+  // events from the harness, and the renderer's `visibilitychange` listener —
+  // which demonstrably fires on a real surface hide — is the ground truth for
+  // whether the surface actually suspended.
+  // ---------------------------------------------------------------------------
+  ipcMain.handle(CH.provoke, async (_e, kind: ProvocationKind): Promise<string> => {
+    const note = await performProvocation(kind);
+    console.log(`[provoke] ${kind}: ${note}`);
+    return note;
+  });
+
   ipcMain.on(CH.measureDone, () => {
     console.log('[run] renderer reported done; quitting');
     setTimeout(() => app.exit(0), 250);
@@ -431,6 +538,107 @@ function wireIpc(): void {
     saveSettings({ measurementMode: on });
     return on === uncappedRequested; // false => a relaunch is needed
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Toggle Mission Control without synthesising a keystroke. Launching
+ * `Mission Control.app` is what F3 does and needs no Accessibility permission,
+ * so an unattended run can drive it; launching it again dismisses it.
+ */
+function toggleMissionControl(): Promise<string> {
+  return new Promise((resolve) => {
+    const child = spawn('open', ['-a', 'Mission Control'], { stdio: 'ignore' });
+    child.on('error', (err) => resolve(`spawn failed: ${err.message}`));
+    child.on('exit', (code) => resolve(`exit ${String(code)}`));
+  });
+}
+
+/**
+ * Perform one provocation and report what was done. Nothing here reopens the
+ * output window: a teardown would restart the measurement, which is the defect
+ * run 5 attempt 1 already found.
+ */
+async function performProvocation(kind: ProvocationKind): Promise<string> {
+  const win = outputWin;
+  if (!win || win.isDestroyed()) return 'no output window; nothing done';
+
+  if (kind === 'hide') {
+    const wasSimple = process.platform === 'darwin' ? win.isSimpleFullScreen() : false;
+    win.hide();
+    await delay(PROVOKE_HOLD_MS);
+    win.show();
+    // A hide/show that silently drops simpleFullscreen would be a live-show
+    // hazard in its own right, and would also change what the intervals after
+    // the resume mean. Checked, restored, and reported either way.
+    if (wasSimple && !win.isSimpleFullScreen()) {
+      win.setSimpleFullScreen(true);
+      return `window hidden ${PROVOKE_HOLD_MS}ms; simpleFullScreen LOST across hide/show, restored`;
+    }
+    return `window hidden ${PROVOKE_HOLD_MS}ms; simpleFullScreen preserved (was ${String(wasSimple)})`;
+  }
+
+  // The control experiment. `backgroundThrottling: false` is set on this window
+  // at creation and Electron documents that it also affects the Page Visibility
+  // API, so it is the reason `hide` produced neither a `visibilitychange` nor a
+  // gap. Re-enabling throttling for the duration is the only way to tell
+  // "the surface cannot be suspended" apart from "we never suspended it".
+  if (kind === 'hidethrottled' || kind === 'mcthrottled') {
+    const wc = win.webContents;
+    const restoreFlag = win.isHiddenInMissionControl();
+    const wasSimple = process.platform === 'darwin' ? win.isSimpleFullScreen() : false;
+    wc.setBackgroundThrottling(true);
+    let what: string;
+    if (kind === 'hidethrottled') {
+      win.hide();
+      await delay(PROVOKE_HOLD_MS);
+      win.show();
+      what = `window hidden ${PROVOKE_HOLD_MS}ms`;
+    } else {
+      // Maximally suspendable: throttling on AND the window not excluded from
+      // Mission Control. If this does not suspend the surface, nothing will.
+      win.setHiddenInMissionControl(false);
+      const opened = await toggleMissionControl();
+      await delay(PROVOKE_HOLD_MS);
+      const dismissed = await toggleMissionControl();
+      await delay(800);
+      win.setHiddenInMissionControl(restoreFlag);
+      what = `Mission Control toggled, hiddenInMissionControl=false (open ${opened}, dismiss ${dismissed})`;
+    }
+    wc.setBackgroundThrottling(false);
+    let note = `backgroundThrottling re-enabled for the provocation; ${what}`;
+    if (wasSimple && !win.isSimpleFullScreen()) {
+      win.setSimpleFullScreen(true);
+      note += '; simpleFullScreen LOST, restored';
+    }
+    return note;
+  }
+
+  if (kind === 'apphide') {
+    app.hide();
+    await delay(PROVOKE_HOLD_MS);
+    app.show();
+    return `app hidden ${PROVOKE_HOLD_MS}ms`;
+  }
+
+  // mc / mcvisible
+  const restore = win.isHiddenInMissionControl();
+  const clearFlag = kind === 'mcvisible';
+  if (clearFlag) win.setHiddenInMissionControl(false);
+  const opened = await toggleMissionControl();
+  await delay(PROVOKE_HOLD_MS);
+  const dismissed = await toggleMissionControl();
+  // Let the dismiss animation finish before the flag goes back, so the window
+  // is not mutated mid-transition.
+  await delay(800);
+  if (clearFlag) win.setHiddenInMissionControl(restore);
+  return (
+    `Mission Control toggled with hiddenInMissionControl=${String(clearFlag ? false : restore)} ` +
+    `(open ${opened}, dismiss ${dismissed}); flag left at ${String(win.isHiddenInMissionControl())}`
+  );
 }
 
 /**

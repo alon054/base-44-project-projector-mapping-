@@ -45,6 +45,12 @@ export const CH = {
   warning: 'warning:show',
   /** output -> main: an unattended measurement run has finished; quit. */
   measureDone: 'measure:done',
+  /**
+   * output -> main (invoke): perform one unattended provocation. Attribution
+   * runs only — a gate run never sends this. The renderer owns the schedule
+   * because it owns the post-warmup clock every other timestamp is on.
+   */
+  provoke: 'run:provoke',
 } as const;
 
 /** SPEC.md I-8: hierarchical key. Registered in `parameters.ts` in Phase 1 (§0.2). */
@@ -100,6 +106,118 @@ export interface OutputConfig {
    * operator-driven disturbance run, where the point is a timed interruption.
    */
   measureCues: number[];
+  /**
+   * Unattended provocations, fired by the harness with no human involved.
+   * Empty for every gate run — a run carrying these is an attribution run and
+   * its M1 numbers describe the provocation, not the engine.
+   */
+  provocations: ProvocationSpec[];
+  /** Captured once at run start, reported in the summary. */
+  conditions: RunConditions | null;
+}
+
+/**
+ * The conditions a run was made under, captured by the app rather than
+ * reconstructed afterwards.
+ *
+ * This exists because run5-mc's null result could not be interpreted: whether
+ * `Displays have separate Spaces` was on decided whether the run had tested its
+ * mechanism at all, and the answer had to be recovered from `defaults read`
+ * after the fact. Same class as A9 and A14 — an instrument that cannot see the
+ * conditions it measured under cannot say what it measured.
+ */
+export interface RunConditions {
+  platform: string;
+  /** Raw `com.apple.spaces spans-displays`: '0', '1', or 'absent'. macOS only. */
+  spansDisplaysRaw: string;
+  /**
+   * True when each display has its own Spaces. macOS defaults to on, which is
+   * `spans-displays` absent or 0; the key is only written once toggled.
+   * Null off darwin.
+   */
+  separateSpaces: boolean | null;
+  /** The output window's `hiddenInMissionControl`, read from the window itself. */
+  hiddenInMissionControl: boolean | null;
+  /** Attached displays at run start. */
+  displayCount: number;
+  outputDisplay: {
+    id: number;
+    label: string;
+    width: number;
+    height: number;
+    scaleFactor: number;
+    displayFrequency: number;
+    internal: boolean;
+    isPrimary: boolean;
+  } | null;
+  /** False means the window is framed — a stale pin or an unconfirmed display. */
+  outputFullscreen: boolean;
+  /** A13: `PINNED (...)` or `HEURISTIC (...)`, verbatim from the picker. */
+  pin: string;
+}
+
+/**
+ * Unattended provocations for an attribution run. Each one drives a real OS
+ * event from the harness itself, so no human presses a key and no human reports
+ * what they saw.
+ *
+ * - `hide` / `apphide` — genuine surface suspend/resume, the positive controls.
+ *   If these produce no stall beyond the deliberate gap, surface suspend/resume
+ *   is not the mechanism regardless of what triggers it.
+ * - `mc` — Mission Control in the shipping configuration.
+ * - `mcvisible` — Mission Control with `hiddenInMissionControl` temporarily
+ *   cleared, which is the only way to tell that flag's effect apart from a
+ *   Spaces setting without a second binary.
+ */
+export type ProvocationKind =
+  | 'hide'
+  | 'apphide'
+  | 'mc'
+  | 'mcvisible'
+  /**
+   * The control that isolates the variable. `backgroundThrottling: false` has
+   * been set on the output window since the first scaffold commit, and Electron
+   * documents that it "also affects the Page Visibility API" — so it is the
+   * candidate explanation for why `hide`, `apphide`, `mc` and `mcvisible` all
+   * produced no suspend at all. These re-enable throttling for the duration of
+   * the provocation, and are the only configurations in which a suspend should
+   * be reachable.
+   */
+  | 'hidethrottled'
+  | 'mcthrottled';
+
+export interface ProvocationSpec {
+  kind: ProvocationKind;
+  /** Post-warmup seconds at which to fire. */
+  atSeconds: number;
+}
+
+/**
+ * What one provocation actually did, decided by the machine.
+ *
+ * `visibilityHidden` is the ground truth for "the surface really suspended" —
+ * the renderer's `visibilitychange` listener demonstrably fires on a real
+ * surface hide and did not fire in run5-mc.
+ */
+export interface ProvocationVerdict {
+  kind: ProvocationKind;
+  requestedAtSeconds: number;
+  /** Did the surface genuinely suspend? The whole experiment turns on this. */
+  visibilityHidden: boolean;
+  focusLost: boolean;
+  /** Longest presentation interval inside the provocation window, ms. */
+  maxIntervalMs: number;
+  /** Clause-3 events inside the window — the deliberate gap included. */
+  clause3InWindow: number;
+  /**
+   * The first intervals after the surface came back. This is the number that
+   * separates "the gap we asked for" from "a resume cost we did not" — a
+   * suspend of D ms yields one interval of ~D by construction, so only what
+   * follows it can attribute a stall to resume.
+   */
+  intervalsAfterResume: number[];
+  /** Anything the main process reported back about performing it. */
+  note: string;
 }
 
 /**
