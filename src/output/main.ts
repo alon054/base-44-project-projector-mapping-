@@ -2,7 +2,12 @@
  * Output window: the authoritative renderer (I-7). Full DEV_RESOLUTION, HUD
  * available but off by default (C4), cursor hidden by CSS.
  */
-import { DEV_RESOLUTION, PARAM_TEST_PATTERN_SPEED, type OutputConfig } from '@shared/ipc';
+import {
+  DEV_RESOLUTION,
+  PARAM_TEST_PATTERN_SPEED,
+  TARGET_RESOLUTION,
+  type OutputConfig,
+} from '@shared/ipc';
 import { Hud, formatReport } from '../debug/hud';
 import { createRenderHost } from '../render/host';
 
@@ -48,6 +53,10 @@ window.engine.onOutputConfig(applyConfig);
 
 window.engine.onParam((p) => {
   if (p.key !== PARAM_TEST_PATTERN_SPEED) return;
+  // A11: transport ack FIRST, before any frame wait. This is the figure that
+  // moves under load; the presented ack below is conservative by one frame by
+  // construction and would hide a transport regression behind the cadence.
+  window.engine.recvParam({ token: p.token, t0: p.t0 });
   if (!host) {
     pendingSpeed.v = { value: p.value, token: p.token, t0: p.t0 };
     return;
@@ -84,10 +93,33 @@ else console.warn('[output] no config available from main yet');
 // or not the overlay is drawn here.
 setInterval(() => {
   if (!host) return;
+  // A14: the tick times itself, so the instrument's cost is a reported number.
+  const t0 = performance.now();
+  host.metrics.setScale(host.scaleReport());
   const r = host.metrics.report();
   window.engine.reportMetrics(r);
   hud.update(formatReport(r, config.uncapped));
+  host.metrics.noteInstrumentTick(performance.now() - t0);
 }, 250);
+
+// A3: say it once, loudly, at startup. A scaler between our backing store and
+// the panel is the condition DEV_RESOLUTION exists to eliminate, and it is
+// invisible unless something checks.
+{
+  const sc = host.scaleReport();
+  console.log(
+    `[scale] buffer ${sc.bufferWidth}x${sc.bufferHeight}  css ${sc.cssWidth}x${sc.cssHeight}  ` +
+      `dpr ${sc.dpr}  displayScaleFactor ${config.scaleFactor}  ` +
+      (sc.oneToOne ? '1:1 to panel' : 'NOT 1:1 — a scaler is in the path'),
+  );
+  if (!sc.oneToOne) {
+    banner.textContent =
+      `Output is NOT 1:1 to the panel: ${sc.bufferWidth}x${sc.bufferHeight} backing store ` +
+      `into a ${sc.cssWidth}x${sc.cssHeight} CSS box at dpr ${sc.dpr}. ` +
+      'Gate numbers measured this way describe a scaled path (SPEC.md §4, A3).';
+    banner.style.display = 'block';
+  }
+}
 
 // I-11: the HUD stays available. `h` toggles it; it starts hidden so it is never
 // burned into a live projection.
@@ -100,5 +132,17 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') {
     host?.metrics.reset();
     console.log('[hud] metrics window reset — warmup restarts');
+  }
+  // A8: k_dev / k_target. On demand only — the probe saturates the GPU and
+  // would corrupt the gate window it sits beside, so it resets that window.
+  if (e.key === 'k' || e.key === 'K') {
+    if (!host) return;
+    const k = host.probe();
+    console.log(
+      `[k] k_dev=${k.dev.toFixed(2)}x (${k.devMs.toFixed(3)} ms/render @${DEV_RESOLUTION.width}x${DEV_RESOLUTION.height})  ` +
+        `k_target=${k.target.toFixed(2)}x (${k.targetMs.toFixed(3)} ms/render @${TARGET_RESOLUTION.width}x${TARGET_RESOLUTION.height})  ` +
+        `fill-rate coefficient=${k.ratio.toFixed(3)}  iterations=${k.iterations}  ` +
+        '(metrics window reset — probe hitch excluded)',
+    );
   }
 });

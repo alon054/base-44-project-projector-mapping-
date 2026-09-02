@@ -95,41 +95,59 @@ export function fingerprint(d: Electron.Display): DisplayFingerprint {
 }
 
 export type DisplayPickReason =
-  | 'exact-id'
-  | 'fingerprint'
-  | 'largest-external'
+  | 'pinned-exact-id'
+  | 'pinned-fingerprint'
+  | 'stale-pin-fallback'
+  | 'first-run-largest-external'
   | 'primary-fallback'
   | 'none';
 
 export interface DisplayPick {
   display: Electron.Display | null;
   reason: DisplayPickReason;
+  /** True when an operator's explicit pin resolved. The show-critical path. */
+  pinned: boolean;
   /**
-   * True when the pick is the primary/internal display. Gate 0 (C6): never enter
-   * fullscreen here without explicit confirmation — a cursorless frameless
-   * fullscreen window on the only monitor is how you lock up a machine.
+   * True when a pin exists but no attached display matches it — the projector
+   * was unplugged, or a different external is present. The session continues
+   * (I-13) but never silently retargets a stranger at fullscreen.
+   */
+  stalePin: boolean;
+  /**
+   * Gate 0 (C6) and A13: never enter fullscreen without explicit confirmation
+   * when this is set. A cursorless frameless fullscreen window on the only
+   * monitor is how you lock up a machine; a cursorless fullscreen window on
+   * the wrong external is how you lose a show.
    */
   needsConfirmation: boolean;
 }
 
 /**
- * Resolve which display to project onto, in descending order of confidence.
- * `Display.id` is tried first but never trusted alone.
+ * Resolve which display to project onto.
+ *
+ * **A13 policy — an explicit pin always wins; the heuristic is a first-run
+ * fallback only.** This is show-critical: the operator's choice is data, the
+ * heuristic is a guess, and a guess must never quietly overrule data.
+ *
+ * The tension with I-13 (loss of the output display must not end the session)
+ * is resolved by degrading rather than retargeting: when a pin exists and does
+ * not resolve, a window still opens on the best available display so the
+ * session survives, but it opens **framed, with a warning, and never
+ * fullscreen**, so the operator sees that the pin was lost instead of
+ * discovering it on the wall.
+ *
+ * `Display.id` is tried first but never trusted alone — it is not stable across
+ * reboots and cable reconnects on macOS — so the fingerprint tuple is what
+ * actually matches.
  */
 export function pickOutputDisplay(
   displays: readonly Electron.Display[],
   primaryId: number,
   saved: DisplayFingerprint | null,
 ): DisplayPick {
-  const decide = (d: Electron.Display, reason: DisplayPickReason): DisplayPick => ({
-    display: d,
-    reason,
-    needsConfirmation: d.id === primaryId || d.internal,
-  });
-
   if (saved) {
     const byId = displays.find((d) => d.id === saved.id && d.internal === saved.internal);
-    if (byId) return decide(byId, 'exact-id');
+    if (byId) return pinnedPick(byId, 'pinned-exact-id', primaryId);
 
     const byPrint = displays.find(
       (d) =>
@@ -139,17 +157,59 @@ export function pickOutputDisplay(
         d.scaleFactor === saved.scaleFactor &&
         d.internal === saved.internal,
     );
-    if (byPrint) return decide(byPrint, 'fingerprint');
+    if (byPrint) return pinnedPick(byPrint, 'pinned-fingerprint', primaryId);
   }
+
+  const stalePin = saved !== null;
 
   const externals = displays
     .filter((d) => !d.internal && d.detected)
     .sort((a, b) => b.size.width * b.size.height - a.size.width * a.size.height);
   const largest = externals[0];
-  if (largest) return decide(largest, 'largest-external');
+  if (largest) {
+    return {
+      display: largest,
+      reason: stalePin ? 'stale-pin-fallback' : 'first-run-largest-external',
+      pinned: false,
+      stalePin,
+      // A13: a stale pin is never silently promoted to fullscreen.
+      needsConfirmation: stalePin || largest.id === primaryId || largest.internal,
+    };
+  }
 
   const primary = displays.find((d) => d.id === primaryId);
-  if (primary) return { display: primary, reason: 'primary-fallback', needsConfirmation: true };
+  if (primary) {
+    return {
+      display: primary,
+      reason: 'primary-fallback',
+      pinned: false,
+      stalePin,
+      needsConfirmation: true,
+    };
+  }
 
-  return { display: null, reason: 'none', needsConfirmation: true };
+  return {
+    display: null,
+    reason: 'none',
+    pinned: false,
+    stalePin,
+    needsConfirmation: true,
+  };
+}
+
+function pinnedPick(
+  d: Electron.Display,
+  reason: 'pinned-exact-id' | 'pinned-fingerprint',
+  primaryId: number,
+): DisplayPick {
+  return {
+    display: d,
+    reason,
+    pinned: true,
+    stalePin: false,
+    // A pin to the internal/primary display is still a pin, but C6 stands: the
+    // operator confirms before a cursorless fullscreen window covers their only
+    // monitor.
+    needsConfirmation: d.id === primaryId || d.internal,
+  };
 }

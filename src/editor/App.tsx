@@ -6,7 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DEV_RESOLUTION,
   PARAM_TEST_PATTERN_SPEED,
+  PRESENTED_GATE_MS,
   TARGET_RESOLUTION,
+  TRANSPORT_GATE_MS,
   type DisplayInfo,
   type MetricsReport,
 } from '@shared/ipc';
@@ -19,8 +21,6 @@ import {
 } from '../debug/hud';
 import { PreviewCanvas } from './PreviewCanvas';
 
-/** Gate 0: editor -> output round-trip p95 must be at or under this. */
-const LATENCY_GATE_MS = 33;
 
 export function App(): React.JSX.Element {
   const [speed, setSpeed] = useState(1);
@@ -29,7 +29,9 @@ export function App(): React.JSX.Element {
   const [uncapped, setUncapped] = useState(false);
   const [nominalMs, setNominalMs] = useState(0);
   const [warning, setWarning] = useState<string>('');
-  const [latencies, setLatencies] = useState<number[]>([]);
+  // A11: two figures, never conflated. Transport is what moves under load.
+  const [transport, setTransport] = useState<number[]>([]);
+  const [presented, setPresented] = useState<number[]>([]);
   const token = useRef(0);
 
   const refreshDisplays = useCallback(() => {
@@ -52,14 +54,19 @@ export function App(): React.JSX.Element {
       refreshDisplays();
     });
     const offWarn = window.engine.onWarning((w) => setWarning(w.level === 'info' ? '' : w.text));
+    const offRecv = window.engine.onParamRecv(({ t0 }) => {
+      const rtt = performance.now() - t0;
+      setTransport((prev) => [...prev.slice(-299), rtt]);
+    });
     const offAck = window.engine.onParamAck(({ t0 }) => {
       const rtt = performance.now() - t0;
-      setLatencies((prev) => [...prev.slice(-299), rtt]);
+      setPresented((prev) => [...prev.slice(-299), rtt]);
     });
     return () => {
       offMetrics();
       offConfig();
       offWarn();
+      offRecv();
       offAck();
     };
   }, [refreshDisplays]);
@@ -75,15 +82,13 @@ export function App(): React.JSX.Element {
     });
   }, []);
 
-  const latency = useMemo(() => {
-    if (latencies.length === 0) return null;
-    const sorted = [...latencies].sort((a, b) => a - b);
-    return {
-      n: latencies.length,
-      median: percentile(sorted, 0.5),
-      p95: percentile(sorted, 0.95),
-    };
-  }, [latencies]);
+  const stat = (xs: readonly number[]) => {
+    if (xs.length === 0) return null;
+    const sorted = [...xs].sort((a, b) => a - b);
+    return { n: xs.length, median: percentile(sorted, 0.5), p95: percentile(sorted, 0.95) };
+  };
+  const tStat = useMemo(() => stat(transport), [transport]);
+  const pStat = useMemo(() => stat(presented), [presented]);
 
   return (
     <div style={{ display: 'flex', gap: 20, padding: 20, alignItems: 'flex-start' }}>
@@ -172,19 +177,27 @@ export function App(): React.JSX.Element {
           </p>
         </Panel>
 
-        <Panel title="Editor → output round-trip">
-          {latency ? (
+        <Panel title="Editor → output latency (A11: two figures, never conflated)">
+          {tStat && pStat ? (
             <pre style={preStyle}>
-              {`median ${latency.median.toFixed(1)} ms
-p95    ${latency.p95.toFixed(1)} ms  ${latency.p95 <= LATENCY_GATE_MS ? 'PASS' : 'FAIL'} (<=${LATENCY_GATE_MS} ms)
-n      ${latency.n}`}
+              {`transport  median ${tStat.median.toFixed(1)}  p95 ${tStat.p95.toFixed(1)} ms  ${
+                tStat.p95 <= TRANSPORT_GATE_MS ? 'PASS' : 'FAIL'
+              } (<=${TRANSPORT_GATE_MS} ms)  n=${tStat.n}
+presented  median ${pStat.median.toFixed(1)}  p95 ${pStat.p95.toFixed(1)} ms  ${
+                pStat.p95 <= PRESENTED_GATE_MS ? 'PASS' : 'FAIL'
+              } (<=${PRESENTED_GATE_MS} ms)  n=${pStat.n}
+implied one-way presented ≈ ${
+                nominalMs > 0 ? (pStat.median - nominalMs).toFixed(1) : '—'
+              } ms${nominalMs > 0 ? ` = ${((pStat.median - nominalMs) / nominalMs).toFixed(2)}× N` : ''}`}
             </pre>
           ) : (
             <p style={{ margin: 0, color: '#8b939b' }}>Move the slider to sample.</p>
           )}
           <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
-            Measured in-process; does not include projector panel latency, which is measured
-            separately and is informational.
+            <strong>Transport</strong> is editor event → output receipt, no frame wait — the figure
+            that moves under load. <strong>Presented</strong> is acked from the frame after the one
+            that rendered, so it is conservative by one frame by construction. Neither includes
+            projector panel latency, which is informational and measured separately.
           </p>
         </Panel>
 
@@ -220,8 +233,8 @@ n      ${latency.n}`}
               <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
                 Gate needs <strong>both</strong>: M1{' '}
                 {passesPresentation(metrics) ? '✓' : '✗'} · M2{' '}
-                {passesHeadroom(metrics) ? '✓' : '✗'} (p95 ≤{' '}
-                {(MAX_RENDER_FRACTION * 100).toFixed(0)}% of N)
+                {passesHeadroom(metrics) ? '✓' : '✗'} (p99 ≤{' '}
+                {(MAX_RENDER_FRACTION * 100).toFixed(0)}% of N, A10)
               </p>
             </>
           ) : (

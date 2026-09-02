@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CAPACITY,
   FrameMetrics,
   LATE_FACTOR,
   MAX_LATE_FRACTION,
   MAX_LATE_RUN,
+  MAX_MAGNITUDE_EVENTS,
   MAX_RENDER_FRACTION,
+  formatReport,
   passesHeadroom,
   passesPresentation,
   percentile,
+  unattributedMagnitude,
+  validateNominal,
 } from '../debug/hud';
 
 const N60 = 1000 / 60;
@@ -125,15 +130,31 @@ describe('FrameMetrics — SPEC.md §4 measurement protocol', () => {
     expect(passesHeadroom(r)).toBe(false);
   });
 
-  it('p95 is blind to a tail of exactly 5% — the deliberate seam between the two metrics', () => {
+  it('A10: p99 closes the seam that p95 left open at a 5% tail', () => {
     const m = new FrameMetrics(N60, { warmupMs: 0 });
-    // Exactly 5 expensive frames in 100. Nearest-rank p95 is the 95th smallest,
-    // so it reports the cheap value. Gate metric 1 is what governs this tail;
-    // gate metric 2 governs the body. Recorded here so the seam is a decision,
-    // not a surprise at Phase 9.
+    // Exactly 5 expensive frames in 100 — precisely the tail gate metric 1 is
+    // allowed to forgive. Nearest-rank p95 is the 95th smallest and reports the
+    // CHEAP value, so a p95-gated metric 2 was structurally blind to the same
+    // frames M1 permits: between them, nothing looked at that tail at all.
+    // p99 looks into it. This test asserts the seam is CLOSED, not that it exists.
     const render = Array.from({ length: 100 }, (_, i) => (i < 95 ? 4 : 15));
     feed(m, Array.from({ length: 100 }, () => N60), render);
-    expect(m.report().renderP95Ms).toBe(4);
+    const r = m.report();
+
+    expect(r.renderP95Ms).toBe(4); // still blind — retained, informational only
+    expect(r.renderP99Ms).toBe(15); // sees the tail
+    expect(passesHeadroom(r)).toBe(false); // and the gate now fails on it
+  });
+
+  it('A10: the gate reads p99, so a p95-passing run with an expensive tail fails', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    // 96 cheap, 4 catastrophic. p95 = cheap and would have passed; p99 does not.
+    const render = Array.from({ length: 100 }, (_, i) => (i < 96 ? 1 : N60 * 0.9));
+    feed(m, Array.from({ length: 100 }, () => N60), render);
+    const r = m.report();
+    expect(r.renderP95OfNominal).toBeLessThan(MAX_RENDER_FRACTION);
+    expect(r.renderP99OfNominal).toBeGreaterThan(MAX_RENDER_FRACTION);
+    expect(passesHeadroom(r)).toBe(false);
   });
 
   it('separates the two metrics: smooth presentation, no headroom', () => {
@@ -143,7 +164,7 @@ describe('FrameMetrics — SPEC.md §4 measurement protocol', () => {
     const r = m.report();
     expect(passesPresentation(r)).toBe(true);
     expect(passesHeadroom(r)).toBe(false);
-    expect(r.renderP95OfNominal).toBeGreaterThan(MAX_RENDER_FRACTION);
+    expect(r.renderP99OfNominal).toBeGreaterThan(MAX_RENDER_FRACTION);
   });
 
   it('passes both metrics at the boundary of gate metric 2', () => {
@@ -192,5 +213,231 @@ describe('FrameMetrics — SPEC.md §4 measurement protocol', () => {
     expect(r.lateFraction).toBe(0);
     expect(r.renderP95Ms).toBe(0);
     expect(Number.isNaN(r.renderP95OfNominal)).toBe(false);
+  });
+});
+
+
+/**
+ * A9: no metric renders a number from unvalidated inputs. This is the guard for
+ * the failure that produced a confident, precise, completely wrong gate number
+ * — N never reached the metrics, every interval was compared against 0, and the
+ * HUD reported "100% late" rather than reporting that it could not measure.
+ */
+describe('A9 — input validation', () => {
+  it('N = 0 yields INVALID, never a percentage', () => {
+    const m = new FrameMetrics(0, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 4);
+    const r = m.report();
+    expect(r.valid).toBe(false);
+    expect(r.invalidReason).toContain('must be > 0');
+    // The critical part: not "100% late".
+    expect(r.lateFraction).toBe(0);
+    expect(r.renderP99OfNominal).toBe(0);
+    expect(passesPresentation(r)).toBe(false);
+    expect(passesHeadroom(r)).toBe(false);
+  });
+
+  it('N unset (undefined) yields INVALID', () => {
+    const m = new FrameMetrics(undefined as unknown as number, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 4);
+    const r = m.report();
+    expect(r.valid).toBe(false);
+    expect(r.invalidReason).toContain('not a finite number');
+    expect(passesHeadroom(r)).toBe(false);
+  });
+
+  it('N = 1000 ms is not a display mode and yields INVALID', () => {
+    const m = new FrameMetrics(1000, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 4);
+    const r = m.report();
+    expect(r.valid).toBe(false);
+    expect(r.invalidReason).toContain('outside the plausible display range');
+    expect(passesPresentation(r)).toBe(false);
+  });
+
+  it('NaN yields INVALID rather than propagating', () => {
+    const m = new FrameMetrics(Number.NaN, { warmupMs: 0 });
+    feed(m, Array.from({ length: 10 }, () => N60), 4);
+    const r = m.report();
+    expect(r.valid).toBe(false);
+    expect(Number.isNaN(r.renderP99OfNominal)).toBe(false);
+  });
+
+  it('a real display mode is valid', () => {
+    for (const hz of [24, 30, 60, 120, 144, 240]) {
+      expect(validateNominal(1000 / hz).valid).toBe(true);
+    }
+  });
+
+  it('formatReport says INVALID instead of printing derived numbers', () => {
+    const m = new FrameMetrics(0, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 4);
+    const text = formatReport(m.report(), false);
+    expect(text).toContain('INVALID');
+    expect(text).not.toContain('PASS');
+  });
+
+  it('an invalid N recorded mid-run resets rather than mixing two Ns', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 50 }, () => N60), 4);
+    expect(m.report().samples).toBe(50);
+    m.setNominalMs(0);
+    expect(m.report().samples).toBe(0);
+    expect(m.report().valid).toBe(false);
+  });
+});
+
+/**
+ * A12: rate and magnitude are separate facts. A low late-rate does not license
+ * an unexplained stall, so every interval over 3 x N is surfaced individually
+ * with the sample number it happened at.
+ */
+describe('A12 — magnitude, not just rate', () => {
+  it('records an interval over 3 x N with its sample index', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    const intervals = Array.from({ length: 200 }, (_, i) => (i === 120 ? 67.7 : N60));
+    feed(m, intervals, 0.4);
+    const r = m.report();
+
+    // The exact shape of the run that passed while hiding a four-frame stall.
+    expect(passesPresentation(r)).toBe(true);
+    expect(r.lateFraction).toBeLessThan(MAX_LATE_FRACTION);
+    expect(r.worstLateRun).toBe(1);
+
+    // ...and the stall is nonetheless reported, individually, for attribution.
+    expect(r.magnitudeEvents).toHaveLength(1);
+    expect(r.magnitudeEvents[0]!.intervalMs).toBeCloseTo(67.7, 5);
+    expect(r.magnitudeEvents[0]!.index).toBe(121);
+    expect(unattributedMagnitude(r)).toHaveLength(1);
+  });
+
+  it('an interval merely late (1.6 x N) is not a magnitude event', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, (_, i) => (i === 40 ? N60 * 1.6 : N60)), 0.4);
+    const r = m.report();
+    expect(r.lateFraction).toBeGreaterThan(0);
+    expect(r.magnitudeEvents).toHaveLength(0);
+  });
+
+  it('a clean run reports no magnitude events', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 3601 }, () => 16.7), 0.4);
+    expect(m.report().magnitudeEvents).toHaveLength(0);
+  });
+
+  it('the event list is bounded so a pathological run cannot grow it forever', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 400 }, () => N60 * 4), 0.4);
+    expect(m.report().magnitudeEvents.length).toBeLessThanOrEqual(MAX_MAGNITUDE_EVENTS);
+  });
+
+  it('A9 before A12: an invalid N produces no magnitude events either', () => {
+    const m = new FrameMetrics(0, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, (_, i) => (i === 50 ? 500 : N60)), 0.4);
+    expect(m.report().magnitudeEvents).toHaveLength(0);
+  });
+
+  it('formatReport surfaces the stall rather than burying it in the rate', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 200 }, (_, i) => (i === 120 ? 67.7 : N60)), 0.4);
+    const text = formatReport(m.report(), false);
+    expect(text).toContain('M1 clause 3');
+    expect(text).toContain('ATTRIBUTE EACH');
+  });
+});
+
+
+/**
+ * A14 — the measurement apparatus is subject to the budget it measures.
+ * Three times the instrument has been the bug; these are the regression tests
+ * for the class of failure, not for the three instances.
+ */
+describe('A14 — the instrument is subject to its own budget', () => {
+  it('evicts by time without reallocating, and the window stays bounded', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0, windowMs: 1000, capacity: 256 });
+    // 10 seconds of frames through a 1-second window.
+    feed(m, Array.from({ length: 600 }, () => N60), 0.4);
+    const r = m.report();
+    // ~60 frames fit in a 1 s window at 60 Hz; never the full 600.
+    expect(r.samples).toBeGreaterThan(50);
+    expect(r.samples).toBeLessThan(70);
+  });
+
+  it('a ring overrun drops the oldest sample rather than growing', () => {
+    // Window long enough that time-eviction never fires: only capacity bounds it.
+    const cap = 64;
+    const m = new FrameMetrics(N60, { warmupMs: 0, windowMs: 1e9, capacity: cap });
+    feed(m, Array.from({ length: 500 }, () => N60), 0.4);
+    expect(m.report().samples).toBe(cap);
+  });
+
+  it('the newest samples survive a ring overrun, not the oldest', () => {
+    const cap = 8;
+    const m = new FrameMetrics(N60, { warmupMs: 0, windowMs: 1e9, capacity: cap });
+    // Render cost climbs; after overrun only the expensive tail should remain.
+    const render = Array.from({ length: 100 }, (_, i) => i);
+    feed(m, Array.from({ length: 100 }, () => N60), render);
+    const r = m.report();
+    expect(r.samples).toBe(cap);
+    expect(r.renderP99Ms).toBe(99);
+  });
+
+  it('reports its own per-frame cost', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 0.4);
+    m.noteInstrumentCost(0.01);
+    m.noteInstrumentCost(0.05);
+    m.noteInstrumentCost(0.03);
+    const inst = m.report().instrument;
+    expect(inst.perFrameMaxMs).toBe(0.05);
+    expect(inst.perFrameMeanMs).toBeCloseTo(0.03, 10);
+    expect(inst.maxShareOfNominal).toBeCloseTo(0.05 / N60, 10);
+  });
+
+  it('reports its own per-tick cost', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 10 }, () => N60), 0.4);
+    m.noteInstrumentTick(0.42);
+    expect(m.report().instrument.tickMs).toBe(0.42);
+  });
+
+  it('the instrument cost surfaces in the HUD, not only in the payload', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 0.4);
+    m.noteInstrumentCost(0.02);
+    expect(formatReport(m.report(), false)).toContain('instrument');
+  });
+
+  it('A9 before A14: an invalid N does not produce an instrument share either', () => {
+    const m = new FrameMetrics(0, { warmupMs: 0 });
+    feed(m, Array.from({ length: 10 }, () => N60), 0.4);
+    m.noteInstrumentCost(0.02);
+    expect(m.report().instrument.maxShareOfNominal).toBe(0);
+  });
+
+  it('reset clears the instrument counters with everything else', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 0.4);
+    m.noteInstrumentCost(0.9);
+    m.reset();
+    const r = m.report();
+    expect(r.samples).toBe(0);
+    expect(r.instrument.perFrameMaxMs).toBe(0);
+    expect(r.instrument.perFrameMeanMs).toBe(0);
+  });
+
+  it('the default capacity covers a 60 s window at the measured uncapped rate', () => {
+    // ADD-2 measured ~823 fps uncapped; 60 s of that must not overrun the ring.
+    expect(DEFAULT_CAPACITY).toBeGreaterThan(823 * 60);
+  });
+
+  it('steady-state reporting is stable — the same window reports the same numbers', () => {
+    const m = new FrameMetrics(N60, { warmupMs: 0, windowMs: 60_000 });
+    feed(m, Array.from({ length: 3601 }, () => 16.7), 0.4);
+    const a = m.report();
+    const b = m.report();
+    expect(b.samples).toBe(a.samples);
+    expect(b.renderP99Ms).toBe(a.renderP99Ms);
+    expect(b.lateFraction).toBe(a.lateFraction);
   });
 });

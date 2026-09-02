@@ -229,17 +229,19 @@ function openOutputWindow(): void {
     if (!goFullscreen) {
       send(win, CH.warning, {
         level: 'warn',
-        text:
-          `Output is on ${d.internal ? 'the internal' : 'the primary'} display ` +
-          `("${d.label}"). Not entering fullscreen without confirmation — ` +
-          `pick the projector in the editor, or confirm this display.`,
+        text: pick.stalePin
+          ? `PINNED DISPLAY NOT FOUND. Falling back to "${d.label}" FRAMED, not fullscreen ` +
+            '(A13: a pin is never silently retargeted). Re-pick the projector in the editor.'
+          : `Output is on ${d.internal ? 'the internal' : 'the primary'} display ` +
+            `("${d.label}"). Not entering fullscreen without confirmation — ` +
+            `pick the projector in the editor, or confirm this display.`,
       });
     }
     send(editorWin, CH.outputConfig, outputConfigFor(d, 'preview'));
     send(editorWin, CH.warning, {
       level: goFullscreen ? 'info' : 'warn',
       text: `Output on "${d.label}" (${d.size.width}x${d.size.height} @ ${d.displayFrequency}Hz, ` +
-        `scale ${d.scaleFactor}) via ${pick.reason}${goFullscreen ? ', fullscreen' : ', FRAMED — unconfirmed'}.`,
+        `scale ${d.scaleFactor}) via ${how}${goFullscreen ? ', fullscreen' : ', FRAMED — unconfirmed'}.`,
     });
   });
 
@@ -257,9 +259,16 @@ function openOutputWindow(): void {
   holdPowerSaveBlocker();
   void win.loadURL(rendererUrl('output'));
 
+  // A13: "via pinned" vs "via heuristic" is the line that distinguishes a real
+  // persistence test from an exercise of the auto-picker. Do not merge them.
+  const how = pick.pinned
+    ? `PINNED (${pick.reason})`
+    : pick.stalePin
+      ? `HEURISTIC after STALE PIN (${pick.reason})`
+      : `HEURISTIC, no pin stored (${pick.reason})`;
   console.log(
     `[output] display "${d.label}" id=${d.id} ${d.size.width}x${d.size.height} ` +
-      `@${d.displayFrequency}Hz scale=${d.scaleFactor} via ${pick.reason} ` +
+      `@${d.displayFrequency}Hz scale=${d.scaleFactor} via ${how} ` +
       `fullscreen=${goFullscreen}`,
   );
 }
@@ -303,6 +312,11 @@ function watchDisplays(): void {
 function wireIpc(): void {
   ipcMain.on(CH.paramSet, (_e: IpcMainEvent, payload: ParamSet) => {
     send(outputWin, CH.paramSet, assertJsonOnly(payload));
+  });
+
+  // A11: the transport half, relayed with no frame wait anywhere in the path.
+  ipcMain.on(CH.paramRecv, (_e: IpcMainEvent, payload: ParamAck) => {
+    send(editorWin, CH.paramRecv, assertJsonOnly(payload));
   });
 
   ipcMain.on(CH.paramAck, (_e: IpcMainEvent, payload: ParamAck) => {
@@ -369,13 +383,27 @@ function logMetricsPeriodically(m: MetricsReport): void {
   if (now - lastMetricsLog < 10_000) return;
   lastMetricsLog = now;
   const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
+  // A9: an invalid N must never be logged as a percentage of anything.
+  if (!m.valid) {
+    console.log(`[metrics] INVALID — ${m.invalidReason}; no gate number can be recorded`);
+    return;
+  }
   console.log(
     `[metrics] ${m.warmedUp ? 'warm' : 'WARMUP'} n=${m.samples} ` +
       `fps=${m.fps.toFixed(2)} N=${m.nominalMs.toFixed(4)}ms | ` +
       `M1 late=${pct(m.lateFraction)} worstRun=${m.worstLateRun} | ` +
-      `M2 renderP95=${m.renderP95Ms.toFixed(3)}ms (${pct(m.renderP95OfNominal)} of N) | ` +
+      `M2 renderP99=${m.renderP99Ms.toFixed(3)}ms (${pct(m.renderP99OfNominal)} of N) ` +
+      `p95=${m.renderP95Ms.toFixed(3)}ms (info) | ` +
       `worstInterval=${m.worstIntervalMs.toFixed(2)}ms`,
   );
+  // A12: magnitude is logged separately from rate, because it is a separate
+  // fact and each event has to be attributed by hand in BUILD_LOG.md.
+  for (const e of m.magnitudeEvents) {
+    console.log(
+      `[metrics] M1-clause-3 STALL n=${e.index} t=${e.atSeconds.toFixed(2)}s ` +
+        `${e.intervalMs.toFixed(2)}ms (>${(m.nominalMs * 3).toFixed(1)}ms) — ATTRIBUTE: engine | OS | unknown`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

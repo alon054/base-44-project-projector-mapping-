@@ -10,6 +10,7 @@ import type {
   MetricsReport,
   OutputConfig,
   ParamAck,
+  ParamRecv,
   ParamSet,
 } from './ipc';
 
@@ -23,6 +24,10 @@ const api = {
   setParam(p: ParamSet): void {
     ipcRenderer.send(CH.paramSet, assertJsonOnly(p));
   },
+  // output -> editor, the instant the value arrives — no frame wait (A11)
+  recvParam(p: ParamRecv): void {
+    ipcRenderer.send(CH.paramRecv, assertJsonOnly(p));
+  },
   // output -> editor, once the change has actually been presented
   ackParam(p: ParamAck): void {
     ipcRenderer.send(CH.paramAck, assertJsonOnly(p));
@@ -34,6 +39,11 @@ const api = {
     const h = (_e: unknown, p: ParamSet) => cb(p);
     ipcRenderer.on(CH.paramSet, h);
     return () => ipcRenderer.off(CH.paramSet, h);
+  },
+  onParamRecv(cb: (p: ParamRecv) => void): () => void {
+    const h = (_e: unknown, p: ParamRecv) => cb(p);
+    ipcRenderer.on(CH.paramRecv, h);
+    return () => ipcRenderer.off(CH.paramRecv, h);
   },
   onParamAck(cb: (p: ParamAck) => void): () => void {
     const h = (_e: unknown, p: ParamAck) => cb(p);

@@ -12,7 +12,9 @@
 // Cost is measured, not assumed — see BUILD_LOG.md.
 import 'pixi.js/unsafe-eval';
 import { Application, Container } from 'pixi.js';
+import { DEV_RESOLUTION, TARGET_RESOLUTION, type KReport, type ScaleReport } from '@shared/ipc';
 import { FrameMetrics } from '../debug/hud';
+import { runRenderMultiplierProbe } from '../debug/probe';
 import { TestPattern } from './testPattern';
 
 export interface RenderHostOptions {
@@ -30,6 +32,10 @@ export interface RenderHost {
   markPending(token: number, t0: number): void;
   setNominalMs(ms: number): void;
   resize(width: number, height: number): void;
+  /** A3: current backing-store vs CSS geometry, so a scaler cannot hide. */
+  scaleReport(): ScaleReport;
+  /** A8: run the render-multiplier probe. Hitches by design; resets metrics. */
+  probe(): KReport;
   destroy(): void;
 }
 
@@ -77,6 +83,43 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
   let raf = 0;
   let alive = true;
 
+  /**
+   * A3: scaleFactor is a first-class concern from Phase 0. The internal display
+   * is 2x and the projector 1x, so "the canvas is 1280x720" says nothing on its
+   * own about what reaches the panel. This is the same subject as the
+   * two-scaler problem — stated and checked rather than discovered on a wall.
+   */
+  let scaleCache: ScaleReport | null = null;
+  const readScale = (): ScaleReport => {
+    // A14: `getBoundingClientRect()` forces a synchronous layout. Calling it on
+    // the 250 ms metrics tick put a forced reflow on the render thread four
+    // times a second, for a value that only changes on resize. Cached.
+    if (scaleCache) return scaleCache;
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = Math.round(rect.width);
+    const cssHeight = Math.round(rect.height);
+    const dpr = window.devicePixelRatio;
+    const next: ScaleReport = {
+      bufferWidth: app.renderer.width,
+      bufferHeight: app.renderer.height,
+      cssWidth,
+      cssHeight,
+      dpr,
+      oneToOne:
+        cssWidth > 0 &&
+        cssHeight > 0 &&
+        Math.abs(cssWidth * dpr - app.renderer.width) < 1 &&
+        Math.abs(cssHeight * dpr - app.renderer.height) < 1,
+    };
+    scaleCache = next;
+    return next;
+  };
+  const invalidateScale = (): void => {
+    scaleCache = null;
+  };
+  window.addEventListener('resize', invalidateScale);
+  metrics.setScale(readScale());
+
   const loop = (now: number): void => {
     if (!alive) return;
 
@@ -97,8 +140,12 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
     const t0 = performance.now();
     app.renderer.render(app.stage);
-    metrics.noteRenderDuration(performance.now() - t0);
+    const t1 = performance.now();
+    metrics.noteRenderDuration(t1 - t0);
     metrics.notePresentation(now);
+    // A14: one extra clock read per frame buys the instrument's own per-frame
+    // cost as a reported number instead of an inference from a later stall.
+    metrics.noteInstrumentCost(performance.now() - t1);
 
     if (pending) {
       renderedPending = pending;
@@ -123,9 +170,26 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     resize(width, height) {
       app.renderer.resize(width, height);
       pattern.resize(width, height);
+      invalidateScale();
+      metrics.setScale(readScale());
+    },
+    scaleReport: readScale,
+    probe() {
+      const k = runRenderMultiplierProbe(app.renderer, app.stage, {
+        nominalMs: metrics.nominal,
+        dev: DEV_RESOLUTION,
+        target: TARGET_RESOLUTION,
+      });
+      metrics.setK(k);
+      // The probe deliberately saturates the GPU. Anything measured across it
+      // is not a gate number, so the window restarts rather than carrying the
+      // hitch the instrument itself caused.
+      metrics.reset();
+      return k;
     },
     destroy() {
       alive = false;
+      window.removeEventListener('resize', invalidateScale);
       cancelAnimationFrame(raf);
       pattern.destroy();
       app.destroy(true, { children: true });

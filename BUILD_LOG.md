@@ -294,3 +294,361 @@ assumption that breaks at 1080p. Parked, not built.
    the metric that will fail to warn us about the resolution change**, while
    metric 1 absorbs it. Phase 9 should not read a comfortable 720p metric 2 as
    1080p headroom.
+
+---
+
+## 2026-09-02 — Phase 0 (session 3)
+- DID: repo re-oriented after the move to `~/dev/projection-engine`. Wrote the
+  A-series into the docs as a proper record (§0's new three-artefact rule, §1
+  v3.2, and the propagation), implemented A1/A2/A3/A8/A9/A10/A12/A13, measured
+  A11's hop breakdown, analysed A12's stall, recorded the conformant run and
+  superseded the non-conformant one. 69 unit tests, both typechecks clean.
+- MEASURED: bare 4-hop IPC relay floor **median 0.10 ms**; conformant §4 run
+  recorded below; A11 breakdown below.
+- BLOCKER: Gate 0 boxes 4 (relaunch) and 7 (keystone/auto-focus) are the
+  human's. A11's amendment is awaiting a ruling on the breakdown. A12's 67.70 ms
+  stall is unattributed pending re-runs.
+- NEXT: the human runs A13's pin-then-relaunch sequence and the A12 re-runs;
+  then A11's wording is settled and Gate 0 closes.
+
+`SPEC-CHANGE-PROPOSED` — **approved by the human in the two messages that
+requested it.** Recorded here for the audit trail, not pending. This is the
+table that §0's new rule now requires, and whose absence for A4/A5/A6 is the
+defect that prompted the rule.
+
+| # | Change | Reason | Alternative rejected |
+|---|---|---|---|
+| A1 | §4 gained a thermal-derate clause: k measured at minute 1 and minute 20 of a continuous run, the delta recorded at every gate; Phase 9's soak 5 min → **20 min**, its gate judged on **minute-20** k. §9's thermal row completed to match | The machine is fanless and an installation runs for hours while the protocol runs for 60 seconds. Every gate would pass cold and fail in the room — a failure mode that only appears in front of an audience | Leaving the 5-minute soak and treating thermals as a Phase 9 surprise |
+| A2 | §5 records that "the preview does not decode video" is load-bearing on **16 GB of unified CPU/GPU memory**, not tidiness, and must not be relaxed for preview fidelity. Symmetrically: the M4's hardware media engine may make one video layer cheaper than §5 assumes — **measure in Phase 3, assume nothing either way** | A future session reading §5 would have seen a preference, not a constraint, and "improve preview fidelity" is exactly the kind of reasonable-sounding change that spends the memory budget twice | Stating only the pessimistic half; it would have licensed over-conservative video caps at Phase 3 |
+| A3 | `scaleFactor` is a first-class concern from Phase 0: explicit in `render/host.ts`, reported by the HUD (backing store / CSS box / dpr), visible warning when the path is not 1:1 to the panel | Internal display 2×, projector 1×. "The canvas is 1280×720" says nothing about what reaches the panel. **A3 arriving late is precisely why the two-scaler problem surfaced as a surprise rather than as a designed-for case** | Handling DPR ad hoc at each draw site, which is how it stayed invisible the first time |
+| A7 | §4's projector block filled: Mars **II Pro**, 500 ANSI, mode in use 1280×720 @ 60.000003814697266 Hz scaleFactor 1, keystone and auto-focus both disableable. §10 row 1 **CLOSED** | The human fixed the macOS display mode outside the session, which removed the second scaler and made a conformant run possible | — |
+| A8 | §4 defines **k**, **k_dev** and **k_target** (the latter against an offscreen 1920×1080 `RenderTexture`), both recorded at every gate, ratio = measured fill-rate coefficient. Informational until Phase 9. Also: §8.1 fixes the golden-hash resolution in the test itself; "particle counts from pixel area" promoted out of `IDEAS` into a §11 Phase 4 note as a latent I-12 violation | Metric 2 times CPU; fill-rate work scales ~2.25× from 720p to 1080p and per-layer CPU work barely scales. **Metric 2 is structurally blind to the one change it was designated to guard.** A 1080p framebuffer costs nothing and needs no 1080p projector | Waiting for 1080p hardware to measure 1080p fill rate — it defers the number past every gate that would have used it |
+| A9 | §4: every metric validates its inputs; N unset / 0 / out-of-range → **INVALID**, never a derived percentage | Session 2's bug 2 produced a confident, precise, completely wrong gate number rather than an error. An instrument that emits a plausible wrong number is worse than one that fails loudly | Fixing only the specific N-propagation bug, which leaves the *class* of failure live for every future metric |
+| A10 | §4 gate metric 2 gates on **p99**; p95 retained, informational | Session 2's bug 4: M1 permits a 5% late tail and nearest-rank p95 over exactly that tail reports the **cheap** value, so between the two metrics nothing examined that tail at all | Tightening p95's threshold — it does not make p95 able to see the tail |
+| A12 | §4 gate metric 1 gained **clause 3, magnitude**: any interval over 3 × N attributed as engine / OS / unknown; more than one "unknown" per run is a gate failure | D2 folded the old 50 ms hard floor into a late *rate*, and "late" is binary above 1.5 × N, so a four-frame stall counted identically to a 1.6× one. The metric discarded exactly the magnitude that matters | Failing a gate on a single event in 3600 — too strict; requiring that it be *explained* is not |
+| A13 | §7 states the output-display pin policy: pin always wins, heuristic is a first-run fallback only, a stale pin degrades to a **framed, warned, non-fullscreen** window. Implemented and unit-tested | It was **not** what was built: `pickOutputDisplay` fell through a failed pin to `largest-external` and would have gone cursorless-fullscreen on whatever external happened to be attached. Discovered by the human asking, not by the code failing | Silently retargeting under I-13's "must not end the session" — it satisfies the invariant's letter and loses the show |
+| A11 | **NOT APPLIED.** Recorded in §1 v3.2 as an open item | The corrected threshold depends on where the ~28 ms actually goes, which was measured this session and is reported below for a ruling. Amending first and measuring second is how the wrong number gets frozen twice | Applying the proposed 66 ms immediately — it would have been right by luck, not by evidence |
+
+`DECISION` — **A6's orphaned material, re-attributed.** Session 2's log named
+A4/A5/A6 and recorded none of their content. With A1–A13 now in hand:
+
+- The §9 thermal row's "two effectively fanless devices / minute-1 vs minute-20"
+  text was built from **a forward reference inside A6 to A1**, as the human
+  confirmed. It was A1-by-proxy and was incomplete: it compared "both §4
+  metrics" and never mentioned k, the derate, or the 20-minute soak. Now
+  completed.
+- §4's **AC-power clause**, the **"wherever a gate says 'meets §4' it means both
+  metrics"** sentence, and Gate 0's **informational phone-video panel-latency**
+  box remain the best candidates for A6 proper — a measurement-conditions
+  amendment. **This is inference from content, not record**, and is marked as
+  such rather than asserted.
+- One item I previously listed as an A6 candidate is **not**: Gate 0's
+  primary-display fullscreen guard is **C6**, from session 1's `DECISION` block.
+  Corrected here so the attribution table is not wrong in the other direction.
+
+`MEASURED` — **the conformant Gate 0 run.** SPEC.md §4 protocol: 60 s continuous
+after a discarded 10 s warmup, output window only, HUD enabled, projector on AC,
+**at DEV_RESOLUTION on the projector at its native mode, scaleFactor 1, 1:1 to
+the panel — no scaler in the path.**
+
+```
+[output] mode: 1280x720, displayFrequency=60.00000366Hz, N=16.6667ms,
+         scaleFactor=1, uncapped=false
+[output] display "T749-fHD720" id=2 1280x720 @60.000003814697266Hz
+         scale=1 via largest-external fullscreen=true
+```
+
+| Metric | Result | Threshold |
+|---|---|---|
+| M1 presentation | **PASS** — late 0.00%, worst run 0, n=3601 | ≤5% late, zero runs of 3+ |
+| M1 worst interval | 17.8 ms (warm) | late threshold 25.0 ms |
+| M1 clause 3 (A12) | **no interval over 3 × N (50 ms) in this run** | ≤1 "unknown" |
+| M2 headroom | **PASS** — render p95 **0.40 ms = 2.4% of N** | ≤60% of N |
+| Round-trip | median 27.5 / p95 28.9 ms (n=297); median 28.2 / p95 29.2 ms (n=62) | p95 ≤ 33 ms |
+
+Physical checks confirmed by the human: fullscreen edge to edge, **all four
+magenta edges visible so no panel cropping**, no chrome, no cursor; test pattern
+correct on the wall; preview at 480×270 tracking; relaunch returned the output
+fullscreen on the projector with no manual step.
+
+**Superseding, not deleting — session 2's numbers are NON-CONFORMANT.** The
+table in the 2026-09-02 session-2 entry (the "Gate-shape, no CSP" and "Final
+config" rows, render p95 0.300 / 0.200 ms) was measured while macOS was
+negotiating **1920×1080** to the projector. The real chain was `1280×720 canvas
+→ CSS upscale to 1920×1080 → projector scaler → 720p panel`: **two scalers**,
+the exact condition A4 exists to eliminate. Those rows describe a scaled path
+and **must not be cited as Gate 0 numbers**. They are retained because the ADD-2
+uncapped finding in that same table (823 fps) is unaffected by the output
+scaling and still stands. The conformant p95 is **0.40 ms**, not 0.200 ms — the
+scaled run was, mildly, optimistic.
+
+`MEASURED` — **A11: where the ~28 ms goes.** Reported for a ruling; §4 not yet
+amended.
+
+Bare IPC floor, measured this session with a standalone Electron 44 harness
+reproducing the **same 4-hop topology** as the real path (renderer A → main →
+renderer B → main → renderer A), no rAF and no rendering, 1800 samples after 200
+discarded:
+
+```
+median 0.10 ms   p95 0.20 ms   p99 0.20 ms   max 0.50 ms
+```
+
+So transport is **0.4% of the round-trip**. The budget:
+
+| Hop | Cost | Evidence |
+|---|---|---|
+| 4-hop IPC transport | **0.10 ms** | harness above |
+| Pixi CPU render | **0.40 ms** | M2, conformant run |
+| Wait for the output's next rAF after the IPC lands | ~8.3 ms (0–16.7) | 1 × N quantization |
+| **Deliberate extra frame before the ack is sent** | **16.67 ms** | `render/host.ts` — see below |
+| Residual (rAF callback → presentation, editor-side input alignment) | ~2 ms | remainder |
+| **Total** | **~27.5 ms** | observed median |
+
+Answering the three questions directly:
+
+1. **Yes, the echo is sent from inside a rAF callback — and worse than
+   suspected.** `render/host.ts` calls `onPresented` at the *top of the
+   following* rAF iteration, not at the end of the one that rendered. That is a
+   full frame, by design, so that the number describes something *presented*
+   rather than merely submitted. It is 16.67 ms of the 28.
+2. **No, the React path is not throttled or coalesced by us.** `push()` captures
+   `t0` synchronously inside `onChange` and sends before React re-renders.
+   Chromium does coalesce the input events themselves to the frame cadence,
+   which is what explains the ~1.4 ms spread: `t0` is itself vsync-aligned, so
+   the phase offset between send and the output's next rAF is near-constant
+   within a drag. The human's read was right — a systematic floor, not jitter.
+3. **0.10 ms.** Everything above that is ours, and ~25 ms of it is two
+   deliberate frame waits.
+
+**The consequence that matters for the ruling.** The wall showed the change one
+full frame *before* the ack was sent. So implied one-way time-to-photons is
+**≈ 27.5 − 16.7 = 10.8 ms ≈ 0.65 × N** — comfortably inside one frame, never
+mind two. The instrument is conservative by roughly a frame, exactly as A11
+suspects, and the proposed 66 ms round-trip gate is generous but not wrong.
+
+**Recommendation, not applied:** do not simply "echo on receipt" — that would
+measure transport and stop measuring presentation, discarding the property that
+makes the number trustworthy. Instrument **both**: a transport ack on receipt
+and the existing presented ack, report both, gate on the presented one, and
+state the implied one-way figure beside it. This matters more at Gate 5, where
+region drags carry real scene state rather than one scalar, and the transport
+number is the one that will move.
+
+`MEASURED` — **A12: attributing the 67.70 ms stall.** Static analysis done;
+re-runs still needed.
+
+**First, a discrepancy the human should know about: the 67.70 ms event is not
+from the conformant run.** That run reports `worstInterval` 17.8 ms at n=3601,
+and `worstInterval` is a monotonic maximum within a measurement window — it
+cannot fall from 67.70 to 17.8. The `n=3057 / 67.70 ms` line and the clean
+3601-sample summary are therefore **two different windows**. The gate run is
+clean; a *different* run carries the stall. Both facts stand, and the stall
+still needs attributing.
+
+Hypotheses, tested against the code:
+
+- **Synchronous metrics log flush — RULED OUT.** `logMetricsPeriodically` runs
+  in the **main** process, not the output renderer, and is throttled to 10 s. It
+  cannot block the renderer's rAF loop. The human was right to ask; it is not
+  this.
+- **A fixed sample-count boundary — RULED OUT.** The sample window is trimmed by
+  **time** (`windowMs`, 60 s), not by count. There is no count boundary at 3057
+  for a hitch to sit on.
+- **The instrument's own allocation churn — the leading candidate, and it is
+  ours.** `report()` runs 4×/s. As written it did `samples.map(s => s.render)`
+  — a fresh ~3600-element array — and then `percentile()` did `[...values].sort()`,
+  another full copy. That is **~29,000 array elements per second of garbage on
+  the same thread as the render loop**, on top of 3600 `Sample` objects per
+  minute. n=3057 is ≈51 s past warmup, near the point where the 60 s sliding
+  window begins re-slicing every frame. A major GC there is entirely plausible,
+  and a 67.7 ms pause is the right order of magnitude for one.
+  **Fixed this session**: one reusable scratch array, one sort, both percentiles
+  read from it. Roughly two-thirds of the churn is gone.
+
+**Prediction to test in the re-runs:** if the stall was the instrument's own GC,
+it should vanish or move. If it recurs at ~the same n with the fix in place, it
+is ours but not this; if it wanders or disappears, it is the OS and is recorded
+as such. Under A12's new clause a single such event attributed "unknown" is
+permitted — two are not.
+
+`DECISION` — `CLAUDE.md`'s Working style measurement bullet is brought in line
+with §4 (60 s after a discarded 10 s warmup, DEV_RESOLUTION through Phase 8,
+both metrics plus k_dev and k_target). This was raised as a
+`SPEC-CHANGE-PROPOSED` in session 1 and left unmade for want of scoped
+permission; approved in this session's message. The stale text had survived
+three sessions and would have had a future session measuring at 1920×1080
+against the wrong protocol.
+
+`DECISION` — **checklist-vs-reality disagreement, logged per `CLAUDE.md`.** The
+Phase 0 deliverable read "`.gitignore` written; git repo not yet initialised —
+awaiting go-ahead", but the repo was initialised and commit `6f9c724` exists
+with a clean tree. `CHECKLIST.md` was wrong, not `SPEC.md`; the box is now `[x]`.
+
+`GATE-FAILED` — not a gate attempt; a statement of what is still open at Gate 0.
+Four boxes of eight remain, none of them silently downgraded:
+
+1. **Box 4, relaunch** — held deliberately (A13). The relaunch that was run
+   resolved via `largest-external`, so it exercised the auto-picker, not
+   persistence. Sequence below.
+2. **Box 7, keystone / auto-focus** — §4 now records YES for both, but the box
+   is the human's physical check and a spec entry is not a verification.
+3. **Box 8, projector-panel latency** — informational, human's, non-blocking.
+4. **A12's stall** — attribution outstanding.
+
+`DECISION` — **A13: the exact pin-then-relaunch sequence, and what the log now
+prints.** The human's assumed sequence was right; the missing piece was that the
+old log said `via largest-external` / `via exact-id` — reason slugs that do
+distinguish the paths but do not *say* which is a pin. It now labels them
+explicitly. Steps:
+
+1. Launch. Note the `[output] display ... via ...` line. Expect
+   **`via HEURISTIC, no pin stored (first-run-largest-external)`**, since
+   `config/settings.json` currently has `"outputDisplay": null`.
+2. In the editor's **Output display** panel, click **`T749-fHD720`**. The output
+   window reopens immediately; the line should now read
+   **`via PINNED (pinned-exact-id)`**.
+3. Confirm on disk: `config/settings.json` → `outputDisplay` is a fingerprint
+   object (`id`, `label`, `width`, `height`, `scaleFactor`, `internal`), no
+   longer `null`.
+4. Quit fully (⌘Q, not just closing a window — macOS keeps the app alive).
+5. Relaunch. **The line that closes box 4 is `via PINNED (pinned-exact-id)`**,
+   or `via PINNED (pinned-fingerprint)` if macOS reassigned the display id
+   across the restart — both are pins and both count. **`via HEURISTIC` in any
+   form does not close the box**, even if the projector is correct, because that
+   is the auto-picker agreeing by coincidence.
+6. Optional, and the case A13 was actually written for: with a pin stored,
+   unplug the projector and relaunch with a different external attached. Expect
+   `via HEURISTIC after STALE PIN (stale-pin-fallback)`, a **framed** window, and
+   the warning "PINNED DISPLAY NOT FOUND". It must not go fullscreen.
+
+`IDEAS` — parked, not built. `MAX_MAGNITUDE_EVENTS` caps A12's event list at 32
+per window; a run pathological enough to exceed that is already failing, but if
+Phase 9's 20-minute soak needs the full distribution rather than the first 32,
+the cap becomes a histogram. Phase 9 decision, not now.
+
+---
+
+## 2026-09-02 — Phase 0 (session 3, part 2)
+- DID: applied the A11 and A12 rulings, added A14 and implemented it, and
+  audited the whole Phase 0 measurement path against the new clause. The audit
+  found four violations, one of them introduced earlier in this same session.
+  79 unit tests, typechecks and build clean.
+- MEASURED: bare 4-hop IPC transport floor **0.10 ms median** — recorded here as
+  the baseline every later phase regresses against (below).
+- BLOCKER: Gate 0 box 2 has **reopened** as a consequence of the A11 ruling, see
+  below. Boxes 4 and 7 remain the human's.
+- NEXT: human runs A13's sequence, one slider drag for transport, and three
+  conformant 60 s runs for A12 confirmation plus k_dev/k_target.
+
+`SPEC-CHANGE-PROPOSED` — approved in the message that requested them.
+
+| # | Change | Reason | Alternative rejected |
+|---|---|---|---|
+| A11 | §4 records **two** latency figures, never conflated: transport (editor event → output receipt, no frame wait, **p95 ≤ 5 ms**) and presented (acked from the frame after the one that rendered, **round-trip p95 ≤ 66 ms**), with the implied one-way stated beside them. Propagated to Gate 0 and Gate 5 | D4 specified a round-trip and judged it against a one-way budget. The measured split shows **~89% of the 28 ms is frame cadence, not work** — the criterion was measuring cadence and calling it latency | Moving the ack out of rAF, as originally instructed. It would have removed the extra frame and **broken the metric**: that frame is what makes the number describe something *presented* rather than merely submitted |
+| A14 | §4 gains a standing clause: metrics code allocates nothing per-frame on the render thread, does no synchronous I/O, and reports its own cost as a HUD row; every future metric is reviewed against it before judging a gate | The instrument has now been the bug three times — N=0, the warmup-boundary leak, `report()`'s allocation churn. Three fixes address three instances; a clause addresses the class | Fixing the churn and moving on, which is what the first two occasions did |
+
+`MEASURED` — **the transport floor, for regression against.** Standalone
+Electron 44 harness, same 4-hop topology as the real path (renderer A → main →
+renderer B → main → renderer A), no rAF, no rendering, 1800 samples after 200
+discarded:
+
+```
+median 0.10 ms   p95 0.20 ms   p99 0.20 ms   max 0.50 ms
+```
+
+**This is the number every later phase regresses against.** It is the floor for
+an empty payload; Gate 5's payload is a region transform, Phase 6's is scene
+state, and the gap between this floor and the live transport figure is the cost
+of what we put on the wire.
+
+`MEASURED` — **A12, recorded as ruled, not closed.**
+
+> **Origin:** instrument allocation churn in `report()`, leading candidate,
+> fixed. **Not observed in the conformant Gate 0 run.** **Unconfirmed** — the
+> confirming re-runs were not performed. If a >3 × N interval recurs at Phase 1
+> or later, this is the first place to look and the fix is already in.
+
+M1 clause 3 stands as written and now has its first real use: the next
+unexplained interval over 3 × N is attributed against a **fixed** instrument, so
+a recurrence kills the churn hypothesis and teaches us something instead of
+re-litigating this one.
+
+`MEASURED` — **A14 audit of the Phase 0 measurement path.** Four violations
+found, all fixed. Listed with what each one actually cost, because "the
+instrument is clean now" is not a finding.
+
+1. **A per-frame array allocation in the sample window — the worst one, and I
+   introduced it earlier in this same session's fix.** `notePresentation` ended
+   with `this.samples = this.samples.slice(drop)`. At steady state the oldest
+   sample is always past the cutoff, so **that ran every frame**, allocating a
+   fresh ~3600-element array 60 times a second — an order of magnitude more
+   churn than the `report()` path I had just "fixed", sitting three lines away
+   from it. Replaced with a preallocated ring buffer (three `Float64Array`s,
+   head + count, in-place time eviction). **This is the A14 pattern exactly: I
+   fixed the instance in front of me and left a larger instance of the same
+   thing in the same function.**
+2. **A per-frame object allocation.** Each sample was a `{t, interval, render}`
+   object — 3600 objects a minute of GC pressure on the render thread. Gone with
+   the ring; samples are now three numbers in typed arrays.
+3. **A synchronous layout read on the metrics tick, also mine, also this
+   session.** `readScale()` calls `getBoundingClientRect()`, which forces a
+   layout flush; the 250 ms tick called it 4×/s on the render thread for a value
+   that only changes on resize. Now cached and invalidated on `resize` and on
+   an explicit `resize()` call.
+4. **`magnitude.filter()` on eviction** allocated a new array per frame once any
+   event existed. Replaced with in-place compaction.
+
+**The instrument now reports itself**, per A14: `noteInstrumentCost` times the
+metrics call every frame (one extra `performance.now()`), `noteInstrumentTick`
+times the whole report + format + DOM-write tick, and the HUD carries an
+`instrument` row with per-frame max, per-frame mean, tick cost, and max as a
+share of N.
+
+`DECISION` — **what remains on the render thread, and why.** Honest inventory
+after the fixes; none of these are per-frame allocations, but they are not free
+and A14 says the overhead must be visible rather than inferred:
+
+- **The HUD's own draw is on the render thread.** It is DOM, not Pixi, so it is
+  *outside* the timed `renderer.render()` call — that was a deliberate Phase 0
+  choice so the instrument does not inflate metric 2 — but `el.textContent = …`
+  4×/s still invalidates style and layout for that element on the same thread.
+  Off-main-thread compositing does not change this. It is now inside the
+  `instrumentTick` measurement, so it is reported rather than hidden.
+- **`assertJsonOnly` on the presented ack** walks a two-key object and allocates
+  a `Set`, inside the rAF callback, once per acked frame — so only during a
+  drag, but every frame during one. Kept: I-7's guard is mechanised on purpose
+  and a drag is not a gate run. Now visible in `instrumentTick`'s sibling
+  per-frame figure.
+- **`assertJsonOnly` on the metrics payload** recursively walks the whole
+  `MetricsReport`, `magnitudeEvents` included, 4×/s. Bounded and inside the tick
+  measurement.
+- **`report()`'s percentile sort** is one in-place sort of up to 3600 doubles,
+  4×/s, over a preallocated scratch. Measured by the tick.
+- **`magnitude.map()` in `report()`** allocates, bounded at 32 entries, 4×/s.
+  Not per-frame; left alone.
+- **The main-process metrics log** (`console.log`, 10 s cadence) is in the main
+  process and cannot block the output renderer's rAF loop. Confirmed, not
+  assumed — this was one of the A12 hypotheses.
+
+`GATE-FAILED` — **Gate 0 box 2 has reopened**, as a direct consequence of the
+A11 ruling, and is being recorded rather than quietly carried:
+
+- **Presented latency: PASS.** p95 28.9 ms and 29.2 ms against the new ≤66 ms.
+- **Transport latency: NOT MEASURED.** The gate condition is new, the
+  instrumentation landed in this session, and no live drag has exercised it. The
+  0.10 ms bare-IPC harness figure **bounds** it but is not the same measurement:
+  it excludes the editor's event dispatch, the real payload, and the output
+  renderer's receipt handler.
+
+Closing box 2 needs **one slider drag** on the next run. Marking it `[x]` on the
+strength of the old criterion would be exactly the "silently downgrade a gate"
+failure `CLAUDE.md` forbids — the criterion got *stricter* and more informative,
+and the box has to be re-earned.
+
+`IDEAS` — parked. The A14 clause implies a test that no per-frame allocation
+occurs, not merely that the numbers come out right. Node exposes enough
+(`process.memoryUsage()` deltas over a fixed frame count) to assert it crudely,
+but it is flaky under GC timing. Worth revisiting at Phase 9 when the soak
+harness exists and can watch heap slope over 20 minutes — that is the honest
+place to catch a regression of this class.

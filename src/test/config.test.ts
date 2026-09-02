@@ -58,7 +58,7 @@ describe('pickOutputDisplay — Gate 0 relaunch without reconfiguration', () => 
   it('matches the saved display by id when the id is still valid', () => {
     const pick = pickOutputDisplay([internal, projector], 1, printOf(projector));
     expect(pick.display?.id).toBe(2);
-    expect(pick.reason).toBe('exact-id');
+    expect(pick.reason).toBe('pinned-exact-id');
     expect(pick.needsConfirmation).toBe(false);
   });
 
@@ -70,7 +70,7 @@ describe('pickOutputDisplay — Gate 0 relaunch without reconfiguration', () => 
     });
     const pick = pickOutputDisplay([internal, reconnected], 1, printOf(projector));
     expect(pick.display?.id).toBe(99);
-    expect(pick.reason).toBe('fingerprint');
+    expect(pick.reason).toBe('pinned-fingerprint');
   });
 
   it('does not match a saved external display against the internal one', () => {
@@ -78,14 +78,14 @@ describe('pickOutputDisplay — Gate 0 relaunch without reconfiguration', () => 
     const saved = { ...printOf(projector), id: 1 };
     const pick = pickOutputDisplay([internal, projector], 1, saved);
     expect(pick.display?.internal).toBe(false);
-    expect(pick.reason).toBe('fingerprint');
+    expect(pick.reason).toBe('pinned-fingerprint');
   });
 
   it('picks the largest detected external display when nothing is saved', () => {
     const small = display({ id: 3, size: { width: 800, height: 600 } });
     const pick = pickOutputDisplay([internal, small, projector], 1, null);
     expect(pick.display?.id).toBe(2);
-    expect(pick.reason).toBe('largest-external');
+    expect(pick.reason).toBe('first-run-largest-external');
     expect(pick.needsConfirmation).toBe(false);
   });
 
@@ -104,7 +104,7 @@ describe('pickOutputDisplay — Gate 0 relaunch without reconfiguration', () => 
 
   it('demands confirmation for the internal display even when it was saved', () => {
     const pick = pickOutputDisplay([internal], 1, printOf(internal));
-    expect(pick.reason).toBe('exact-id');
+    expect(pick.reason).toBe('pinned-exact-id');
     expect(pick.needsConfirmation).toBe(true);
   });
 
@@ -118,5 +118,66 @@ describe('pickOutputDisplay — Gate 0 relaunch without reconfiguration', () => 
     const pick = pickOutputDisplay([internal], 1, printOf(projector));
     expect(pick.display?.id).toBe(1);
     expect(pick.reason).toBe('primary-fallback');
+  });
+});
+
+/**
+ * A13: an explicit pin always wins; the heuristic is a first-run fallback only.
+ * These are the cases that decide whether a projector comes back on the wall or
+ * a stranger goes fullscreen mid-show.
+ */
+describe('pickOutputDisplay — A13 pin policy', () => {
+  const otherExternal = display({
+    id: 3,
+    label: 'DELL U2720Q',
+    size: { width: 2560, height: 1440 },
+  });
+
+  it('a resolved pin is flagged pinned, not heuristic', () => {
+    const pick = pickOutputDisplay([internal, projector], 1, printOf(projector));
+    expect(pick.pinned).toBe(true);
+    expect(pick.stalePin).toBe(false);
+    expect(pick.needsConfirmation).toBe(false);
+  });
+
+  it('a pin wins over a physically larger external display', () => {
+    // The heuristic alone would take the 2560x1440 Dell. The operator pinned
+    // the 1280x720 projector, and data beats a guess.
+    const pick = pickOutputDisplay([internal, projector, otherExternal], 1, printOf(projector));
+    expect(pick.display?.id).toBe(2);
+    expect(pick.pinned).toBe(true);
+    expect(pick.reason).toBe('pinned-exact-id');
+  });
+
+  it('a stale pin never silently retargets another external at fullscreen', () => {
+    // Projector unplugged, a different external present. The session must
+    // survive (I-13) but must not go cursorless-fullscreen on a stranger.
+    const pick = pickOutputDisplay([internal, otherExternal], 1, printOf(projector));
+    expect(pick.display?.id).toBe(3);
+    expect(pick.pinned).toBe(false);
+    expect(pick.stalePin).toBe(true);
+    expect(pick.reason).toBe('stale-pin-fallback');
+    expect(pick.needsConfirmation).toBe(true);
+  });
+
+  it('first run with no pin uses the heuristic and may go fullscreen', () => {
+    const pick = pickOutputDisplay([internal, otherExternal], 1, null);
+    expect(pick.stalePin).toBe(false);
+    expect(pick.reason).toBe('first-run-largest-external');
+    expect(pick.needsConfirmation).toBe(false);
+  });
+
+  it('a pin that resolves after a cable reconnect stays a pin, not a guess', () => {
+    // Same panel, new Display.id — the fingerprint is what actually matches.
+    const reconnected = display({
+      id: 99,
+      label: projector.label,
+      size: { width: 1280, height: 720 },
+    });
+    const pick = pickOutputDisplay([internal, reconnected], 1, printOf(projector));
+    expect(pick.display?.id).toBe(99);
+    expect(pick.pinned).toBe(true);
+    expect(pick.stalePin).toBe(false);
+    expect(pick.needsConfirmation).toBe(false);
   });
 });

@@ -14,6 +14,11 @@ export const TARGET_RESOLUTION = { width: 1920, height: 1080 } as const;
 export const CH = {
   /** editor -> main -> output: one parameter value. */
   paramSet: 'param:set',
+  /**
+   * output -> main -> editor: the same token, sent the instant the output
+   * renderer RECEIVES it, before any frame wait (A11 transport latency).
+   */
+  paramRecv: 'param:recv',
   /** output -> main -> editor: the same token, once the change has been presented. */
   paramAck: 'param:ack',
   /** main -> renderer: resolution, display mode, measurement-mode state. */
@@ -57,6 +62,18 @@ export interface ParamAck {
   t0: number;
 }
 
+/**
+ * A11: SPEC.md §4 records two latency figures and never conflates them.
+ * Transport is the one that moves under load; presented is conservative by one
+ * frame by construction. This is the transport half.
+ */
+export type ParamRecv = ParamAck;
+
+/** A11, SPEC.md §4: transport latency gate, p95. */
+export const TRANSPORT_GATE_MS = 5;
+/** A11, SPEC.md §4: presented round-trip gate, p95. Four frames at 60 Hz. */
+export const PRESENTED_GATE_MS = 66;
+
 export interface OutputConfig {
   width: number;
   height: number;
@@ -72,16 +89,92 @@ export interface OutputConfig {
   hudVisible: boolean;
 }
 
+/**
+ * A12: a presentation interval over 3 x N. Rate and magnitude are separate
+ * facts, so these are carried individually and attributed in `BUILD_LOG.md`.
+ */
+export interface MagnitudeEvent {
+  /** Post-warmup sample number, so a recurring hitch can be spotted by its n. */
+  index: number;
+  /** The offending interval, ms. */
+  intervalMs: number;
+  /** Seconds since the measurement window opened. */
+  atSeconds: number;
+}
+
+/**
+ * A8: the render-multiplier probe. `k` is how many times the current scene fits
+ * into one frame interval at a given resolution, GPU included.
+ */
+export interface KReport {
+  /** k at DEV_RESOLUTION (1280x720). */
+  dev: number;
+  /** k against an offscreen 1920x1080 RenderTexture. */
+  target: number;
+  /** k_dev / k_target — the measured fill-rate coefficient. */
+  ratio: number;
+  /** Per-render cost behind k_dev, ms, GPU sync included. */
+  devMs: number;
+  /** Per-render cost behind k_target, ms, GPU sync included. */
+  targetMs: number;
+  /** Renders per resolution in the probe burst. */
+  iterations: number;
+}
+
+/**
+ * A3: scaleFactor is a first-class concern. One backing-store pixel must land
+ * on exactly one panel pixel, or something between us and the wall is scaling.
+ */
+export interface ScaleReport {
+  /** Pixi backing store, device pixels. */
+  bufferWidth: number;
+  bufferHeight: number;
+  /** The CSS box the canvas occupies. */
+  cssWidth: number;
+  cssHeight: number;
+  /** `window.devicePixelRatio` in the window holding the canvas. */
+  dpr: number;
+  /** True when buffer == css x dpr on both axes: no scaler in the path. */
+  oneToOne: boolean;
+}
+
+/**
+ * A14: the measurement apparatus is subject to the budget it measures, so it
+ * reports its own cost rather than leaving it to be inferred from a stall.
+ */
+export interface InstrumentCost {
+  /** Worst per-frame cost of the metrics call itself, ms. */
+  perFrameMaxMs: number;
+  /** Mean per-frame cost of the metrics call itself, ms. */
+  perFrameMeanMs: number;
+  /** Cost of one report + format + DOM write tick, ms. */
+  tickMs: number;
+  /** `perFrameMaxMs` as a share of N. Anything visible here is a problem. */
+  maxShareOfNominal: number;
+}
+
 export interface MetricsReport {
   /** Nominal frame interval N in ms, derived from `displayFrequency`. */
   nominalMs: number;
+  /**
+   * A9: false when N is unset, zero, or outside a plausible display-mode range.
+   * Every derived figure below is then meaningless and must not be recorded.
+   */
+  valid: boolean;
+  /** A9: why the report is invalid; empty string when valid. */
+  invalidReason: string;
   /** Gate metric 1: share of presentation intervals over 1.5 x N, as a fraction. */
   lateFraction: number;
   /** Gate metric 1: longest run of consecutive late presentations. */
   worstLateRun: number;
-  /** Gate metric 2: Pixi CPU render duration p95, ms. */
+  /** A12, gate metric 1 clause 3: intervals over 3 x N, each needing attribution. */
+  magnitudeEvents: MagnitudeEvent[];
+  /** A10: gate metric 2 gates on p99, ms. */
+  renderP99Ms: number;
+  /** A10: gate metric 2 as a share of N. Gate is <= 0.60. */
+  renderP99OfNominal: number;
+  /** A10: p95 is retained but informational — it is blind to M1's permitted tail. */
   renderP95Ms: number;
-  /** Gate metric 2 as a share of N. Gate is <= 0.60. */
   renderP95OfNominal: number;
   /** Observed presentation rate, fps. */
   fps: number;
@@ -89,8 +182,14 @@ export interface MetricsReport {
   samples: number;
   /** True once the 10-second warmup has been discarded (SPEC.md §4). */
   warmedUp: boolean;
-  /** Informational, not gated: worst interval seen including warmup. */
+  /** Informational, not gated: worst post-warmup interval in the window. */
   worstIntervalMs: number;
+  /** A8: null until the probe is run. */
+  k: KReport | null;
+  /** A3: null until the renderer reports its geometry. */
+  scale: ScaleReport | null;
+  /** A14: what the instrument itself costs. */
+  instrument: InstrumentCost;
 }
 
 export interface DisplayInfo {
