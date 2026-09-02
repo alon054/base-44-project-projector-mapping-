@@ -251,10 +251,58 @@ exists. The probe may well be measurable there and unmeasurable here.
 
 ---
 
+## 4.5 Run 5 — three attempts, one completed, provocations not performed
+
+Run 5 was attempted three times. It exposed a defect before it produced data.
+
+**Attempt 1 — aborted, and it found a bug.** The run restarted endlessly: cue 1
+fired, focus was lost as expected at t≈16–18 s, and then
+`openOutputWindow(displaysSelect)` tore the output window down and the whole
+70-second window began again. Six cycles, never reaching cue 2. **Cause:**
+re-selecting a display in the editor's picker destroyed and recreated the output
+window *even when the requested display was the one already in use*. This had
+been filed as a parked idea after runs 1–4; it was in fact blocking the
+measurement, and it is a live-show hazard in its own right — an output window
+that restarts whenever a control is touched drops the frame, the power-save
+blocker and the calibration state. **Fixed:** the pin is still persisted, but a
+re-select of the current display leaves the live window alone. Seven such
+no-op selects were logged in the next attempt, each one a teardown avoided.
+
+**Attempt 2 — partial, and informative.** Reached cue 1 and cue 2 with no
+teardown. A genuine focus-loss / focus-gain pair occurred at **t = 37.63 s and
+t = 37.98 s** inside the live window, together with an application `activate`.
+The window ran to n=3044 (~51 s post-warmup). **`worstInterval` stayed at
+17.70 ms throughout. Zero late frames, zero clause-3 events.** The attempt ended
+when the picker was used to select the built-in display and then the projector
+again, which legitimately reopened the window.
+
+**Attempt 3 — completed, clean, but unprovoked.**
+
+| | run5-disturb (attempt 3) |
+|---|---|
+| samples | 3600 · fps 59.999 |
+| M1 rate | **PASS** — 0.0000% late, worst run 0 |
+| worst interval | 17.80 ms |
+| **M1 clause 3** | **none** |
+| M2 p99 | 0.400 ms = **2.40% of N** |
+| instrument max / mean | 0.200 ms (1.20%) / 0.0052 ms (0.031%) |
+| `[event]` lines | **none** |
+
+All three cues fired on schedule. **No focus, blur or visibility event was
+recorded, so none of the three provocations was performed** — and the operator
+confirms independently that the speed slider was not touched in this run or in
+the earlier ones, which is consistent with the empty event list. This is therefore a
+fourth clean control run, not a disturbance test. It does usefully **replace the
+outstanding run 3** — same synchronous-stdout configuration, single window,
+undisturbed — with the caveat that the cue overlay was drawing a countdown
+inside the window. That overlay cost nothing measurable: this run had the
+*lowest* p99 (2.40% of N) and the *lowest* instrument max (1.20%) of any run.
+
 ## 5. Findings
 
-**Did an interval over 3 × N recur?** **No.** Zero in three valid runs, 10,802
-samples. Worst interval anywhere was 17.80 ms.
+**Did an interval over 3 × N recur?** **No.** Zero in four valid runs, 14,402
+samples. Worst interval anywhere was 17.80 ms — against a late threshold of
+25.0 ms, so not one late frame anywhere in the set.
 
 **Did the stall follow the pipe?** **No.** Run 4 was piped exactly as the
 original failing run was, and was the *cleanest* of the three — lowest p99
@@ -289,9 +337,10 @@ is a third untested candidate.
 |---|---|
 | stdout pipe blocking the writer | **eliminated** — empirically and architecturally |
 | instrument allocation churn (earlier 67.7 ms stall) | fixed; **unconfirmed**, never observed in a conformant run |
-| plain keyboard focus loss | **ruled out** — observed repeatedly with no stall |
-| surface suspend/resume: Mission Control, Spaces switch, occlusion | **open, leading** — requires the operator-driven run |
-| parameter drag concurrent with a switch | **open, untested** |
+| plain keyboard focus loss / app switch | **ruled out** — performed deliberately at cue 1 in six separate cycles of run 5 attempt 1, and observed again at t≈37.6 s inside attempt 2's live window, with an app `activate`. Not one interval over 3 × N in any of them |
+| surface suspend/resume: Mission Control, Spaces switch, occlusion | **open, leading, still unperformed** — the one provocation never actually executed |
+| parameter drag concurrent with a switch | **eliminated** — the operator confirms the speed slider was never touched, in run 5 or in the original run that produced the stall. It was one of the two possibilities originally offered for t=131 s; it is now out |
+| output window teardown from a picker re-select | **found and fixed** — not the original stall (it postdates it), but a real live-show hazard uncovered by run 5 |
 
 ---
 
@@ -310,7 +359,7 @@ is a third untested candidate.
 | Projector keystone / auto-focus disable to passthrough | operator's physical check |
 | Projector-panel latency by phone video | informational, operator's |
 
-**Three clean runs are not an attribution.** They eliminate one hypothesis and
+**Four clean runs are not an attribution.** They eliminate one hypothesis and
 narrow a second. The clause-3 event needs a positive identification, which needs
 a run that deliberately provokes it. That run is §7, and it needs a human.
 
@@ -410,8 +459,16 @@ cause**, and the cue it belongs to names the mechanism:
 
 ### 7.4 Still outstanding
 
-- **Run 3** — needs redoing on an idle machine; both attempts were interrupted by
-  a display-picker click.
+- **Run 3** — effectively satisfied by run 5 attempt 3 (same configuration,
+  clean, undisturbed), with the cue-overlay caveat noted in §4.5.
+- **The Mission Control provocation** — now the *only* remaining named
+  candidate, and the one arm of run 5 that has never actually been executed.
+  With focus loss ruled out by provocation and the drag eliminated by the
+  operator's own account, the named-candidate list is nearly exhausted: if
+  Mission Control also comes back clean, the honest outcome is that the original
+  event stays **unknown**, which clause 3 permits for a single event. It is a single
+  90-second run: launch with the cues, then at cue 2 press F3, wait two seconds,
+  press Esc. Cues 1 and 3 can be skipped; cue 1 is now answered.
 - **A8's k probe** — defective, awaiting a ruling on the proposed fix.
 - **The 67.70 ms stall from the earlier session** — origin recorded as instrument
   allocation churn, fixed, never confirmed.

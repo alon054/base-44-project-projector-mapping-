@@ -402,7 +402,27 @@ function wireIpc(): void {
   ipcMain.handle(CH.displaysSelect, (_e, id: number): boolean => {
     const d = screen.getAllDisplays().find((x) => x.id === id);
     if (!d) return false;
+    // The pin is always persisted — that is what the operator asked for.
     saveSettings({ outputDisplay: fingerprint(d) });
+
+    // ...but re-picking the display the output is ALREADY on must not tear down
+    // a live output window. Destroying and recreating it drops the frame, the
+    // power-save blocker and the measurement window for no change at all. Same
+    // class as the self-triggering reopen fixed in Phase 0: a live show does not
+    // survive an output window that restarts whenever a control is touched.
+    const alive = outputWin !== null && !outputWin.isDestroyed();
+    if (alive && currentDisplay !== null && currentDisplay.id === d.id) {
+      console.log(
+        `[display] select "${d.label}" id=${d.id} — already the output display; ` +
+          'pin persisted, live window left alone',
+      );
+      return true;
+    }
+
+    console.log(
+      `[display] select "${d.label}" id=${d.id} — was ` +
+        `${currentDisplay ? `id=${currentDisplay.id}` : 'none'}; reopening`,
+    );
     openOutputWindow('displaysSelect');
     return true;
   });

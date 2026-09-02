@@ -909,3 +909,77 @@ even when the requested display is the one already in use. Harmless in the
 editor, a hazard in a show — the same class as the self-triggering reopen fixed
 in session 2. A guard making the select idempotent is a small fix, deliberately
 **not** applied mid-measurement-series so that runs 1, 2 and 4 share one binary.
+
+---
+
+## 2026-09-02 — Phase 0 (session 3, part 5)
+- DID: drove run 5 three times. Attempt 1 exposed a real defect and was aborted;
+  the fix landed; attempt 3 completed clean. Report updated.
+- MEASURED: **four valid runs now, zero intervals over 3 × N in 14,402 samples.**
+  Keyboard focus loss / app switching **ruled out** as the stall mechanism.
+- BLOCKER: Gate 0 open. The Mission Control provocation is the last untested
+  candidate and was never actually performed in any attempt.
+- NEXT: one 90-second run with cue 2 only — the operator presses F3, waits two
+  seconds, presses Esc.
+
+`DECISION` — **a real bug, found by run 5 rather than by a test.** Re-selecting
+a display in the editor's picker destroyed and recreated the output window
+**even when the requested display was the one already in use**. During run 5
+attempt 1 this restarted the measurement six times: cue 1 fired, focus was lost
+as scripted, and then a picker select tore the window down and the 70-second
+window began again. It never reached cue 2.
+
+It had been parked as an `IDEAS` note after runs 1–4 on the grounds that it was
+"harmless in the editor, a hazard in a show". That judgement was wrong in one
+respect — it was actively preventing the measurement — and the parking was
+correct only in that it should not have been changed mid-series. Fixed now that
+the series is complete: the pin is still persisted on every select, but a
+re-select of the display already in use leaves the live window alone. Seven
+such no-op selects were logged in the following attempt, each a teardown
+avoided. Same class as the self-triggering reopen fixed in session 2: **an
+output window that restarts whenever a control is touched is not show
+equipment.**
+
+`MEASURED` — **H2's focus-loss arm is RULED OUT, with deliberate provocation.**
+
+- Attempt 1: the cmd-tab at cue 1 was performed in **six separate cycles**,
+  each producing a logged `focus LOST` at t≈16–18 s. **No clause-3 event in
+  any.**
+- Attempt 2: a genuine focus-loss/focus-gain pair at **t = 37.63 / 37.98 s**
+  inside a live window, with an application `activate`, running on to n=3044.
+  **`worstInterval` stayed 17.70 ms. Zero late frames.**
+
+Keyboard focus loss and application switching do not produce the stall. This was
+the cheap half of H2 and it is now closed by measurement rather than by argument.
+
+`MEASURED` — **run 5 attempt 3: completed, clean, unprovoked.** n=3600, M1
+0.0000% late, worst run 0, worst interval 17.80 ms, **zero clause-3**, M2 p99
+0.400 ms = 2.40% of N, instrument max 0.200 ms = 1.20%, mean 0.0052 ms.
+
+All three cues fired on schedule and **no focus, blur or visibility event was
+recorded — so none of the provocations was performed.** Reported as a fourth
+clean control run, not as a disturbance test. It does replace the outstanding
+run 3: same synchronous-stdout configuration, single window, undisturbed. Caveat
+recorded: the cue overlay was drawing a countdown inside the window. It cost
+nothing measurable — this run had the lowest p99 and the lowest instrument max
+of the set.
+
+`GATE-FAILED` — Gate 0 still open, and the reason has narrowed to one thing.
+Four clean runs eliminate the pipe and rule out focus loss, but **four clean runs
+are not an attribution**. The surviving candidate — surface suspend/resume via
+Mission Control or a Spaces switch — has never actually been executed, in any
+attempt. Everything else in the run set is now answered.
+
+`DECISION` — **the parameter-drag candidate is ELIMINATED, on the operator's
+own account.** They confirm the speed slider was not touched in run 5, nor in
+the original run that produced the 233/283 ms event — consistent with run 5's
+empty event list. The drag was one of the two possibilities originally offered
+for t=131 s; the other was the terminal switch, which deliberate provocation has
+now ruled out.
+
+That leaves **Mission Control / Spaces surface suspend-resume as the only named
+candidate still standing**, and it has never actually been executed. If it also
+comes back clean, the named list is exhausted and the honest outcome is that the
+original event is recorded as **unknown** — which clause 3 permits for a single
+event, and which would let Gate 0 close on that basis rather than on a weakened
+clause.
