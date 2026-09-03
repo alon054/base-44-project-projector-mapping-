@@ -81,6 +81,8 @@ function applyScene(raw: unknown): void {
 
 function applyConfig(c: OutputConfig): void {
   config = c;
+  // The measure-run flag arrives here, so the badge's visibility is re-decided.
+  syncFocusBadge();
   if (c.displayFrequency > 0) host?.setNominalMs(1000 / c.displayFrequency);
   host?.resize(c.width, c.height);
   // Restored from config/ (SPEC.md §7); still off by default (C4).
@@ -90,6 +92,101 @@ function applyConfig(c: OutputConfig): void {
       `N=${c.displayFrequency > 0 ? (1000 / c.displayFrequency).toFixed(4) : 'unknown'}ms, ` +
       `scaleFactor=${c.scaleFactor}, uncapped=${c.uncapped}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// A12 attribution and the focus badge are declared HERE, above the first IPC
+// listener, and not further down where they read more naturally.
+//
+// `applyConfig` calls `syncFocusBadge`, and main pushes the config while this
+// module is still evaluating — during the `await createRenderHost` below,
+// which takes real time for Pixi init. Declared after that await, the binding
+// is still uninitialised when the push lands, and the output window dies on
+// "is not a function" before it draws a frame. Nothing about the badge is
+// order-sensitive; the listener that reaches it is.
+// ---------------------------------------------------------------------------
+/**
+ * A12 attribution support. The output renderer had no way to tell whether a
+ * stall coincided with the window losing focus or being occluded, so every
+ * such hypothesis had to be argued rather than checked. These are event-driven,
+ * not per-frame, so they cost nothing against A14's clause.
+ *
+ * `backgroundThrottling: false` stops timer throttling but does NOT make
+ * Chromium run rAF for a surface it considers not visible — so occlusion
+ * remains a live candidate for a multi-frame stall, and this is how we see it.
+ */
+interface RunEvent {
+  t: number;
+  what: string;
+  disturbing: boolean;
+}
+const runEvents: RunEvent[] = [];
+
+/**
+ * The output window has no cursor and draws black, so "does this window have
+ * keyboard focus?" is otherwise unanswerable by looking at the wall. Shown only
+ * when focus is LOST, so a clean run draws nothing extra.
+ *
+ * **Restricted to measurement runs from Phase 1.** It was unconditional, which
+ * was harmless while the editor had one slider and nobody clicked it — and
+ * wrong the moment there was an editor worth using. Every click on the control
+ * panel takes focus off the output window by definition, so the badge painted a
+ * yellow bar across the projected image during ordinary editing. On a live
+ * instrument, burning a warning onto the wall for the operator doing their job
+ * is a defect, not a diagnostic.
+ *
+ * The *logging* below stays unconditional — A12 attribution needs focus and
+ * visibility events on every run, and those cost nothing on the wall. Only the
+ * visible badge is gated, so nothing about attribution changes.
+ */
+let focusIsLost = false;
+let syncFocusBadge: () => void = () => {};
+const focusBadge = document.createElement('div');
+focusBadge.style.cssText = [
+  'position:fixed',
+  'left:0',
+  'right:0',
+  'bottom:0',
+  'padding:10px 14px',
+  'font:600 16px/1.3 ui-monospace,Menlo,monospace',
+  'color:#111',
+  'background:#ffcc00',
+  'text-align:center',
+  'z-index:20',
+  'display:none',
+].join(';');
+focusBadge.textContent =
+  'OUTPUT WINDOW NOT FOCUSED — click anywhere on this display; h / r / k need focus';
+document.body.appendChild(focusBadge);
+
+{
+  const logEvent = (what: string, disturbing: boolean): void => {
+    const t = host ? host.metrics.elapsedSeconds : 0;
+    runEvents.push({ t, what, disturbing });
+    console.log(`[event] t=${t.toFixed(2)}s ${what}${disturbing ? '  [DISTURBING]' : ''}`);
+  };
+  document.addEventListener('visibilitychange', () => {
+    const hidden = document.visibilityState !== 'visible';
+    logEvent(`visibility=${document.visibilityState}`, hidden);
+  });
+  // Read at the moment of blur, not captured: `config.measureLabel` is still
+  // the default when this module evaluates and is filled in by `applyConfig`.
+  const badgeWanted = (): boolean => config.measureLabel !== '';
+  syncFocusBadge = (): void => {
+    focusBadge.style.display = focusIsLost && badgeWanted() ? 'block' : 'none';
+  };
+  window.addEventListener('focus', () => {
+    focusIsLost = false;
+    syncFocusBadge();
+    logEvent('focus gained', false);
+  });
+  window.addEventListener('blur', () => {
+    focusIsLost = true;
+    syncFocusBadge();
+    logEvent('focus LOST', true);
+  });
+  focusIsLost = !document.hasFocus();
+  syncFocusBadge();
 }
 
 window.engine.onOutputConfig(applyConfig);
@@ -172,66 +269,6 @@ setInterval(() => {
   }
 }
 
-/**
- * A12 attribution support. The output renderer had no way to tell whether a
- * stall coincided with the window losing focus or being occluded, so every
- * such hypothesis had to be argued rather than checked. These are event-driven,
- * not per-frame, so they cost nothing against A14's clause.
- *
- * `backgroundThrottling: false` stops timer throttling but does NOT make
- * Chromium run rAF for a surface it considers not visible — so occlusion
- * remains a live candidate for a multi-frame stall, and this is how we see it.
- */
-interface RunEvent {
-  t: number;
-  what: string;
-  disturbing: boolean;
-}
-const runEvents: RunEvent[] = [];
-
-/**
- * The output window has no cursor and draws black, so "does this window have
- * keyboard focus?" is otherwise unanswerable by looking at the wall. Shown only
- * when focus is LOST, so a clean run draws nothing extra.
- */
-const focusBadge = document.createElement('div');
-focusBadge.style.cssText = [
-  'position:fixed',
-  'left:0',
-  'right:0',
-  'bottom:0',
-  'padding:10px 14px',
-  'font:600 16px/1.3 ui-monospace,Menlo,monospace',
-  'color:#111',
-  'background:#ffcc00',
-  'text-align:center',
-  'z-index:20',
-  'display:none',
-].join(';');
-focusBadge.textContent =
-  'OUTPUT WINDOW NOT FOCUSED — click anywhere on this display; h / r / k need focus';
-document.body.appendChild(focusBadge);
-
-{
-  const logEvent = (what: string, disturbing: boolean): void => {
-    const t = host ? host.metrics.elapsedSeconds : 0;
-    runEvents.push({ t, what, disturbing });
-    console.log(`[event] t=${t.toFixed(2)}s ${what}${disturbing ? '  [DISTURBING]' : ''}`);
-  };
-  document.addEventListener('visibilitychange', () => {
-    const hidden = document.visibilityState !== 'visible';
-    logEvent(`visibility=${document.visibilityState}`, hidden);
-  });
-  window.addEventListener('focus', () => {
-    focusBadge.style.display = 'none';
-    logEvent('focus gained', false);
-  });
-  window.addEventListener('blur', () => {
-    focusBadge.style.display = 'block';
-    logEvent('focus LOST', true);
-  });
-  if (!document.hasFocus()) focusBadge.style.display = 'block';
-}
 
 /**
  * The on-wall cue for the operator-driven disturbance run. Large, centred, and
