@@ -17,6 +17,7 @@ import { Application } from 'pixi.js';
 import { DEV_RESOLUTION, TARGET_RESOLUTION, type KReport, type ScaleReport } from '@shared/ipc';
 import { FrameMetrics } from '../debug/hud';
 import { runRenderMultiplierProbe } from '../debug/probe';
+import { readGpuResources, type GpuResourceReport } from '../debug/gpu';
 import { createDefaultScene } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
 import type { PlaceholderInfo } from '../core/resilience';
@@ -49,6 +50,10 @@ export interface RenderHost {
   scaleReport(): ScaleReport;
   /** A8: run the render-multiplier probe. Hitches by design; resets metrics. */
   probe(order?: 'dev-first' | 'target-first'): KReport;
+  /** §8.2: managed GPU resources. Cheap, but never call it per frame (A14). */
+  gpuResources(): GpuResourceReport;
+  /** Re-applies the current scene, exercising the teardown/rebuild path. */
+  reapplyScene(): void;
   destroy(): void;
 }
 
@@ -90,7 +95,8 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     ...(opts.onLayerFailed ? { onLayerFailed: opts.onLayerFailed } : {}),
   });
   app.stage.addChild(compositor.view);
-  compositor.setScene(createDefaultScene());
+  let currentScene: Scene = createDefaultScene();
+  compositor.setScene(currentScene);
 
   const metrics = new FrameMetrics(opts.nominalMs);
 
@@ -181,7 +187,14 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       speed = v;
     },
     setScene(scene) {
+      currentScene = scene;
       compositor.setScene(scene);
+    },
+    gpuResources() {
+      return readGpuResources(app.renderer);
+    },
+    reapplyScene() {
+      compositor.setScene(currentScene);
     },
     failures() {
       return compositor.failures();

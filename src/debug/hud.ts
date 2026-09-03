@@ -8,7 +8,13 @@
  * measured `renderer.render()` call and would inflate gate metric 2 with the
  * cost of the instrument.
  */
-import type { KReport, MagnitudeEvent, MetricsReport, ScaleReport } from '@shared/ipc';
+import type {
+  GpuResources,
+  KReport,
+  MagnitudeEvent,
+  MetricsReport,
+  ScaleReport,
+} from '@shared/ipc';
 
 /** SPEC.md §4: the first 10 seconds are discarded. */
 export const WARMUP_MS = 10_000;
@@ -113,6 +119,7 @@ export class FrameMetrics {
   private postWarmupCount = 0;
   private kReport: KReport | null = null;
   private scaleReport: ScaleReport | null = null;
+  private gpuReport: GpuResources | null = null;
 
   /**
    * Attribution support: the first intervals after a provocation's surface
@@ -158,6 +165,11 @@ export class FrameMetrics {
   /** A8: record the latest render-multiplier probe. */
   setK(k: KReport | null): void {
     this.kReport = k;
+  }
+
+  /** §8.2: sampled on the metrics tick, never per frame (A14). */
+  setGpu(g: GpuResources | null): void {
+    this.gpuReport = g;
   }
 
   /** A3: record the canvas geometry, so a non-1:1 path is visible, not inferred. */
@@ -394,6 +406,7 @@ export class FrameMetrics {
       worstIntervalMs: this.worstInterval,
       k: this.kReport,
       scale: this.scaleReport,
+      gpu: this.gpuReport,
       instrument: {
         perFrameMaxMs: this.instrumentMax,
         perFrameMeanMs: this.instrumentCount > 0 ? this.instrumentSum / this.instrumentCount : 0,
@@ -506,6 +519,16 @@ export function formatReport(r: MetricsReport, uncapped: boolean): string {
   }
 
   // A3: one backing-store pixel per panel pixel, or say so loudly.
+  if (r.gpu) {
+    const g = r.gpu;
+    lines.push(
+      g.valid
+        ? `gpu    tex ${g.textureCount} (~${(g.textureBytesEstimate / 1048576).toFixed(1)} MB est)  ` +
+          `buffers ${g.bufferCount}  geometries ${g.geometryCount}`
+        : `gpu    INVALID — ${g.invalidReason}`,
+    );
+  }
+
   if (r.scale) {
     const s = r.scale;
     lines.push(

@@ -39,6 +39,12 @@ const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
  * with a caveat — which requires the app to notice the disturbance itself.
  */
 const MEASURE_LABEL = process.env['PROJENGINE_MEASURE'] ?? '';
+/**
+ * §8.2's "texture memory flat over a 5-minute soak with motion".
+ * `PROJENGINE_SOAK=<minutes>` extends the measurement window; unset or 0 leaves
+ * §4's protocol window exactly as it was.
+ */
+const MEASURE_SOAK_MINUTES = Math.max(0, Number(process.env['PROJENGINE_SOAK'] ?? '0') || 0);
 const MEASURE_CUES = (process.env['PROJENGINE_CUES'] ?? '')
   .split(',')
   .map((x) => Number(x.trim()))
@@ -183,6 +189,7 @@ function outputConfigFor(display: Electron.Display, role: 'output' | 'preview'):
     // §4 requires the HUD enabled for a measurement run.
     hudVisible: MEASURE_LABEL !== '' ? true : loadSettings().hudVisible,
     measureLabel: MEASURE_LABEL,
+    soakMinutes: MEASURE_SOAK_MINUTES,
     measureCues: role === 'output' ? MEASURE_CUES : [],
     provocations: role === 'output' ? MEASURE_PROVOKE : [],
     conditions: role === 'output' ? currentConditions : null,

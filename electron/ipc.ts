@@ -143,6 +143,11 @@ export interface OutputConfig {
    * its M1 numbers describe the provocation, not the engine.
    */
   provocations: ProvocationSpec[];
+  /**
+   * §8.2's soak, in minutes. 0 is the ordinary §4 protocol window, untouched —
+   * a gate run and a soak run must not be confusable for one another.
+   */
+  soakMinutes: number;
   /** Captured once at run start, reported in the summary. */
   conditions: RunConditions | null;
 }
@@ -284,6 +289,20 @@ export interface KReport {
 }
 
 /**
+ * §8.2: managed GPU resources, for the "texture memory flat over a soak"
+ * rolling check. Named `gpu` and not `texture` deliberately — Phase 1 has no
+ * textures at all, and what it allocates and frees is geometry and buffers.
+ */
+export interface GpuResources {
+  valid: boolean;
+  invalidReason: string;
+  textureCount: number;
+  textureBytesEstimate: number;
+  bufferCount: number;
+  geometryCount: number;
+}
+
+/**
  * A3: scaleFactor is a first-class concern. One backing-store pixel must land
  * on exactly one panel pixel, or something between us and the wall is scaling.
  */
@@ -350,6 +369,8 @@ export interface MetricsReport {
   k: KReport | null;
   /** A3: null until the renderer reports its geometry. */
   scale: ScaleReport | null;
+  /** §8.2: null until sampled. */
+  gpu: GpuResources | null;
   /** A14: what the instrument itself costs. */
   instrument: InstrumentCost;
 }

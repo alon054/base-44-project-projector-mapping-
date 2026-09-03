@@ -13,6 +13,7 @@ import {
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
 import { canonicalizeScene, layersInDrawOrder, type Scene } from '../core/scene';
+import { judgeSoak, type GpuSample } from '../debug/gpu';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
@@ -30,6 +31,7 @@ let config: OutputConfig = {
   measureLabel: '',
   measureCues: [],
   provocations: [],
+  soakMinutes: 0,
   conditions: null,
 };
 
@@ -257,6 +259,10 @@ setInterval(() => {
   const r = host.metrics.report();
   window.engine.reportMetrics(r);
   hud.update(formatReport(r, config.uncapped));
+  // §8.2: the GPU census rides the existing 250 ms tick rather than the frame
+  // loop. A14's clause means the cost of asking lands inside the instrument's
+  // own reported tick time below, not hidden in the render budget.
+  host.metrics.setGpu(host.gpuResources());
   host.metrics.noteInstrumentTick(performance.now() - t0);
 }, 250);
 
@@ -399,7 +405,48 @@ function startMeasurementRun(
   cues: readonly number[],
   provocations: readonly ProvocationSpec[],
 ): void {
-  const totalMs = WARMUP_MS + WINDOW_MS;
+  // §8.2's soak. `PROJENGINE_SOAK=<minutes>` extends the measurement window;
+  // 0 means the ordinary §4 protocol window, untouched, so a gate run and a
+  // soak run cannot be confused for one another.
+  const soakMs = config.soakMinutes > 0 ? config.soakMinutes * 60_000 : 0;
+  const windowMs = soakMs > 0 ? soakMs : WINDOW_MS;
+  const totalMs = WARMUP_MS + windowMs;
+
+  const gpuSamples: GpuSample[] = [];
+  let rebuilds = 0;
+  if (soakMs > 0) {
+    console.log(
+      `[soak] ${config.soakMinutes} minute(s), sampling GPU resources every 30s ` +
+        'and re-applying the scene every 2s',
+    );
+    // "With motion" is satisfied by the water layer, which redraws every frame.
+    // The rebuilds are the point of THIS soak: Phase 1's compositor tears down
+    // and re-creates every layer on each scene edit, and the operator now
+    // triggers that with a drag. A soak that only watched a static scene
+    // animate would miss the one path this phase actually introduced.
+    const rebuild = window.setInterval(() => {
+      host?.reapplyScene();
+      rebuilds++;
+    }, 2000);
+    const sample = window.setInterval(() => {
+      if (!host) return;
+      gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
+    }, 30_000);
+    window.setTimeout(() => {
+      // One sample the instant the window opens, so drift is measured from the
+      // first POST-WARMUP state and not from a renderer that is still warming.
+      if (host) {
+        gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
+      }
+    }, WARMUP_MS + 50);
+    window.setTimeout(() => {
+      window.clearInterval(rebuild);
+      window.clearInterval(sample);
+      if (host) {
+        gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
+      }
+    }, totalMs - 200);
+  }
   console.log(
     `[run] START label=${label} warmupMs=${WARMUP_MS} windowMs=${WINDOW_MS} ` +
       `cues=[${cues.join(',')}] — measurement ends in ${(totalMs / 1000).toFixed(0)}s`,
@@ -452,6 +499,7 @@ function startMeasurementRun(
       instrument: r.instrument,
       scale: r.scale,
       k,
+      soak: soakMs > 0 ? judgeSoak(gpuSamples, rebuilds) : null,
       events: runEvents,
       // The conditions the run actually ran in, so no later reader has to
       // reconstruct them with `defaults read` after the fact.
