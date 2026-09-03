@@ -1278,3 +1278,172 @@ is sanctioned — §0.2, the Phase 0 ticker is throwaway and is deleted in Phase
 when I-2's single clock lands — and it is **not** an I-2 violation. Recorded
 because it is the reason the preview can never be a timing reference, and
 because Phase 3's gate should be able to point at a before-and-after.
+
+## 2026-09-03 — Phase 1 (session 1)
+
+- DID: Phase 1's whole buildable surface in four commits — scene/layer models,
+  I-8 registry, seeded RNG, compositor, blend, outputs, `ContentProvider`,
+  `ProceduralProvider`, `resilience.ts`, the §8.1 golden-frame harness, and the
+  editor layer list. Deleted `render/testPattern.ts`.
+- MEASURED: I-6 additive gain **1.1441×** (mean frame luminance 0.011315 →
+  0.012945). I-1 cross-resolution layout delta **0.0109** max per cell against a
+  **0.1204** negative control and an 0.08 limit. Occlusion centre pixel exactly
+  the top layer's tint both ways (`[208,32,32]` / `[32,64,208]`). 174 unit tests
+  green, up from 87. 11 golden frames, exit 0.
+- BLOCKER: none in code. Two boxes are the operator's and one needs a
+  measurement run — see NEXT.
+- NEXT: (1) click the layer list on a real launch — add / remove / reorder /
+  opacity / blend, and add a `fault` layer to see the placeholder. (2) Gate 1's
+  informal wall check. (3) §4's two gate metrics at Phase 1's layer load, which
+  is a **rolling check and therefore a Gate 1 blocker**, plus the 5-minute
+  texture-memory soak. Neither can be run today — see the display-mode note
+  below. Two rulings from Gate 0 are still open and were not decided here.
+
+`DECISION` — **the golden-frame resolution is 1280×720, and the harness runs
+under Electron.** Both were the operator's calls this session.
+
+Electron rather than headless-gl or a Playwright browser: it is already a
+dependency, and it is **the renderer that ships**. A golden produced by a
+different GL implementation can pass in CI and differ on the wall, which is a
+regression net that catches the wrong thing.
+
+1280×720 currently **equals `DEV_RESOLUTION`**, and that coincidence is the
+whole hazard A8 names. The two numbers look identical, so tidying the literal
+into an import would look like a cleanup and would silently delete the net —
+the first 1080p run would re-bless every golden at once, in a commit that looks
+routine. So it is guarded mechanically rather than by comment: tests assert the
+harness declares it as an object literal, imports neither resolution constant
+nor `@shared/ipc` at all, and never reads a resolution from a display, window,
+`devicePixelRatio` or env. A sixth test asserts every committed golden was
+rendered at a resolution the harness states.
+
+`DECISION` — **rotation is stored in turns, not radians.** Not a style choice.
+It puts every field of a stored transform inside [0,1], which turns
+`isNormalizedTransform` into a *total* I-1 check instead of a per-field special
+case: if a pixel value ever leaks into stored state, some field lands outside
+the unit interval and a test says so. Radians would put a legal `3.14` in stored
+state with no way to tell it from a pixel value by inspection.
+
+`DECISION` — **`ContentProvider.create` is synchronous.** The tempting shape is
+`Promise<LayerView>`, since a catalog or AI provider cannot have its texture
+ready at create time. It is the wrong one for a live instrument: awaiting a
+provider means a scene switch mid-show stalls on a network fetch. Instead a view
+exists from the first frame and populates itself — which is exactly the
+placeholder → poster → content chain I-13 already requires of video in Phase 3.
+Recorded because I-3 is the one interface SPEC.md sanctions building before its
+consumers exist, and Gate 10 tests that swapping a catalog entity for an AI one
+needs no compositor change.
+
+`DECISION` — **the I-8 registry holds accessors, not values.** A definition
+carries `get`/`set` onto wherever the value actually lives: scene state for
+`entity.<id>.*`, a local cell for a debug knob. If the registry stored a copy of
+`entity.<id>.opacity`, the scene JSON and the registry would be two sources of
+truth for one number, and I-12 says there is exactly one. The editor's layer
+controls write **through** the registry rather than mutating layers, so I-8 is
+load-bearing from Phase 1 instead of a table nothing reads until Phase 11 asks
+it to carry MIDI. `debug.testPattern.speed` is registered in Phase 1's first
+commit (rule 9).
+
+`MEASURED` — **three real defects, each found by writing the check rather than
+by reading the code.** Recorded together because they share a moral.
+
+1. **`moveLayer` was a silent no-op.** It swapped array positions and then
+   called `reindexZOrder`, which re-indexes by *current draw order* — sorting by
+   the very `zOrder` values the swap was meant to exchange, and putting the
+   layers straight back. Correct for add and remove; a no-op for a move.
+   **Invisible to the golden harness**, which builds its scenes directly rather
+   than through the editor's operations, and invisible to typecheck. It was
+   caught by the first unit test written against it, which is the argument for
+   having pulled those three operations out of the click handlers into
+   `core/sceneEdit.ts` in the first place.
+
+2. **`canonicalizeScene` converted a typed array instead of refusing it.** A
+   `Uint8ClampedArray` is an object with numeric keys, so `Object.entries` would
+   turn a 4 MB pixel buffer into a four-million-key plain object and call it
+   valid scene state — an I-7 violation that arrives through the scene rather
+   than through IPC. Now refused at **both** boundaries, because layer content
+   reaches a scene from a provider as well as from a channel.
+
+3. **Two Phase 0 `invoke` sites carried unguarded payloads** (`displaysSelect`,
+   `measurementMode`), while `CHECKLIST.md`'s Gate 0 line claimed
+   `assertJsonOnly` was "on every send site". Neither can carry pixels — one
+   sends a number, the other a boolean — so this was an **overstated claim, not
+   a live defect**, and it is recorded as such rather than as a Gate 0 failure.
+   The claim is now true and is checked mechanically: a test greps every
+   `ipcRenderer.send`/`invoke` in `preload.ts` and fails on any that passes a
+   payload without the guard.
+
+`MEASURED` — **Gate 1's pixel conditions, as numbers.**
+
+| Condition | Measure | Value |
+|---|---|---|
+| I-6 additive brightening | mean frame luminance, `add` ÷ `normal` | **1.1441×** (0.011315 → 0.012945) |
+| Occlusion, red over blue | centre pixel | `[208, 32, 32]` = `0xd02020` exactly |
+| Occlusion, blue over red | centre pixel | `[32, 64, 208]` = `0x2040d0` exactly |
+| I-1 across resolutions | max per-cell luminance delta, 32×18 | **0.0109** |
+| I-1 negative control | same, one layer moved 0.05 of frame width | **0.1204** |
+| I-13 | `resilience` case | 2 placeholders + working layer, 13.4% lit |
+
+The I-6 pair are identical scenes differing **only** in the glow's blend mode,
+so the gap between them is the additive contribution and nothing else.
+
+Both the I-6 and the occlusion assertions live in the **runner**, not only in
+the committed goldens. A golden pins what was observed; an assertion says what
+must be true. Without the second, a careless `--bless` would quietly record
+`add` and `normal` producing the same frame, or the two z-orders producing one,
+and every later run would agree with it.
+
+The I-1 threshold of 0.08 is **not taste**. It sits between a measured pass
+(0.0109) and a measured failure (0.1204), and the negative control is committed
+beside the case so it stays there. If the control ever stops tripping, the
+runner reports it **louder** than a mismatch — a blind check makes every pass
+beside it worthless, which is a worse failure than a red one.
+
+`MEASURED` — **the projector reported 1920×1080 at this session's launch**, not
+the 1280×720 native mode every Gate 0 number was taken at. A3's warning fired
+correctly: `buffer 1280x720 / css 1920x1080 / dpr 1 — NOT 1:1, a scaler is in
+the path`. The instrument caught it, which is A3 doing its job.
+
+Consequence, stated so it is not discovered later: **no §4 number taken in this
+mode is comparable to Gate 0's.** Gate 1's rolling check — both §4 metrics at
+Phase 1's layer load — is therefore not runnable until the display is back in
+its native mode, and it is a **Gate 1 blocker**, not an optional extra. The
+5-minute texture-memory soak is in the same position.
+
+`DECISION` — **Gate 1 is NOT crossed.** Three boxes are open and none of them
+was weakened to close it:
+
+- The editor layer list is `[~]`: built, wired, and its logic unit-tested, but
+  **nobody has clicked the buttons**. The app launches clean with no console
+  errors, which is not the same claim.
+- Gate 1's informal wall check is the operator's.
+- The §4 rolling check and the texture soak need the projector in its native
+  mode.
+
+Everything else in Phase 1 is `[x]` with a number behind it.
+
+`SPEC-CHANGE-PROPOSED` is **not** raised this session. The A1 / §4 reconciliation
+over "k recorded at every gate" is due before Phase 3 and is deliberately left
+where the last session put it.
+
+`BLOCKER` — **two rulings from Gate 0 are still open, and were not decided
+here.** Both were put to the operator this session and both came back
+unanswered, so neither was decided unilaterally:
+
+- **A8's k probe** — the fix proposed in `measurements/GATE0-RUNS.md` §4.4 is
+  still unapplied. It first *matters* at Phase 3's layer load, where real fill
+  work exists, so nothing in Phase 1 or 2 is blocked by it. Raise again at
+  Phase 3.
+- **A15's statistic** — its trigger reads per-frame instrument max, which
+  straddles its own 2% threshold on noise. A15 is ratified as written and was
+  not touched. Due at Gate 3.
+
+`IDEAS` — parked, not built:
+- The compositor rebuilds the whole layer stack on `setScene`. Honest for
+  Phase 1 (static content, operator-paced edits) and it is what keeps texture
+  memory flat across a reorder. If Phase 6's live scene switching or a per-frame
+  parameter path makes it hurt, that is the phase that will know it.
+- The `rect` procedural kind was added for the occlusion check — the only object
+  here that is fully opaque, which is what makes "is this layer on top" a fact
+  rather than a judgement about alpha. It may be worth keeping as a plain
+  colour-field layer regardless.
