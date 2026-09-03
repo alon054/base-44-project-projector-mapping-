@@ -1159,3 +1159,122 @@ reused `Display.id` across it**, so the match was `pinned-exact-id` and the
 survive — has still never fired in the field. It is unit-tested
 (`config.test.ts:65`, `:170`). Stated rather than claimed as covered: the field
 has now exercised the easy half of A13, and the hard half remains simulated.
+
+## 2026-09-03 — Phase 0 (session 5, part 3)
+- DID: closed Gate 0. Deferred the panel-latency box to Phase 5 with its failure
+  modes recorded, logged the cursor finding, corrected a stale Gate 5 line.
+- MEASURED: full Gate 0 number set below.
+- BLOCKER: none. Phase 0 is closed.
+- NEXT: Phase 1 — `Scene` and `Layer` models, parameter registry (I-8), seeded
+  RNG (I-12). `/compact` before starting.
+
+`GATE-PASSED` — **Gate 0, 2026-09-03. DEV_RESOLUTION 1280×720 on the projector,
+under §4's measurement protocol.**
+
+**Display mode.** `displayFrequency` **60.000003814697266 Hz** read from
+`Display.displayFrequency`, never assumed. **N = 16.6667 ms**, A9-validated in
+every run. Scale 1280×720 buffer / 1280×720 css / dpr 1 — **1:1 to the panel**
+in all five runs, no scaler in the path (A3).
+
+**Gate metric 1 — presentation.** Five conformant runs:
+
+| | run1-sync | run2-sync | run4-pipe | run5 att3 | run6-attrib |
+|---|---|---|---|---|---|
+| samples | 3600 | 3601 | 3601 | 3600 | 3601 |
+| fps | 59.999 | 60.001 | 60.000 | 59.999 | 60.000 |
+| late % (≤5%) | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| worst late run (≤2) | 0 | 0 | 0 | 0 | 0 |
+| worst interval | 17.70 ms | 17.80 ms | 17.70 ms | 17.80 ms | 18.80 ms |
+| clause 3 | none | none | none | none | none |
+
+**18,003 samples, not one late frame anywhere** — worst interval in the set is
+18.80 ms against a late threshold of 25.0 ms.
+
+**Gate metric 2 — headroom (the recorded number).** Render p99 as a share of N:
+**4.80%, 4.80%, 3.00%, 2.40%, 2.40%** against a 60% limit. p95 informational:
+0.500 / 0.500 / 0.400 / — / — ms.
+
+**Metric 1 clause 3 (A12).** One event in the whole project, from the original
+pre-harness run: 233.3 ms at n=7846 and 283.4 ms at n=7851, five frames apart —
+**one event, attributed `unknown`**, which A12 permits at one per run. Every
+named candidate eliminated: stdout pipe (empirically and architecturally), plain
+focus loss (repeated deliberate provocation), parameter drag (operator's own
+account), surface suspend/resume (the run 6 / run 7 provocation matrix — a
+forced suspend costs one 32.8 ms frame on resume against an event of 233/283 ms;
+the mechanism is the wrong size, not merely absent). **Clause 3 was never
+weakened.** The allowance is now spent: a second unexplained stall in any future
+run is a gate failure with nothing left to absorb it.
+
+**Latency (A11), two figures, never conflated.** Dedicated bench, deliberately
+outside a gate window: **transport median 0.40 / p95 1.80 ms** — PASS against
+≤5 ms. **Presented median 24.60 / p95 33.30 ms** — PASS against ≤66 ms; implied
+one-way presented **≈7.93 ms = 0.48 × N**. Frame wait, paired by token,
+**23.90 ms = 1.434 × N — in the structural 1–2 × N band.** Live-path transport
+p95 **2.1 ms** stands as the regression baseline for every later phase, not the
+0.10 ms bare-wire floor.
+
+**Instrument self-cost (A14).** Per-frame mean **0.0044–0.0062 ms = 0.026–0.037%
+of N**, stable to two significant figures across five runs. Per-frame max
+0.200–0.700 ms (1.2–4.2% of N) — a single-sample extreme, and the reason A15's
+statistic is questioned. Tick 0.20–0.50 ms.
+
+**Measurement mode (ADD-2).** `--disable-frame-rate-limit` + `--disable-gpu-vsync`
+still work in Electron 44: sustained **823 fps** vs 60.00 capped.
+
+**Conditions, captured by the app.** `separateSpaces=true (spans-displays=absent)`,
+`hiddenInMissionControl=true`, `displays=2`, output `T749-fHD720` fullscreen,
+`pin=PINNED (pinned-exact-id)`.
+
+**Not recorded, and why:** `k_dev` / `k_target` and the thermal derate. The A8
+probe is defective (nine samples spanning 0.379–5.000 on an unchanged scene) and
+A8 makes k informational through Phase 8; §4 names Phase 3 and Phase 9 as the
+gates that must carry it. **A1's "recorded at every gate" and §4's "Phase 3 and
+Phase 9" need reconciling before Phase 3**, where k stops being informational.
+Flagged, not resolved — that is a `SPEC.md` question.
+
+`DECISION` — **projector-panel latency deferred to Phase 5.** Attempted with a
+phone video; the clip was **30 fps** (33.3 ms/frame, twice N, ±67 ms of
+ambiguity on a 30–80 ms quantity), a **DLP panel filmed at 30 fps beats
+light/dark on nearly every frame** (3,748 luminance transitions in 6,883
+frames), and the **editor preview cannot be the time reference** — the sweep bar
+sat ~12% across on the wall and ~35% in the preview, about **0.9 s apart on a
+4 s loop**, because Phase 0's ticker is per-window.
+
+**No number was recorded, deliberately.** A9 is ratified for the HUD — *an
+instrument that emits a plausible wrong number is worse than one that fails
+loudly* — and it binds the analysis as much as the apparatus. "≈33 ms" from that
+clip would be precisely the defect A9 exists to stop. Needs 240 fps. Carried to
+Phase 5 as a deliverable, which is where the number is first used. Box marked
+`[-]`, not dropped, so the gate is not crossed with anything hanging.
+
+`MEASURED` — **finding, found by hand and not by any log: the output window's
+controls need a pointer on the projector.** `h` / `r` / `k` are bound with
+`window.addEventListener('keydown')` in the output renderer, so that window must
+hold keyboard focus, so the operator must click the projector display — where
+`cursor: none` makes the pointer invisible. **Nothing traps the cursor**: no
+pointer lock, no kiosk mode, no confinement anywhere in the codebase. But an
+invisible pointer on a 1280×720 panel is indistinguishable from a trapped one,
+and the operator had to quit the app to recover.
+
+`cursor: none` is **required** by Gate 0 box 1 ("no chrome, no cursor"), so this
+is not a bug to fix by deleting it. The fix is to forward the keys from the
+editor over IPC so the pointer never needs to go to the wall — carried to Phase 5
+as a deliverable. `SPEC.md` C6 already covers the one-monitor lockup; this is
+the two-monitor case, and it surfaced only because someone used the thing with
+their hands.
+
+`DECISION` — **a second stale checklist line corrected.** Gate 5's latency
+criterion still read "p95 ≤ 33 ms", which predates A11 and conflates the two
+figures it exists to separate. `SPEC.md` §11 Gate 5 is authoritative —
+**transport p95 ≤ 5 ms and presented round-trip p95 ≤ 66 ms** — and the
+checklist was wrong. Second such correction this session; both were lines that
+went stale under an amendment rather than being wrong when written, which is the
+failure mode a tracker has and a spec does not.
+
+`MEASURED` — **observation, free and worth keeping: preview and output are
+~0.9 s out of phase.** Each `createRenderHost` accumulates its own `phase` from
+its own first frame (`render/host.ts`), so two windows drift arbitrarily. This
+is sanctioned — §0.2, the Phase 0 ticker is throwaway and is deleted in Phase 3
+when I-2's single clock lands — and it is **not** an I-2 violation. Recorded
+because it is the reason the preview can never be a timing reference, and
+because Phase 3's gate should be able to point at a before-and-after.

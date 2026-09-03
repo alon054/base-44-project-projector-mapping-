@@ -1,8 +1,7 @@
 # Gate 0 measurement runs — Phase 0
 
 **Date:** 2026-09-02 · **Commit:** see `git log` for `P0: A-series amendments…` and
-following · **Verdict: Gate 0's measurement box closes; the gate's remaining
-boxes are the operator's physical checks.**
+following · **Verdict: GATE 0 PASSED, 2026-09-03.**
 
 This report is self-contained. It assumes no prior context.
 
@@ -450,18 +449,18 @@ is a third untested candidate.
 
 ## 6. Gate 0 status
 
-**The measurement box closes. The gate does not, and what remains is physical.**
+**Passed, 2026-09-03.**
 
 | Box | Status |
 |---|---|
 | Output truly fullscreen on the projector, no chrome, no cursor | pass |
 | Both latency figures (transport ≤5 ms, presented ≤66 ms) | pass — 1.80 ms / 33.30 ms p95 |
 | **Both §4 gate metrics under protocol** | **closed** — five runs pass both metrics; the 233/283 ms event is recorded **`unknown`**, which A12 permits at one per run, after its last named candidate was eliminated by the §4.6 provocation matrix |
-| App relaunches without manual display reconfiguration | operator's — pin resolved as `PINNED (pinned-exact-id)` in every run here, which is evidence, not the operator's own verification |
+| App relaunches without manual display reconfiguration | **pass** — verified across a physical cable reconnect: unplug, replug, relaunch, resolved `via PINNED (pinned-exact-id)` fullscreen. 15 launches on record, every one `PINNED`, none `HEURISTIC`. macOS reused `Display.id`, so `pinned-fingerprint` has still never fired in the field (unit-tested, `config.test.ts:65`, `:170`) |
 | Never fullscreens the primary display without confirmation | pass |
 | Both §4 metrics recorded, labelled DEV_RESOLUTION | pass |
-| Projector keystone / auto-focus disable to passthrough | operator's physical check |
-| Projector-panel latency by phone video | informational, operator's |
+| Projector keystone / auto-focus disable to passthrough | **pass** — confirmed by the operator at the device, 2026-09-03. Discharges §9's projector-side geometric correction row and §10's installation prerequisite for the Nebula Mars II Pro: I-5 holds in practice and Phase 2 / Phase 7 calibrate one transform |
+| Projector-panel latency by phone video | **deferred to Phase 5** — attempted and failed on capture, not on effort. See §8 |
 
 **Clean runs were never going to be an attribution**, which is why §4.6 stopped
 running them and started provoking instead. The event is recorded `unknown` on
@@ -595,3 +594,30 @@ condition needed to interpret its own null.
 - **The 67.70 ms stall from the earlier session** — origin recorded as instrument
   allocation churn, fixed, never confirmed.
 
+---
+
+## 8. The panel-latency attempt, and why no number was recorded
+
+Attempted 2026-09-03 with a phone video of the wall and the laptop in one frame.
+The framing was right and the clip contains a real discrete event — the HUD
+toggling off on the wall. **No number was extracted, and none was invented.**
+
+| Obstacle | Detail |
+|---|---|
+| **Frame rate** | 1920×1080 @ **30 fps** = 33.3 ms/frame, *twice* the projector's own frame interval. One frame of ambiguity at each end spans ±67 ms on a quantity expected to be 30–80 ms — consistent with anything from zero to 150 ms |
+| **DLP flicker** | A per-frame luminance scan of the projected area found **3,748 brightness transitions in 6,883 frames**. The colour wheel and PWM mean the panel is not showing a stable image within a 30 fps exposure, so the wall beats light/dark almost every frame. Automatic event detection is impossible and a by-eye scrub is little better |
+| **No valid reference** | The editor preview cannot serve as the time reference: measured from the same still, the sweep bar sat ~12% across on the wall and ~35% across in the preview — **about 0.9 s apart on a 4 s loop**. Phase 0's ticker (`render/host.ts`) is per-window and each accumulates phase from its own first frame. Sanctioned throwaway (§0.2), deleted in Phase 3 when I-2's single clock lands |
+
+**Why nothing was recorded anyway.** A9 is ratified for the HUD — *an instrument
+that emits a plausible wrong number is worse than one that fails loudly* — and
+that clause binds the analysis as much as the apparatus. "≈33 ms" from a 30 fps
+clip of a flickering DLP is exactly the kind of confident, precise, wrong figure
+A9 exists to stop.
+
+**What the measurement needs.** 240 fps slo-mo (4.17 ms/frame, which also
+averages through the DLP flicker), the wall and the laptop keyboard in one
+frame, and the HUD toggled several times. It is carried into Phase 5 as a
+deliverable, which is where the number is first used — judging whether a drag
+feels late, against a fresh transport figure. Reported separately from the
+software round-trip and never as an engine number (§9's projector-observation
+rule).
