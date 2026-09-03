@@ -142,6 +142,21 @@
     ],
     "meanLuminance": 0.134703
   },
+  "editor-water-to-front": {
+    "width": 1280,
+    "height": 720,
+    "hash": "b6e147dc",
+    "coverage": 0.334772,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      32,
+      192,
+      208
+    ],
+    "meanLuminance": 0.181636
+  },
   "testPattern": {
     "width": 1280,
     "height": 720,

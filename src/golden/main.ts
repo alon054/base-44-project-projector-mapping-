@@ -184,6 +184,12 @@ function cases(): GoldenCase[] {
     // one that wasted three rounds of clicking on the wall.
     { name: 'editor-two-rects', scene: twoRects(false) },
     { name: 'editor-two-rects-swapped', scene: twoRects(true) },
+    // The operator's remaining complaint: everything reorders except `water`.
+    // Same scene, water dragged from the back to the very front. If this
+    // hashes the same as `editor-two-rects`, the water layer genuinely draws
+    // nothing where it overlaps — and that is a defect in the layer, not in
+    // the ordering.
+    { name: 'editor-water-to-front', scene: waterToFront() },
     { name: 'testPattern', scene: testPatternScene() },
     // Gate 1, condition 1: identical scenes but for the glow's blend mode. The
     // ONLY difference is `add` vs `normal`, so the gap between their mean
@@ -236,6 +242,13 @@ function twoRects(swapped: boolean): Scene {
   const spec = { idPrefix: 'rect', providerId: PROVIDER_ID, content: { kind: 'rect' } };
   const s = addLayer(addLayer(createDefaultScene(), spec), spec);
   return swapped ? moveLayer(s, 'rect-2', -1) : s;
+}
+
+/** `twoRects(false)` with `water` moved all the way to the front. */
+function waterToFront(): Scene {
+  let s = twoRects(false);
+  for (let i = 0; i < 6; i++) s = moveLayer(s, 'water', 1);
+  return s;
 }
 
 const OCCLUSION_RED = 0xd02020;
