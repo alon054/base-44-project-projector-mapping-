@@ -11,7 +11,8 @@
     "build:web": "vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:render": "npm run build:web && electron scripts/golden.mjs"
   },
   "dependencies": {
     "pixi.js": "8.20.1",

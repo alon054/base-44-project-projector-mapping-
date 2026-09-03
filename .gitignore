@@ -8,3 +8,7 @@ out/
 # app/installation prefs are machine-local, not shared state (SPEC.md §7)
 config/settings.json
 measurements/*.log
+
+# Golden-frame previews: written on every render-test run, for eyeballing a
+# mismatch. The hashes in test/golden/ are the committed artefact, not these.
+.golden-preview/

@@ -19,6 +19,10 @@ export default defineConfig({
       input: {
         editor: resolve(import.meta.dirname, 'src/editor/index.html'),
         output: resolve(import.meta.dirname, 'src/output/index.html'),
+        // §8.1's headless render smoke test. Built with the same config as the
+        // shipping windows on purpose — a golden produced by a different build
+        // path is not a regression net for the one that ships.
+        golden: resolve(import.meta.dirname, 'src/golden/index.html'),
       },
     },
   },
