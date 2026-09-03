@@ -1132,3 +1132,30 @@ Consequences, all already written into `SPEC.md` and now actually earned:
   than two stacked ones, only one of which we would control.
 - The requirement stands for every future device. It is not discharged by this
   one passing (§10).
+
+## 2026-09-03 — Phase 0 (session 5, part 2)
+- DID: verified the A13 pin across a physical cable reconnect. Marked Gate 0's
+  relaunch box and corrected a stale deliverable line.
+- MEASURED: relaunch after unplug/replug resolved `via PINNED
+  (pinned-exact-id)`, fullscreen on `T749-fHD720`. 15 launches on record, every
+  one `PINNED`, none `HEURISTIC`.
+- BLOCKER: one Gate 0 box left — the informational projector-panel latency.
+- NEXT: measure panel latency by phone video, or log a decision to defer it.
+  A gate is not crossed with a box left hanging (CLAUDE.md rule 3).
+
+`DECISION` — **the relaunch box was held against evidence that had expired.**
+It was opened because one early relaunch resolved via the `largest-external`
+heuristic, which tests the auto-picker rather than persistence (`SPEC.md` §7
+rule 5). Every launch since — 15 of them across the whole run set — resolved
+`PINNED (pinned-exact-id)`, and the operator has clicked the picker 15 times in
+both directions, which also retires the "human click not yet exercised" note on
+the picker deliverable. Both lines were stale rather than wrong when written;
+recorded here because a tracker that lags its own evidence is the same defect as
+one that runs ahead of it.
+
+The reconnect was performed physically: cable out, cable in, relaunch. **macOS
+reused `Display.id` across it**, so the match was `pinned-exact-id` and the
+`pinned-fingerprint` fallback — the one A13 exists for when the id does *not*
+survive — has still never fired in the field. It is unit-tested
+(`config.test.ts:65`, `:170`). Stated rather than claimed as covered: the field
+has now exercised the easy half of A13, and the hard half remains simulated.
