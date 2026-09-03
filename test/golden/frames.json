@@ -97,6 +97,21 @@
     ],
     "meanLuminance": 0.059766
   },
+  "occlusion-reordered-live": {
+    "width": 1280,
+    "height": 720,
+    "hash": "2eb88dc5",
+    "coverage": 0.22375,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      32,
+      64,
+      208
+    ],
+    "meanLuminance": 0.059766
+  },
   "testPattern": {
     "width": 1280,
     "height": 720,

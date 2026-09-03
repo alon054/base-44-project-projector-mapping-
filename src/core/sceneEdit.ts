@@ -23,6 +23,15 @@ export interface AddLayerSpec {
 }
 
 /**
+ * Distinct, deterministic tints for added layers. Not decoration: two layers
+ * that look identical cannot demonstrate z-order, and Gate 1 asks whether
+ * reordering changes occlusion *correctly* — a question that needs the answer
+ * to be visible. Fixed rather than random so a scene built by clicking is still
+ * reproducible from its JSON (I-12).
+ */
+const ADDED_TINTS = [0xd02020, 0x2040d0, 0x20c060, 0xd0a020, 0xa040d0, 0x20c0d0] as const;
+
+/**
  * Appends a layer at the top of the draw order with a unique id.
  *
  * The id has to be unique for two independent reasons, and either alone would
@@ -33,6 +42,7 @@ export function addLayer(scene: Scene, spec: AddLayerSpec): Scene {
   let n = 1;
   while (scene.layers.some((l) => l.id === `${spec.idPrefix}-${n}`)) n++;
   const id = `${spec.idPrefix}-${n}`;
+  const nth = scene.layers.length;
   return reindexZOrder({
     ...scene,
     layers: [
@@ -41,11 +51,26 @@ export function addLayer(scene: Scene, spec: AddLayerSpec): Scene {
         id,
         name: spec.name ?? `${spec.idPrefix} ${n}`,
         providerId: spec.providerId,
-        content: spec.content,
+        // A caller-supplied tint always wins; this only fills the gap so that
+        // two layers of the same kind are not the same colour.
+        content:
+          spec.content['tint'] === undefined
+            ? { ...spec.content, tint: ADDED_TINTS[nth % ADDED_TINTS.length] as number }
+            : spec.content,
         zOrder: scene.layers.length,
-        // Half-frame and centred, so a new layer is visible without a placement
-        // gesture. Region placement is Phase 5.
-        transform: { x: 0.5, y: 0.5, width: 0.5, height: 0.5, rotation: 0 },
+        // Half-frame, and STAGGERED rather than centred. Every added layer used
+        // to land on exactly the same box with the same default colour, so two
+        // of them were pixel-identical and reordering them changed nothing on
+        // screen — the engine was right and the scene could not show it.
+        // Region placement is Phase 5; until then a new layer has to be
+        // distinguishable from the last one without a gesture.
+        transform: {
+          x: 0.5 + (((nth % 3) - 1) * 0.12),
+          y: 0.5 + (((Math.floor(nth / 3) % 3) - 1) * 0.12),
+          width: 0.5,
+          height: 0.5,
+          rotation: 0,
+        },
         ...(spec.blendMode ? { blendMode: spec.blendMode } : {}),
       }),
     ],

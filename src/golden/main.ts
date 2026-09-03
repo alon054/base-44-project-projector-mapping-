@@ -29,6 +29,7 @@ import 'pixi.js/unsafe-eval';
 import { Application, Rectangle } from 'pixi.js';
 import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
+import { moveLayer } from '../core/sceneEdit';
 import { createDefaultScene } from '../core/defaultScene';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
@@ -54,6 +55,13 @@ interface GoldenCase {
    * resolution-independent luminance signature instead.
    */
   compareTo?: string;
+  /**
+   * Apply this scene FIRST, then `scene`, on the same Application. The editor
+   * never renders a scene into a fresh compositor — it always replaces a live
+   * one — and every other case here calls `setScene` exactly once, so the
+   * teardown-and-rebuild path had no coverage at all.
+   */
+  afterScene?: Scene;
   /**
    * A negative control: this case is *deliberately* mislaid, and its delta must
    * land ABOVE the runner's threshold. Without one, the threshold is taste — it
@@ -162,6 +170,13 @@ function cases(): GoldenCase[] {
     // must differ AND the centre pixel must be whichever layer is on top.
     { name: 'occlusion-red-over-blue', scene: occlusionScene('red') },
     { name: 'occlusion-blue-over-red', scene: occlusionScene('blue') },
+    // The editor's actual path: a live compositor is handed a new scene. This
+    // must land on exactly the same pixels as rendering that scene cold.
+    {
+      name: 'occlusion-reordered-live',
+      scene: moveLayer(occlusionScene('red'), 'blue', 1),
+      afterScene: occlusionScene('red'),
+    },
     { name: 'testPattern', scene: testPatternScene() },
     // Gate 1, condition 1: identical scenes but for the glow's blend mode. The
     // ONLY difference is `add` vs `normal`, so the gap between their mean
@@ -410,6 +425,12 @@ async function run(): Promise<GoldenResult[]> {
       height: size.height,
     });
     app.stage.addChild(compositor.view);
+    if (c.afterScene) {
+      // Mount one scene, run a frame, then replace it — the editor's path.
+      compositor.setScene(c.afterScene);
+      compositor.update({ phase: GOLDEN_PHASE });
+      app.renderer.render(app.stage);
+    }
     compositor.setScene(c.scene);
     // Two updates, one render: `isolateUpdate` swaps a layer that throws for a
     // placeholder on the frame it throws, so a single-frame harness would hash

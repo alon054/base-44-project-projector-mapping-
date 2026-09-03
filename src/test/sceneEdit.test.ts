@@ -7,7 +7,7 @@
  * is right on screen and wrong in the saved JSON is a Phase 6 bug waiting.
  */
 import { describe, expect, it } from 'vitest';
-import { createLayer } from '../core/layer';
+import { createLayer, isNormalizedTransform } from '../core/layer';
 import { createScene, deserializeScene, layersInDrawOrder, serializeScene } from '../core/scene';
 import { addLayer, moveLayer, removeLayer } from '../core/sceneEdit';
 import { ParameterRegistry, defineLayerParameters } from '../core/parameters';
@@ -51,7 +51,44 @@ describe('addLayer', () => {
   it('a new layer is placed and sized in normalized space, never pixels (I-1)', () => {
     const s = addLayer(base(), { idPrefix: 'glow', providerId: 'procedural', content: {} });
     const added = s.layers.find((l) => l.id === 'glow-1')!;
-    expect(added.transform).toEqual({ x: 0.5, y: 0.5, width: 0.5, height: 0.5, rotation: 0 });
+    expect(isNormalizedTransform(added.transform)).toBe(true);
+    expect(added.transform.width).toBe(0.5);
+    expect(added.transform.height).toBe(0.5);
+  });
+
+  it('two added layers are distinguishable — z-order cannot be demonstrated otherwise', () => {
+    // This is the defect that made reordering look broken on the wall: every
+    // added layer landed on the same box with the same default colour, so two
+    // of them were pixel-identical and swapping them changed nothing. The
+    // engine was right and the scene could not show it.
+    let s = base();
+    for (let i = 0; i < 4; i++) {
+      s = addLayer(s, { idPrefix: 'rect', providerId: 'procedural', content: { kind: 'rect' } });
+    }
+    const added = s.layers.filter((l) => l.id.startsWith('rect-'));
+    const boxes = new Set(added.map((l) => `${l.transform.x},${l.transform.y}`));
+    const tints = new Set(added.map((l) => String(l.content['tint'])));
+    expect(boxes.size).toBe(added.length);
+    expect(tints.size).toBe(added.length);
+  });
+
+  it('a caller-supplied tint always wins', () => {
+    const s = addLayer(base(), {
+      idPrefix: 'rect',
+      providerId: 'procedural',
+      content: { kind: 'rect', tint: 0x123456 },
+    });
+    expect(s.layers.find((l) => l.id === 'rect-1')!.content['tint']).toBe(0x123456);
+  });
+
+  it('added layers stay reproducible from the JSON alone (I-12)', () => {
+    const build = () =>
+      addLayer(addLayer(base(), { idPrefix: 'rect', providerId: 'p', content: {} }), {
+        idPrefix: 'rect',
+        providerId: 'p',
+        content: {},
+      });
+    expect(build()).toEqual(build());
   });
 });
 

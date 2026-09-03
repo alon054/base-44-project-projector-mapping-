@@ -12,7 +12,7 @@ import {
 } from '@shared/ipc';
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
-import { canonicalizeScene, type Scene } from '../core/scene';
+import { canonicalizeScene, layersInDrawOrder, type Scene } from '../core/scene';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
@@ -77,6 +77,16 @@ function applyScene(raw: unknown): void {
   }
   host.setScene(scene);
   reportFailures();
+  // Operator-paced, not per-frame, so it costs nothing on the render thread.
+  // Without it, "the editor changed something and the wall did not" is
+  // unanswerable from the wall — exactly the class of question A12 and A3
+  // exist to make answerable rather than arguable.
+  console.log(
+    `[scene] applied "${scene.id}" draw order: ` +
+      layersInDrawOrder(scene)
+        .map((l) => `${l.id}(z${l.zOrder}${l.visible ? '' : ',hidden'})`)
+        .join(' -> '),
+  );
 }
 
 function applyConfig(c: OutputConfig): void {
