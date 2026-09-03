@@ -1104,3 +1104,31 @@ conditions. Not load-bearing — the shipping immunity is a WebContents property
 and display-independent, and `mcthrottled` failed to suspend with that immunity
 removed — but it is the honest edge of the claim and is written down rather than
 smoothed over.
+
+---
+
+## 2026-09-03 — Phase 0 (session 5)
+- DID: marked Gate 0's projector-passthrough box verified on the operator's
+  confirmation at the projector. No code change.
+- MEASURED: -
+- BLOCKER: Gate 0 has one blocking box left, and it is the operator's: the
+  A13 pin-then-relaunch sequence.
+- NEXT: pin the projector in the picker, relaunch, and confirm the log reads
+  `PINNED`, not `HEURISTIC`.
+
+`DECISION` — **projector auto-keystone and auto-focus confirmed fully
+disableable to geometric passthrough**, by the operator, at the device. This was
+always the human's physical check rather than a spec entry: `SPEC.md` §4 has
+recorded YES for both since A7, but §4 is a statement and this box is its
+verification, and the two were deliberately not allowed to satisfy each other.
+
+Consequences, all already written into `SPEC.md` and now actually earned:
+
+- §9's **projector-side geometric correction** risk row is discharged for this
+  device. That row's fallback was "no software fix exists; Phase 7 requires a
+  projector with full geometric passthrough" — it does not fire.
+- §10's installation prerequisite is satisfied for the Nebula Mars II Pro, so
+  **I-5 holds in practice**: Phase 2 and Phase 7 calibrate one transform rather
+  than two stacked ones, only one of which we would control.
+- The requirement stands for every future device. It is not discharged by this
+  one passing (§10).
