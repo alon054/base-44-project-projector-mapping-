@@ -2,8 +2,8 @@
   "default": {
     "width": 1280,
     "height": 720,
-    "hash": "ded2e98d",
-    "coverage": 0.07624,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
@@ -12,13 +12,13 @@
       0,
       0
     ],
-    "meanLuminance": 0.015384
+    "meanLuminance": 0.109309
   },
   "stack": {
     "width": 1280,
     "height": 720,
-    "hash": "ded2e98d",
-    "coverage": 0.07624,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
@@ -27,18 +27,18 @@
       0,
       0
     ],
-    "meanLuminance": 0.015384
+    "meanLuminance": 0.109309
   },
   "stack@640x360": {
     "width": 640,
     "height": 360,
-    "hash": "4eae80b6",
-    "coverage": 0.094219,
+    "hash": "a600827c",
+    "coverage": 0.46569,
     "failures": [],
     "layoutDelta": {
       "against": "stack",
-      "maxCell": 0.010933,
-      "meanCell": 0.002968
+      "maxCell": 0.009044,
+      "meanCell": 0.001412
     },
     "expectLayoutMismatch": false,
     "centrePixel": [
@@ -46,18 +46,18 @@
       0,
       0
     ],
-    "meanLuminance": 0.018308
+    "meanLuminance": 0.110245
   },
   "stack-shifted@640x360": {
     "width": 640,
     "height": 360,
-    "hash": "c24d3022",
-    "coverage": 0.095634,
+    "hash": "fd7c66d1",
+    "coverage": 0.467031,
     "failures": [],
     "layoutDelta": {
       "against": "stack",
       "maxCell": 0.120353,
-      "meanCell": 0.008047
+      "meanCell": 0.004985
     },
     "expectLayoutMismatch": true,
     "centrePixel": [
@@ -65,7 +65,7 @@
       0,
       0
     ],
-    "meanLuminance": 0.018316
+    "meanLuminance": 0.110253
   },
   "occlusion-red-over-blue": {
     "width": 1280,
@@ -115,8 +115,8 @@
   "editor-two-rects": {
     "width": 1280,
     "height": 720,
-    "hash": "2975553c",
-    "coverage": 0.334772,
+    "hash": "2bcbf440",
+    "coverage": 0.622337,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
@@ -125,13 +125,13 @@
       192,
       208
     ],
-    "meanLuminance": 0.182598
+    "meanLuminance": 0.251982
   },
   "editor-two-rects-swapped": {
     "width": 1280,
     "height": 720,
-    "hash": "72d48d3c",
-    "coverage": 0.334772,
+    "hash": "91dfe740",
+    "coverage": 0.622337,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
@@ -140,13 +140,13 @@
       64,
       208
     ],
-    "meanLuminance": 0.134703
+    "meanLuminance": 0.204088
   },
   "editor-water-to-front": {
     "width": 1280,
     "height": 720,
-    "hash": "b6e147dc",
-    "coverage": 0.334772,
+    "hash": "885d63de",
+    "coverage": 0.622337,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
@@ -155,7 +155,7 @@
       192,
       208
     ],
-    "meanLuminance": 0.181636
+    "meanLuminance": 0.231679
   },
   "testPattern": {
     "width": 1280,
@@ -205,17 +205,17 @@
   "blend-modes": {
     "width": 1280,
     "height": 720,
-    "hash": "9f74b1eb",
+    "hash": "4add5f1e",
     "coverage": 1,
     "failures": [],
     "layoutDelta": null,
     "expectLayoutMismatch": false,
     "centrePixel": [
-      16,
-      24,
-      32
+      41,
+      104,
+      130
     ],
-    "meanLuminance": 0.117571
+    "meanLuminance": 0.380236
   },
   "resilience": {
     "width": 1280,

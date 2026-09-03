@@ -204,15 +204,30 @@ class TreeView extends BaseView {
   }
 }
 
+/**
+ * A body of water: a filled surface with ripple lines on it.
+ *
+ * The fill is not decoration. Without it this layer was ripple lines and
+ * nothing else — thin, translucent, and drawn on black — so it could not
+ * occlude anything, and moving it through the draw order changed the frame by
+ * 0.5% of mean luminance. The operator reported "everything reorders except
+ * the water" twice, and both times the ordering was provably correct and the
+ * object simply had nothing to show it with. A placeholder object that cannot
+ * demonstrate the invariant it sits under is the wrong placeholder.
+ */
 class WaterView extends BaseView {
   private readonly g = new Graphics();
   private readonly bands: { y: number; amp: number; speed: number; alpha: number }[] = [];
   private readonly tint: number;
+  private readonly bodyAlpha: number;
 
   constructor(ctx: ProviderContext) {
     super(ctx);
     const tint = ctx.content['tint'];
     this.tint = typeof tint === 'number' ? tint >>> 0 : 0x1d5f7a;
+    const bodyAlpha = ctx.content['bodyAlpha'];
+    this.bodyAlpha =
+      typeof bodyAlpha === 'number' && bodyAlpha >= 0 && bodyAlpha <= 1 ? bodyAlpha : 0.72;
     const count = numberOr(ctx.content['bands'], 14, 1, 200);
     const rng = ctx.rng('bands');
     for (let i = 0; i < count; i++) {
@@ -234,6 +249,14 @@ class WaterView extends BaseView {
     const { w, h } = this;
     if (w === 0 || h === 0) return;
     const g = this.g.clear();
+
+    // The surface itself, under the ripples. Dark enough to stay in D1's
+    // additive world — on a projector this reads as water rather than as a
+    // panel of paint — and opaque enough that what is behind it is behind it.
+    if (this.bodyAlpha > 0) {
+      g.rect(0, 0, w, h).fill({ color: this.tint, alpha: this.bodyAlpha });
+    }
+
     const steps = 24;
     for (const band of this.bands) {
       const a = frame.phase * Math.PI * 2 * band.speed;
