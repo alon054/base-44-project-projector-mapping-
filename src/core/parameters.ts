@@ -1,0 +1,318 @@
+/**
+ * I-8 — the hierarchical parameter registry.
+ *
+ * Every addressable value in the engine — force parameters, per-entity
+ * parameters, grade settings, debug knobs — is registered here under a
+ * hierarchical string key (`force.wind.strength`, `entity.<id>.opacity`,
+ * `grade.tint`). Phase 11's MIDI and audio mapping is then a lookup rather than
+ * a rewrite, which is the entire reason this exists in Phase 1 (SPEC.md I-8).
+ *
+ * **The registry does not own values.** A definition carries `get`/`set`
+ * accessors onto wherever the value actually lives — scene state for anything
+ * belonging to a layer, a local cell for a debug knob. This is deliberate: if
+ * the registry stored a copy of `entity.<id>.opacity`, the scene JSON and the
+ * registry would be two sources of truth for one number, and I-12 says there is
+ * exactly one. The registry is an *index* onto state, not a second store.
+ */
+import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
+import { BLEND_MODES, isBlendMode, type Layer } from './layer';
+
+export type ParameterValue = number | boolean | string;
+
+interface ParameterDefBase<T extends ParameterValue> {
+  /** Hierarchical, dot-separated, at least two segments. */
+  key: string;
+  /** Operator-facing. Never an identifier. */
+  label: string;
+  default: T;
+  get(): T;
+  set(v: T): void;
+}
+
+export interface NumberParameterDef extends ParameterDefBase<number> {
+  kind: 'number';
+  min: number;
+  max: number;
+  /** UI step hint only. Values are not quantized to it. */
+  step: number;
+}
+
+export interface BooleanParameterDef extends ParameterDefBase<boolean> {
+  kind: 'boolean';
+}
+
+export interface EnumParameterDef extends ParameterDefBase<string> {
+  kind: 'enum';
+  options: readonly string[];
+}
+
+export type ParameterDef = NumberParameterDef | BooleanParameterDef | EnumParameterDef;
+
+export class ParameterKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ParameterKeyError';
+  }
+}
+
+export class ParameterCollisionError extends Error {
+  constructor(readonly key: string) {
+    super(`parameter key already registered: ${key} (I-8: keys are unique)`);
+    this.name = 'ParameterCollisionError';
+  }
+}
+
+const SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A key must have at least two segments. A bare `speed` is exactly the name
+ * collision across entities that I-8 exists to prevent, so it is rejected at
+ * registration rather than discovered when a second entity wants the same word.
+ */
+export function assertValidKey(key: string): void {
+  if (typeof key !== 'string' || key === '') {
+    throw new ParameterKeyError('parameter key must be a non-empty string');
+  }
+  const segments = key.split('.');
+  if (segments.length < 2) {
+    throw new ParameterKeyError(`parameter key must be hierarchical (a.b), got "${key}"`);
+  }
+  for (const s of segments) {
+    if (!SEGMENT.test(s)) {
+      throw new ParameterKeyError(`invalid segment "${s}" in parameter key "${key}"`);
+    }
+  }
+}
+
+export class ParameterRegistry {
+  private readonly defs = new Map<string, ParameterDef>();
+
+  /** Throws `ParameterCollisionError` if the key is taken (I-8, §8.1). */
+  register<D extends ParameterDef>(def: D): D {
+    assertValidKey(def.key);
+    if (this.defs.has(def.key)) throw new ParameterCollisionError(def.key);
+    this.defs.set(def.key, def);
+    return def;
+  }
+
+  registerAll(defs: readonly ParameterDef[]): void {
+    for (const d of defs) this.register(d);
+  }
+
+  /**
+   * Removes a key. Needed from Phase 1 because deleting a layer must remove its
+   * `entity.<id>.*` keys — otherwise re-adding a layer with the same id
+   * collides, and the operator sees a crash on an ordinary edit.
+   */
+  unregister(key: string): boolean {
+    return this.defs.delete(key);
+  }
+
+  /** Removes every key under a prefix. Returns how many were removed. */
+  unregisterPrefix(prefix: string): number {
+    let n = 0;
+    for (const key of [...this.defs.keys()]) {
+      if (key === prefix || key.startsWith(`${prefix}.`)) {
+        this.defs.delete(key);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  has(key: string): boolean {
+    return this.defs.has(key);
+  }
+
+  definition(key: string): ParameterDef | undefined {
+    return this.defs.get(key);
+  }
+
+  /** Sorted, so enumeration is stable for the UI and for tests. */
+  keys(prefix?: string): string[] {
+    const all = [...this.defs.keys()].sort();
+    if (prefix === undefined) return all;
+    return all.filter((k) => k === prefix || k.startsWith(`${prefix}.`));
+  }
+
+  get size(): number {
+    return this.defs.size;
+  }
+
+  /** §8.1: every key resolves back to its value. */
+  read(key: string): ParameterValue {
+    const def = this.mustGet(key);
+    return def.get();
+  }
+
+  /**
+   * Validates against the definition before writing. A number outside its range
+   * is clamped rather than rejected — a MIDI knob or an audio envelope will
+   * routinely overshoot, and refusing the write would leave a mapped control
+   * silently dead at the top of its travel.
+   */
+  write(key: string, value: ParameterValue): ParameterValue {
+    const def = this.mustGet(key);
+    const coerced = coerce(def, value);
+    def.set(coerced as never);
+    return coerced;
+  }
+
+  /** Every current value, for the UI and for debugging. Not scene state. */
+  snapshot(prefix?: string): Record<string, ParameterValue> {
+    const out: Record<string, ParameterValue> = {};
+    for (const key of this.keys(prefix)) out[key] = this.read(key);
+    return out;
+  }
+
+  private mustGet(key: string): ParameterDef {
+    const def = this.defs.get(key);
+    if (!def) throw new ParameterKeyError(`unknown parameter key: ${key}`);
+    return def;
+  }
+}
+
+function coerce(def: ParameterDef, value: ParameterValue): ParameterValue {
+  switch (def.kind) {
+    case 'number': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new ParameterKeyError(`${def.key} expects a finite number, got ${String(value)}`);
+      }
+      return Math.min(def.max, Math.max(def.min, value));
+    }
+    case 'boolean': {
+      if (typeof value !== 'boolean') {
+        throw new ParameterKeyError(`${def.key} expects a boolean, got ${String(value)}`);
+      }
+      return value;
+    }
+    case 'enum': {
+      if (typeof value !== 'string' || !def.options.includes(value)) {
+        throw new ParameterKeyError(
+          `${def.key} expects one of [${def.options.join(', ')}], got ${String(value)}`,
+        );
+      }
+      return value;
+    }
+  }
+}
+
+/**
+ * A definition whose value lives in a cell the registry hands back. For knobs
+ * with no home in scene state — debug parameters, mostly. Anything belonging to
+ * a layer must instead be bound to the scene with explicit accessors, so that
+ * the scene stays the single source of truth (I-12).
+ */
+export function cellParameter(
+  spec: Omit<NumberParameterDef, 'get' | 'set'>,
+  onChange?: (v: number) => void,
+): NumberParameterDef;
+export function cellParameter(
+  spec: Omit<BooleanParameterDef, 'get' | 'set'>,
+  onChange?: (v: boolean) => void,
+): BooleanParameterDef;
+export function cellParameter(
+  spec: Omit<EnumParameterDef, 'get' | 'set'>,
+  onChange?: (v: string) => void,
+): EnumParameterDef;
+export function cellParameter(
+  spec:
+    | Omit<NumberParameterDef, 'get' | 'set'>
+    | Omit<BooleanParameterDef, 'get' | 'set'>
+    | Omit<EnumParameterDef, 'get' | 'set'>,
+  onChange?: (v: never) => void,
+): ParameterDef {
+  let value: ParameterValue = spec.default;
+  const notify = onChange as ((v: ParameterValue) => void) | undefined;
+  return {
+    ...spec,
+    get: () => value,
+    set: (v: ParameterValue) => {
+      value = v;
+      notify?.(v);
+    },
+  } as ParameterDef;
+}
+
+/**
+ * `debug.testPattern.speed` — I-8's first registered key.
+ *
+ * Phase 0 introduced it as a bare constant in `electron/ipc.ts` because the
+ * registry did not exist yet; SPEC.md §0.2 permits a parameter to carry its
+ * eventual hierarchical key before Phase 1, and CLAUDE.md rule 9 requires it to
+ * land here in Phase 1's first commit. The range matches the editor's existing
+ * slider (0–4, step 0.01, default 1×) rather than inventing a new one, so the
+ * registry describes the control that exists.
+ */
+export function defineTestPatternSpeed(onChange?: (v: number) => void): NumberParameterDef {
+  return cellParameter(
+    {
+      key: PARAM_TEST_PATTERN_SPEED,
+      label: 'Test pattern speed',
+      kind: 'number',
+      default: 1,
+      min: 0,
+      max: 4,
+      step: 0.01,
+    },
+    onChange,
+  );
+}
+
+/**
+ * The `entity.<id>.*` keys a layer owns. Bound to scene state through
+ * accessors, never copied — see this file's header.
+ *
+ * `read` returns the layer as it currently is; the compositor owns the scene
+ * and hands this a live accessor, so the registry can never go stale against an
+ * undo or a scene switch.
+ */
+export function defineLayerParameters(
+  layerId: string,
+  read: () => Layer,
+  write: (patch: Partial<Layer>) => void,
+): ParameterDef[] {
+  return [
+    {
+      key: `entity.${layerId}.opacity`,
+      label: 'Opacity',
+      kind: 'number',
+      default: 1,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      get: () => read().opacity,
+      set: (v: number) => write({ opacity: v }),
+    },
+    {
+      key: `entity.${layerId}.depth`,
+      label: 'Depth',
+      kind: 'number',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      get: () => read().depth,
+      set: (v: number) => write({ depth: v }),
+    },
+    {
+      key: `entity.${layerId}.visible`,
+      label: 'Visible',
+      kind: 'boolean',
+      default: true,
+      get: () => read().visible,
+      set: (v: boolean) => write({ visible: v }),
+    },
+    {
+      key: `entity.${layerId}.blendMode`,
+      label: 'Blend mode',
+      kind: 'enum',
+      options: BLEND_MODES,
+      default: 'normal',
+      get: () => read().blendMode,
+      set: (v: string) => {
+        if (isBlendMode(v)) write({ blendMode: v });
+      },
+    },
+  ];
+}
