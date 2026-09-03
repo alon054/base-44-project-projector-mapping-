@@ -12,6 +12,7 @@ import {
 } from '@shared/ipc';
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
+import { canonicalizeScene, type Scene } from '../core/scene';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
@@ -41,6 +42,42 @@ let host: Awaited<ReturnType<typeof createRenderHost>> | null = null;
 // Held in a box: a bare `let` assigned only inside a callback gets narrowed to
 // `never` by control-flow analysis at the top-level read below.
 const pendingSpeed: { v: { value: number; token: number; t0: number } | null } = { v: null };
+/** Same race as the speed above: a scene can arrive before Pixi has finished init. */
+const pendingScene: { v: Scene | null } = { v: null };
+
+/**
+ * I-13, mirrored back to the editor's layer list. Sent only when the set
+ * changes, not every frame — a live session should see a layer go red once,
+ * not sixty times a second.
+ */
+let lastFailureKey = '';
+function reportFailures(): void {
+  if (!host) return;
+  const failures = host.failures();
+  const key = JSON.stringify(failures);
+  if (key === lastFailureKey) return;
+  lastFailureKey = key;
+  window.engine.reportSceneFailures(failures);
+}
+
+function applyScene(raw: unknown): void {
+  let scene: Scene;
+  try {
+    // The validation boundary (I-12). A malformed scene is refused here, with a
+    // reason, rather than half-applied — and refusing it leaves the output
+    // showing the scene it already had, which is what a live session needs.
+    scene = canonicalizeScene(raw);
+  } catch (e) {
+    console.error(`[output] refused scene: ${(e as Error).message}`);
+    return;
+  }
+  if (!host) {
+    pendingScene.v = scene;
+    return;
+  }
+  host.setScene(scene);
+  reportFailures();
+}
 
 function applyConfig(c: OutputConfig): void {
   config = c;
@@ -71,6 +108,8 @@ window.engine.onParam((p) => {
   host.markPending(p.token, p.t0);
 });
 
+window.engine.onScene((s) => applyScene(s.scene));
+
 window.engine.onWarning((w) => {
   banner.textContent = w.text;
   banner.style.display = w.level === 'info' ? 'none' : 'block';
@@ -83,6 +122,12 @@ host = await createRenderHost({
   nominalMs: 0,
   onPresented: (token, t0) => window.engine.ackParam({ token, t0 }),
 });
+
+if (pendingScene.v) {
+  host.setScene(pendingScene.v);
+  pendingScene.v = null;
+}
+reportFailures();
 
 if (pendingSpeed.v) {
   host.setSpeed(pendingSpeed.v.value);

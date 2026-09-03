@@ -1,6 +1,10 @@
 /**
- * Editor control panel. Phase 0 scope: display picker, one parameter, the
- * always-on metrics text mirror (C4), and the instrumented round-trip readout.
+ * Editor control panel. Phase 0's display picker, parameter slider, always-on
+ * metrics mirror (C4) and round-trip readout, plus Phase 1's layer list.
+ *
+ * The scene lives here and crosses to the output as JSON (I-7). The preview
+ * renders the same scene at reduced resolution — an approximation, not a
+ * mirror: each window loads its own content and runs its own loop.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +15,7 @@ import {
   TRANSPORT_GATE_MS,
   type DisplayInfo,
   type MetricsReport,
+  type SceneFailure,
 } from '@shared/ipc';
 import {
   MAX_RENDER_FRACTION,
@@ -20,10 +25,17 @@ import {
   percentile,
 } from '../debug/hud';
 import { PreviewCanvas } from './PreviewCanvas';
+import { LayerPanel } from './LayerPanel';
+import { useSceneRegistry } from './useSceneRegistry';
+import { createDefaultScene } from '../core/defaultScene';
+import type { Scene } from '../core/scene';
 
 
 export function App(): React.JSX.Element {
   const [speed, setSpeed] = useState(1);
+  const [scene, setScene] = useState<Scene>(createDefaultScene);
+  const [failures, setFailures] = useState<SceneFailure[]>([]);
+  const registry = useSceneRegistry(scene, setScene);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [metrics, setMetrics] = useState<MetricsReport | null>(null);
   const [uncapped, setUncapped] = useState(false);
@@ -46,6 +58,13 @@ export function App(): React.JSX.Element {
   const frameWaitRef = useRef<number[]>([]);
   const [measureLabel, setMeasureLabel] = useState('');
   const token = useRef(0);
+
+  // The whole scene, on every edit. Small, operator-paced, and JSON only (I-7).
+  useEffect(() => {
+    window.engine.setScene({ scene });
+  }, [scene]);
+
+  useEffect(() => window.engine.onSceneFailures(setFailures), []);
 
   const refreshDisplays = useCallback(() => {
     void window.engine.listDisplays().then(setDisplays);
@@ -171,7 +190,7 @@ export function App(): React.JSX.Element {
       <div style={{ width: 380, display: 'flex', flexDirection: 'column', gap: 18 }}>
         <header>
           <h1 style={{ font: '600 15px/1.3 inherit', margin: '0 0 4px' }}>
-            Projection Engine — Phase 0
+            Projection Engine — Phase 1
           </h1>
           <p style={{ margin: 0, color: '#8b939b' }}>
             Scaffold &amp; dual-screen output. DEV {DEV_RESOLUTION.width}×{DEV_RESOLUTION.height}
@@ -308,7 +327,16 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Panel title="Preview (I-7: approximation, not a mirror)">
-          <PreviewCanvas speed={speed} nominalMs={nominalMs} />
+          <PreviewCanvas speed={speed} nominalMs={nominalMs} scene={scene} />
+        </Panel>
+
+        <Panel title="Layers — z-order, opacity, blend (I-1, I-6, I-8)">
+          <LayerPanel
+            scene={scene}
+            setScene={setScene}
+            registry={registry}
+            failures={failures}
+          />
         </Panel>
 
         <Panel title="Output metrics — SPEC.md §4 (always-on mirror)">

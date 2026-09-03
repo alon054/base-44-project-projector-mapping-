@@ -24,6 +24,8 @@ import {
   type ProvocationKind,
   type ProvocationSpec,
   type RunConditions,
+  type SceneFailure,
+  type SceneSet,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
 
@@ -314,6 +316,12 @@ function openOutputWindow(why: string): void {
   const win = outputWin;
   win.webContents.once('did-finish-load', () => {
     send(win, CH.outputConfig, outputConfigFor(d, 'output'));
+    // The output window can open, close and reopen under the operator (a
+    // display re-select, I-13's "reopens on the next available display"). It
+    // must come back showing the scene the editor is holding, not the built-in
+    // default, so main keeps the last scene and replays it here. Main does not
+    // interpret the scene; it is an opaque JSON blob on this path.
+    if (lastScene !== null) send(win, CH.sceneSet, lastScene);
     if (!goFullscreen) {
       send(win, CH.warning, {
         level: 'warn',
@@ -430,12 +438,29 @@ function watchDisplays(): void {
   screen.on('display-metrics-changed', reconcile('display-metrics-changed'));
 }
 
+/**
+ * The last scene the editor sent, replayed to an output window that opens
+ * later. Held as the opaque JSON it arrived as — main is a relay on this path
+ * and does not know what a Scene is (the validation boundary is the receiving
+ * renderer's `canonicalizeScene`).
+ */
+let lastScene: SceneSet | null = null;
+
 // ---------------------------------------------------------------------------
 // IPC relay. Every payload passes the I-7 guard on the way through.
 // ---------------------------------------------------------------------------
 function wireIpc(): void {
   ipcMain.on(CH.paramSet, (_e: IpcMainEvent, payload: ParamSet) => {
     send(outputWin, CH.paramSet, assertJsonOnly(payload));
+  });
+
+  ipcMain.on(CH.sceneSet, (_e: IpcMainEvent, payload: SceneSet) => {
+    lastScene = assertJsonOnly(payload);
+    send(outputWin, CH.sceneSet, lastScene);
+  });
+
+  ipcMain.on(CH.sceneFailures, (_e: IpcMainEvent, payload: SceneFailure[]) => {
+    send(editorWin, CH.sceneFailures, assertJsonOnly(payload));
   });
 
   // A11: the transport half, relayed with no frame wait anywhere in the path.

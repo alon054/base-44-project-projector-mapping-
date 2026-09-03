@@ -31,6 +31,18 @@ export const CH = {
    * reliably reach the metrics.
    */
   outputConfigRequest: 'output:config:get',
+  /**
+   * editor -> main -> output: the whole scene, as JSON (I-7, I-12).
+   *
+   * The scene and not a delta: Phase 1's scenes are small, edits are
+   * operator-paced rather than per-frame, and a delta protocol is a second
+   * description of the state whose only job is to agree with the first one.
+   * Phase 6 owns history and coalescing (D12); if the payload ever gets large
+   * enough to matter, that is the phase that will know it.
+   */
+  sceneSet: 'scene:set',
+  /** output -> main -> editor: layers currently showing an I-13 placeholder. */
+  sceneFailures: 'scene:failures',
   /** output -> main -> editor: HUD numbers, for the editor's always-on text mirror (C4). */
   metrics: 'metrics:report',
   /** editor -> main (invoke): enumerate displays. */
@@ -55,6 +67,25 @@ export const CH = {
 
 /** SPEC.md I-8: hierarchical key. Registered in `parameters.ts` in Phase 1 (§0.2). */
 export const PARAM_TEST_PATTERN_SPEED = 'debug.testPattern.speed';
+
+/**
+ * The scene, unvalidated. Typed as `unknown` on purpose: this module is
+ * dependency-free so main and both renderers can import it, and `Scene` lives
+ * in `src/core/scene.ts`. The receiving renderer runs `canonicalizeScene()`,
+ * which is the validation boundary that module exists to be — so a malformed
+ * scene is refused where it can be refused loudly, not typed away here.
+ */
+export interface SceneSet {
+  scene: unknown;
+}
+
+/** I-13: what the output is showing as broken, mirrored into the layer list. */
+export interface SceneFailure {
+  layerId: string;
+  layerName: string;
+  providerId: string;
+  reason: string;
+}
 
 export interface ParamSet {
   key: string;

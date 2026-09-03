@@ -13,6 +13,8 @@ import type {
   ParamRecv,
   ParamSet,
   ProvocationKind,
+  SceneFailure,
+  SceneSet,
 } from './ipc';
 
 export interface WarningMessage {
@@ -32,6 +34,24 @@ const api = {
   // output -> editor, once the change has actually been presented
   ackParam(p: ParamAck): void {
     ipcRenderer.send(CH.paramAck, assertJsonOnly(p));
+  },
+  // editor -> output: whole scene, JSON only (I-7)
+  setScene(s: SceneSet): void {
+    ipcRenderer.send(CH.sceneSet, assertJsonOnly(s));
+  },
+  onScene(cb: (s: SceneSet) => void): () => void {
+    const h = (_e: unknown, s: SceneSet) => cb(s);
+    ipcRenderer.on(CH.sceneSet, h);
+    return () => ipcRenderer.off(CH.sceneSet, h);
+  },
+  // output -> editor: I-13 flags for the layer list
+  reportSceneFailures(f: SceneFailure[]): void {
+    ipcRenderer.send(CH.sceneFailures, assertJsonOnly(f));
+  },
+  onSceneFailures(cb: (f: SceneFailure[]) => void): () => void {
+    const h = (_e: unknown, f: SceneFailure[]) => cb(f);
+    ipcRenderer.on(CH.sceneFailures, h);
+    return () => ipcRenderer.off(CH.sceneFailures, h);
   },
   reportMetrics(m: MetricsReport): void {
     ipcRenderer.send(CH.metrics, assertJsonOnly(m));
@@ -83,10 +103,10 @@ const api = {
     return ipcRenderer.invoke(CH.displaysList) as Promise<DisplayInfo[]>;
   },
   selectDisplay(id: number): Promise<boolean> {
-    return ipcRenderer.invoke(CH.displaysSelect, id) as Promise<boolean>;
+    return ipcRenderer.invoke(CH.displaysSelect, assertJsonOnly(id)) as Promise<boolean>;
   },
   setMeasurementMode(on: boolean): Promise<boolean> {
-    return ipcRenderer.invoke(CH.measurementMode, on) as Promise<boolean>;
+    return ipcRenderer.invoke(CH.measurementMode, assertJsonOnly(on)) as Promise<boolean>;
   },
 };
 

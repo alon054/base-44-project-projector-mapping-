@@ -86,6 +86,8 @@ app.whenReady().then(async () => {
       failures: r.failures,
       layoutDelta: r.layoutDelta,
       expectLayoutMismatch: r.expectLayoutMismatch,
+      centrePixel: r.centrePixel,
+      meanLuminance: r.meanLuminance,
     };
     writeFileSync(
       join(PREVIEW_DIR, `${r.name.replace(/[^\w.@-]/g, '_')}.png`),
@@ -146,6 +148,14 @@ app.whenReady().then(async () => {
     if (got.hash !== exp.hash) {
       problems.push(`${name}: hash ${got.hash} != golden ${exp.hash} (preview: ${PREVIEW_DIR}/${name}.png)`);
     }
+    if (got.meanLuminance !== exp.meanLuminance) {
+      problems.push(`${name}: mean luminance ${got.meanLuminance} != golden ${exp.meanLuminance}`);
+    }
+    if (JSON.stringify(got.centrePixel) !== JSON.stringify(exp.centrePixel)) {
+      problems.push(
+        `${name}: centre pixel ${JSON.stringify(got.centrePixel)} != golden ${JSON.stringify(exp.centrePixel)}`,
+      );
+    }
     if (JSON.stringify(got.layoutDelta) !== JSON.stringify(exp.layoutDelta)) {
       problems.push(
         `${name}: I-1 layout delta changed\n    got      ${JSON.stringify(got.layoutDelta)}\n    expected ${JSON.stringify(exp.layoutDelta)}`,
@@ -162,6 +172,45 @@ app.whenReady().then(async () => {
       problems.push(`${name}: new case with no golden — run with --bless in a commit that says why`);
     }
   }
+  // Gate 1, condition 1 (I-6): a dark-background `add` glow visibly brightens
+  // what is beneath it. The two cases differ ONLY in blend mode, so the gap
+  // between their mean luminances is the additive contribution and nothing
+  // else. Asserted in the runner, not only in the goldens, so a re-bless cannot
+  // quietly record `add` and `normal` producing the same frame.
+  const gNormal = observed['glow-normal'];
+  const gAdd = observed['glow-add'];
+  if (gNormal && gAdd) {
+    const gain = gAdd.meanLuminance / gNormal.meanLuminance;
+    if (!(gain > 1.05)) {
+      problems.push(
+        `I-6: \`add\` did not brighten. mean luminance normal=${gNormal.meanLuminance} add=${gAdd.meanLuminance} (gain ${gain.toFixed(4)}x, need > 1.05x)`,
+      );
+    } else {
+      process.stdout.write(
+        `I-6: additive gain ${gain.toFixed(4)}x (mean luminance ${gNormal.meanLuminance} -> ${gAdd.meanLuminance})\n`,
+      );
+    }
+  } else {
+    problems.push('I-6: the Gate 1 blend-mode cases are missing from the harness');
+  }
+
+  // Gate 1: reordering changes occlusion CORRECTLY. A hash difference only
+  // says something changed; this says the right layer is on top. Asserted in
+  // the runner rather than only in the goldens, so a re-bless cannot quietly
+  // record the two orders producing the same pixel.
+  const red = observed['occlusion-red-over-blue'];
+  const blue = observed['occlusion-blue-over-red'];
+  if (red && blue) {
+    const dominant = (p) => (p[0] > p[2] ? 'red' : p[2] > p[0] ? 'blue' : 'neither');
+    if (dominant(red.centrePixel) !== 'red' || dominant(blue.centrePixel) !== 'blue') {
+      problems.push(
+        `occlusion: swapping z-order did not swap what is on top — red-over-blue centre ${JSON.stringify(red.centrePixel)}, blue-over-red centre ${JSON.stringify(blue.centrePixel)}`,
+      );
+    }
+  } else {
+    problems.push('occlusion: the Gate 1 z-order cases are missing from the harness');
+  }
+
   if (errors.length > 0) problems.push(`renderer logged errors:\n    ${errors.join('\n    ')}`);
 
   if (problems.length > 0) {

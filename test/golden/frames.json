@@ -6,7 +6,13 @@
     "coverage": 0.07624,
     "failures": [],
     "layoutDelta": null,
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.015384
   },
   "stack": {
     "width": 1280,
@@ -15,7 +21,13 @@
     "coverage": 0.07624,
     "failures": [],
     "layoutDelta": null,
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.015384
   },
   "stack@640x360": {
     "width": 640,
@@ -28,7 +40,13 @@
       "maxCell": 0.010933,
       "meanCell": 0.002968
     },
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.018308
   },
   "stack-shifted@640x360": {
     "width": 640,
@@ -41,7 +59,43 @@
       "maxCell": 0.120353,
       "meanCell": 0.008047
     },
-    "expectLayoutMismatch": true
+    "expectLayoutMismatch": true,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.018316
+  },
+  "occlusion-red-over-blue": {
+    "width": 1280,
+    "height": 720,
+    "hash": "0a89bdc5",
+    "coverage": 0.22375,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      208,
+      32,
+      32
+    ],
+    "meanLuminance": 0.060455
+  },
+  "occlusion-blue-over-red": {
+    "width": 1280,
+    "height": 720,
+    "hash": "2eb88dc5",
+    "coverage": 0.22375,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      32,
+      64,
+      208
+    ],
+    "meanLuminance": 0.059766
   },
   "testPattern": {
     "width": 1280,
@@ -50,7 +104,43 @@
     "coverage": 0.041968,
     "failures": [],
     "layoutDelta": null,
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      252,
+      252,
+      252
+    ],
+    "meanLuminance": 0.021945
+  },
+  "glow-normal": {
+    "width": 1280,
+    "height": 720,
+    "hash": "48f8f77d",
+    "coverage": 0.060088,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      74,
+      51,
+      20
+    ],
+    "meanLuminance": 0.011315
+  },
+  "glow-add": {
+    "width": 1280,
+    "height": 720,
+    "hash": "b87d261e",
+    "coverage": 0.060088,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      86,
+      59,
+      23
+    ],
+    "meanLuminance": 0.012945
   },
   "blend-modes": {
     "width": 1280,
@@ -59,7 +149,13 @@
     "coverage": 1,
     "failures": [],
     "layoutDelta": null,
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      32
+    ],
+    "meanLuminance": 0.117571
   },
   "resilience": {
     "width": 1280,
@@ -77,6 +173,12 @@
       }
     ],
     "layoutDelta": null,
-    "expectLayoutMismatch": false
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      229,
+      0,
+      229
+    ],
+    "meanLuminance": 0.013142
   }
 }

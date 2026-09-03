@@ -208,6 +208,20 @@ function canonicalizeJson(v: unknown, path: string): JsonValue {
   }
   if (Array.isArray(v)) return v.map((item, i) => canonicalizeJson(item, `${path}[${i}]`));
   if (t === 'object') {
+    // A typed array is an object with numeric keys, so `Object.entries` would
+    // happily turn a 4 MB pixel buffer into a 4-million-key plain object and
+    // call it valid scene state. Refused here, the same way `assertJsonOnly`
+    // refuses it at the send site (I-7) — both boundaries, because content
+    // reaches the scene from a provider as well as from IPC.
+    if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) {
+      throw new SceneFormatError(`${path}: pixel/binary buffers are not scene state (I-7)`);
+    }
+    const proto = Object.getPrototypeOf(v as object);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new SceneFormatError(
+        `${path}: only plain objects are scene state, got ${proto?.constructor?.name ?? 'unknown'}`,
+      );
+    }
     const out: JsonObject = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
       out[k] = canonicalizeJson(val, `${path}.${k}`);

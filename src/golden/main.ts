@@ -157,7 +157,17 @@ function cases(): GoldenCase[] {
       compareTo: 'stack',
       expectLayoutMismatch: true,
     },
+    // Gate 1: reordering layers changes occlusion correctly. Two opaque
+    // overlapping rects, the same scene with the z-order swapped. The hashes
+    // must differ AND the centre pixel must be whichever layer is on top.
+    { name: 'occlusion-red-over-blue', scene: occlusionScene('red') },
+    { name: 'occlusion-blue-over-red', scene: occlusionScene('blue') },
     { name: 'testPattern', scene: testPatternScene() },
+    // Gate 1, condition 1: identical scenes but for the glow's blend mode. The
+    // ONLY difference is `add` vs `normal`, so the gap between their mean
+    // luminances is the additive contribution and nothing else.
+    { name: 'glow-normal', scene: glowOverTree('normal') },
+    { name: 'glow-add', scene: glowOverTree('add') },
     { name: 'blend-modes', scene: blendScene() },
     { name: 'resilience', scene: faulty },
   ];
@@ -172,6 +182,59 @@ function shifted(scene: Scene, layerId: string, dx: number): Scene {
       l.id === layerId ? { ...l, transform: { ...l.transform, x: l.transform.x + dx } } : l,
     ),
   };
+}
+
+function glowOverTree(blendMode: 'normal' | 'add'): Scene {
+  return createScene({
+    id: `golden-glow-${blendMode}`,
+    seed: 0x5eed,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'tree',
+        providerId: PROVIDER_ID,
+        content: { kind: 'tree' },
+        transform: { x: 0.5, y: 0.56, width: 0.5, height: 0.72, rotation: 0 },
+        zOrder: 0,
+      }),
+      createLayer({
+        id: 'glow',
+        providerId: PROVIDER_ID,
+        content: { kind: 'glow', rings: 24, tint: 0xffb040 },
+        transform: { x: 0.5, y: 0.42, width: 0.4, height: 0.4, rotation: 0 },
+        zOrder: 1,
+        blendMode,
+      }),
+    ],
+  });
+}
+
+const OCCLUSION_RED = 0xd02020;
+const OCCLUSION_BLUE = 0x2040d0;
+
+function occlusionScene(top: 'red' | 'blue'): Scene {
+  const z = (which: 'red' | 'blue'): number => (which === top ? 1 : 0);
+  return createScene({
+    id: `golden-occlusion-${top}`,
+    seed: 5,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'red',
+        providerId: PROVIDER_ID,
+        content: { kind: 'rect', tint: OCCLUSION_RED },
+        transform: { x: 0.42, y: 0.5, width: 0.4, height: 0.4, rotation: 0 },
+        zOrder: z('red'),
+      }),
+      createLayer({
+        id: 'blue',
+        providerId: PROVIDER_ID,
+        content: { kind: 'rect', tint: OCCLUSION_BLUE },
+        transform: { x: 0.58, y: 0.5, width: 0.4, height: 0.4, rotation: 0 },
+        zOrder: z('blue'),
+      }),
+    ],
+  });
 }
 
 function testPatternScene(): Scene {
@@ -240,6 +303,20 @@ export interface GoldenResult {
   layoutDelta: { against: string; maxCell: number; meanCell: number } | null;
   /** True for the negative control, whose delta must exceed the threshold. */
   expectLayoutMismatch: boolean;
+  /**
+   * Gate 1: "reordering layers changes occlusion correctly". The RGB of the
+   * pixel at the centre of the frame, where two opaque layers overlap — so the
+   * gate is answered by which colour is actually there, not by a hash saying
+   * something changed.
+   */
+  centrePixel: [number, number, number];
+  /**
+   * I-6, Gate 1: mean luminance of the frame, in [0, 1]. The `add` and
+   * `normal` variants of one glow scene differ only in blend mode, so the
+   * difference between their means is the additive brightening itself —
+   * a number rather than an impression.
+   */
+  meanLuminance: number;
   /** PNG data URL, written to disk by the runner for eyeballing. */
   png: string;
 }
@@ -270,6 +347,28 @@ function signature(pixels: Uint8ClampedArray, width: number, height: number): Fl
     cells[i] = (counts[i] as number) > 0 ? (cells[i] as number) / (counts[i] as number) : 0;
   }
   return cells;
+}
+
+function meanLuminance(pixels: Uint8ClampedArray): number {
+  let sum = 0;
+  const n = pixels.length / 4;
+  for (let i = 0; i < pixels.length; i += 4) {
+    sum +=
+      0.2126 * (pixels[i] as number) +
+      0.7152 * (pixels[i + 1] as number) +
+      0.0722 * (pixels[i + 2] as number);
+  }
+  return sum / n / 255;
+}
+
+/** RGB at the exact centre of the frame. */
+function centreRgb(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): [number, number, number] {
+  const i = ((height >> 1) * width + (width >> 1)) * 4;
+  return [pixels[i] as number, pixels[i + 1] as number, pixels[i + 2] as number];
 }
 
 function fnv1a(bytes: Uint8Array): string {
@@ -352,6 +451,8 @@ async function run(): Promise<GoldenResult[]> {
       png: canvas.toDataURL('image/png'),
       layoutDelta: null,
       expectLayoutMismatch: c.expectLayoutMismatch === true,
+      centrePixel: centreRgb(pixels.pixels, size.width, size.height),
+      meanLuminance: Number(meanLuminance(pixels.pixels).toFixed(6)),
     });
 
     compositor.destroy();

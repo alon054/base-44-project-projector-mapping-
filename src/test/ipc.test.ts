@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { PARAM_TEST_PATTERN_SPEED, assertJsonOnly } from '@shared/ipc';
+import { createDefaultScene } from '../core/defaultScene';
+import { SceneFormatError, canonicalizeScene, deserializeScene, serializeScene } from '../core/scene';
 
 describe('assertJsonOnly — I-7, no pixel buffers over IPC', () => {
   it('passes a realistic parameter payload', () => {
@@ -56,5 +59,61 @@ describe('assertJsonOnly — I-7, no pixel buffers over IPC', () => {
   it('accepts null and reuses object identity for repeat visits', () => {
     const shared = { v: 1 };
     expect(() => assertJsonOnly({ a: shared, b: shared, c: null })).not.toThrow();
+  });
+});
+
+/**
+ * I-7 re-verified for Phase 1's new scene-state channel. The rolling check
+ * asks for this at every gate, not once — a channel added after Gate 0 is
+ * exactly what the "at every gate" is for.
+ */
+describe('I-7 — the scene channel carries state, never pixels', () => {
+  it('a real scene passes the guard', () => {
+    const scene = createDefaultScene();
+    expect(() => assertJsonOnly({ scene })).not.toThrow();
+    // And survives the trip it is about to make.
+    expect(deserializeScene(serializeScene(scene))).toEqual(scene);
+  });
+
+  it('a scene carrying a pixel buffer is refused at the send site', () => {
+    const scene = createDefaultScene();
+    const smuggled = {
+      scene: {
+        ...scene,
+        layers: [{ ...scene.layers[0], content: { atlas: new Uint8ClampedArray(64) } }],
+      },
+    };
+    expect(() => assertJsonOnly(smuggled)).toThrow(/I-7/);
+  });
+
+  it('and refused again by the scene format, before it reaches the guard', () => {
+    expect(() =>
+      canonicalizeScene({
+        id: 's',
+        layers: [{ id: 'a', providerId: 'p', content: { atlas: new Uint8ClampedArray(4) } }],
+      }),
+    ).toThrow(SceneFormatError);
+  });
+});
+
+/**
+ * The guard is only worth having if it is on every send site. Checked
+ * mechanically rather than by review, because "someone will remember" is how
+ * the one unguarded channel gets added.
+ */
+describe('I-7 — every renderer send passes through the guard', () => {
+  it('no ipcRenderer.send or invoke carries an unguarded payload', () => {
+    const preload = readFileSync(
+      new URL('../../electron/preload.ts', import.meta.url).pathname,
+      'utf8',
+    );
+    const calls = preload.match(/ipcRenderer\.(send|invoke)\([^)]*\)/g) ?? [];
+    expect(calls.length).toBeGreaterThan(5);
+    for (const call of calls) {
+      // A send with no payload at all is fine; anything with one must be guarded.
+      const args = call.slice(call.indexOf('(') + 1, -1).split(',');
+      if (args.length < 2) continue;
+      expect(call, `unguarded IPC send site: ${call}`).toContain('assertJsonOnly');
+    }
   });
 });

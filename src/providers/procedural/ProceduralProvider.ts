@@ -20,7 +20,7 @@ import type {
 
 export const PROCEDURAL_PROVIDER_ID = 'procedural';
 
-export const PROCEDURAL_KINDS = ['testPattern', 'tree', 'water', 'glow', 'fault'] as const;
+export const PROCEDURAL_KINDS = ['testPattern', 'tree', 'water', 'glow', 'rect', 'fault'] as const;
 export type ProceduralKind = (typeof PROCEDURAL_KINDS)[number];
 
 export function isProceduralKind(v: unknown): v is ProceduralKind {
@@ -46,6 +46,8 @@ export class ProceduralProvider implements ContentProvider {
         return new WaterView(ctx);
       case 'glow':
         return new GlowView(ctx);
+      case 'rect':
+        return new RectView(ctx);
       case 'fault':
         return new FaultView(ctx);
     }
@@ -275,6 +277,34 @@ class GlowView extends BaseView {
       const t = i / this.rings;
       g.circle(cx, cy, maxR * t).fill({ color: this.tint, alpha: 0.05 * (1 - t) + 0.01 });
     }
+  }
+
+  update(): void {
+    // Static in Phase 1.
+  }
+}
+
+/**
+ * A flat opaque fill. Deliberately the dullest object here, and the only one
+ * that makes occlusion unambiguous: every other procedural object is either
+ * translucent or mostly empty, so "is this layer on top" becomes a judgement
+ * about alpha rather than a fact about order. Gate 1 asks whether reordering
+ * changes occlusion *correctly*, which needs something that actually covers.
+ */
+class RectView extends BaseView {
+  private readonly g = new Graphics();
+  private readonly tint: number;
+
+  constructor(ctx: ProviderContext) {
+    super(ctx);
+    const tint = ctx.content['tint'];
+    this.tint = typeof tint === 'number' ? tint >>> 0 : 0xffffff;
+    this.view.addChild(this.g);
+    this.redraw();
+  }
+
+  protected redraw(): void {
+    this.g.clear().rect(0, 0, this.w, this.h).fill({ color: this.tint, alpha: 1 });
   }
 
   update(): void {

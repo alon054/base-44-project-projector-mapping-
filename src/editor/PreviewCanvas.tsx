@@ -7,17 +7,22 @@
  */
 import { useEffect, useRef } from 'react';
 import { createRenderHost, type RenderHost } from '../render/host';
+import type { Scene } from '../core/scene';
 
 export const PREVIEW_SIZE = { width: 480, height: 270 } as const;
 
 interface Props {
   speed: number;
   nominalMs: number;
+  scene: Scene;
 }
 
-export function PreviewCanvas({ speed, nominalMs }: Props): React.JSX.Element {
+export function PreviewCanvas({ speed, nominalMs, scene }: Props): React.JSX.Element {
   const mount = useRef<HTMLDivElement | null>(null);
   const host = useRef<RenderHost | null>(null);
+  // The mount effect runs once and must not capture a stale scene.
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
 
   useEffect(() => {
     let disposed = false;
@@ -38,6 +43,7 @@ export function PreviewCanvas({ speed, nominalMs }: Props): React.JSX.Element {
       }
       host.current = h;
       h.setSpeed(speed);
+      h.setScene(sceneRef.current);
     });
 
     return () => {
@@ -56,6 +62,10 @@ export function PreviewCanvas({ speed, nominalMs }: Props): React.JSX.Element {
   useEffect(() => {
     if (nominalMs > 0) host.current?.setNominalMs(nominalMs);
   }, [nominalMs]);
+
+  useEffect(() => {
+    host.current?.setScene(scene);
+  }, [scene]);
 
   return (
     <div
