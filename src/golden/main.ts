@@ -29,7 +29,7 @@ import 'pixi.js/unsafe-eval';
 import { Application, Rectangle } from 'pixi.js';
 import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
-import { moveLayer } from '../core/sceneEdit';
+import { addLayer, moveLayer } from '../core/sceneEdit';
 import { createDefaultScene } from '../core/defaultScene';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
@@ -177,6 +177,13 @@ function cases(): GoldenCase[] {
       scene: moveLayer(occlusionScene('red'), 'blue', 1),
       afterScene: occlusionScene('red'),
     },
+    // EXACTLY the operator's click sequence: the default scene, "+ rect",
+    // "+ rect", then the top one moved back one place. If these two hash the
+    // same, the layer list cannot demonstrate z-order no matter how correct
+    // the engine is — which is the failure this pair exists to catch, and the
+    // one that wasted three rounds of clicking on the wall.
+    { name: 'editor-two-rects', scene: twoRects(false) },
+    { name: 'editor-two-rects-swapped', scene: twoRects(true) },
     { name: 'testPattern', scene: testPatternScene() },
     // Gate 1, condition 1: identical scenes but for the glow's blend mode. The
     // ONLY difference is `add` vs `normal`, so the gap between their mean
@@ -222,6 +229,13 @@ function glowOverTree(blendMode: 'normal' | 'add'): Scene {
       }),
     ],
   });
+}
+
+/** The default scene after two "+ rect" clicks, optionally reordered. */
+function twoRects(swapped: boolean): Scene {
+  const spec = { idPrefix: 'rect', providerId: PROVIDER_ID, content: { kind: 'rect' } };
+  const s = addLayer(addLayer(createDefaultScene(), spec), spec);
+  return swapped ? moveLayer(s, 'rect-2', -1) : s;
 }
 
 const OCCLUSION_RED = 0xd02020;
