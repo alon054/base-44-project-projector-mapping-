@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { createLayer, isNormalizedTransform } from '../core/layer';
 import { createScene, deserializeScene, layersInDrawOrder, serializeScene } from '../core/scene';
-import { addLayer, moveLayer, removeLayer } from '../core/sceneEdit';
+import { addLayer, moveLayer, removeLayer, reorderLayer } from '../core/sceneEdit';
 import { ParameterRegistry, defineLayerParameters } from '../core/parameters';
 
 const base = () =>
@@ -151,5 +151,49 @@ describe('moveLayer — Gate 1: reordering changes occlusion correctly', () => {
     const s = moveLayer(base(), 'a', 1);
     expect(deserializeScene(serializeScene(s))).toEqual(s);
     expect(order(deserializeScene(serializeScene(s)))).toEqual(['b', 'a', 'c']);
+  });
+});
+
+describe('reorderLayer — drag and drop', () => {
+  it('drops a layer at an absolute position', () => {
+    expect(order(reorderLayer(base(), 'a', 2))).toEqual(['b', 'c', 'a']);
+    expect(order(reorderLayer(base(), 'c', 0))).toEqual(['c', 'a', 'b']);
+    expect(order(reorderLayer(base(), 'b', 2))).toEqual(['a', 'c', 'b']);
+  });
+
+  it('clamps past either end, unlike the buttons — a drag past the end means "put it at the end"', () => {
+    expect(order(reorderLayer(base(), 'a', 99))).toEqual(['b', 'c', 'a']);
+    expect(order(reorderLayer(base(), 'c', -99))).toEqual(['c', 'a', 'b']);
+    // The button affordance stays strict: a press past the end does nothing.
+    expect(order(moveLayer(base(), 'c', 1))).toEqual(['a', 'b', 'c']);
+  });
+
+  it('dropping a layer on itself changes nothing', () => {
+    const s = base();
+    expect(reorderLayer(s, 'b', 1)).toBe(s);
+  });
+
+  it('an unknown id is a no-op', () => {
+    const s = base();
+    expect(reorderLayer(s, 'nope', 0)).toBe(s);
+  });
+
+  it('leaves zOrder and array position agreeing', () => {
+    const s = reorderLayer(base(), 'a', 2);
+    expect(s.layers.map((l) => [l.id, l.zOrder])).toEqual(
+      layersInDrawOrder(s).map((l, i) => [l.id, i]),
+    );
+  });
+
+  it('reaches every permutation the buttons can, so the two affordances agree', () => {
+    // Dragging `a` to the front must equal pressing up twice.
+    expect(order(reorderLayer(base(), 'a', 2))).toEqual(
+      order(moveLayer(moveLayer(base(), 'a', 1), 'a', 1)),
+    );
+  });
+
+  it('a drag survives the round-trip (I-12)', () => {
+    const s = reorderLayer(base(), 'a', 2);
+    expect(deserializeScene(serializeScene(s))).toEqual(s);
   });
 });

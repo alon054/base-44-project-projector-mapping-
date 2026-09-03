@@ -88,6 +88,29 @@ export function removeLayer(scene: Scene, id: string): Scene {
  * jumped from the back to the front because the operator pressed the button
  * once too often is a surprise in a live session.
  */
+/**
+ * Moves a layer to an absolute position in the draw order. Backs drag-and-drop,
+ * where the operator names a destination rather than a direction.
+ *
+ * Out-of-range destinations are **clamped**, unlike `moveLayer`, which returns
+ * the scene unchanged. The difference is deliberate and follows the gesture:
+ * a button press past the end is a mistake and should do nothing, while a drag
+ * past the end is an unambiguous request for "put it at the end".
+ */
+export function reorderLayer(scene: Scene, id: string, toIndex: number): Scene {
+  const order = layersInDrawOrder(scene);
+  const from = order.findIndex((l) => l.id === id);
+  if (from < 0) return scene;
+  const to = Math.max(0, Math.min(order.length - 1, Math.floor(toIndex)));
+  if (to === from) return scene;
+  const next = [...order];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved as Layer);
+  // Same rule as `moveLayer`: zOrder comes from the new ARRAY position, never
+  // from `reindexZOrder`, which would re-sort by the values being changed.
+  return { ...scene, layers: next.map((l, k) => ({ ...l, zOrder: k })) };
+}
+
 export function moveLayer(scene: Scene, id: string, delta: number): Scene {
   const order = layersInDrawOrder(scene);
   const i = order.findIndex((l) => l.id === id);

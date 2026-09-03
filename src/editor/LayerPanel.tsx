@@ -5,11 +5,12 @@
  * than mutating the layer directly. Structure — which layers exist and in what
  * order — is not a parameter and is edited on the scene itself.
  */
+import { useState } from 'react';
 import type { SceneFailure } from '@shared/ipc';
 import { BLEND_MODES, type BlendMode } from '../core/layer';
 import type { ParameterRegistry } from '../core/parameters';
 import { layersInDrawOrder, type Scene } from '../core/scene';
-import { addLayer, moveLayer, removeLayer } from '../core/sceneEdit';
+import { addLayer, moveLayer, removeLayer, reorderLayer } from '../core/sceneEdit';
 import {
   PROCEDURAL_KINDS,
   PROCEDURAL_PROVIDER_ID,
@@ -44,6 +45,26 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
   const move = (id: string, delta: number): void =>
     setScene((prev) => moveLayer(prev, id, delta));
 
+  /**
+   * Drag-and-drop reordering. The grip is the drag source rather than the whole
+   * row: a draggable row swallows pointer gestures on the sliders inside it, so
+   * the opacity control would stop working in exchange for a nicer reorder.
+   */
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  const endDrag = (): void => {
+    setDragId(null);
+    setDropIndex(null);
+  };
+
+  const dropOn = (index: number): void => {
+    const id = dragId;
+    endDrag();
+    if (id === null) return;
+    setScene((prev) => reorderLayer(prev, id, index));
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -54,8 +75,9 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
         ))}
       </div>
       <p style={{ margin: 0, fontSize: 11, color: '#6f767d' }}>
-        Listed back to front — the last row draws on top. <code>fault</code> throws on purpose
-        (I-13): it must show a magenta placeholder, never blank the frame.
+        Listed back to front — the last row draws on top. Drag the <span aria-hidden>⠿</span> grip
+        to reorder, or use ↑ / ↓. <code>fault</code> throws on purpose (I-13): it must show a
+        magenta placeholder, never blank the frame.
       </p>
 
       {ordered.length === 0 && (
@@ -67,17 +89,56 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
         return (
           <div
             key={layer.id}
+            onDragOver={(e) => {
+              if (dragId === null) return;
+              // Without preventDefault the browser refuses the drop entirely.
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dropIndex !== i) setDropIndex(i);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              dropOn(i);
+            }}
             style={{
-              border: `1px solid ${failure ? '#7a2a72' : '#2b2f34'}`,
+              border: `1px solid ${
+                dropIndex === i && dragId !== null && dragId !== layer.id
+                  ? '#7CFFB2'
+                  : failure
+                    ? '#7a2a72'
+                    : '#2b2f34'
+              }`,
               borderRadius: 5,
               padding: 8,
               background: failure ? '#1d1420' : '#191c1f',
+              opacity: dragId === layer.id ? 0.45 : 1,
               display: 'flex',
               flexDirection: 'column',
               gap: 6,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                draggable
+                onDragStart={(e) => {
+                  setDragId(layer.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                  // Firefox refuses to start a drag without payload. The id is
+                  // carried in React state; this is only to satisfy the API.
+                  e.dataTransfer.setData('text/plain', layer.id);
+                }}
+                onDragEnd={endDrag}
+                title="Drag to reorder"
+                aria-label={`Drag ${layer.name} to reorder`}
+                style={{
+                  cursor: 'grab',
+                  color: '#6f767d',
+                  padding: '0 2px',
+                  userSelect: 'none',
+                }}
+              >
+                ⠿
+              </span>
               <code style={{ flex: 1, fontSize: 12 }}>
                 z{layer.zOrder} {layer.name}
               </code>
