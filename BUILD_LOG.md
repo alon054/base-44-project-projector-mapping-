@@ -2455,3 +2455,40 @@ spread above is the first. The second, found in part 6: the probe renders
 composite** — `k_dev` 42–50 warp-off against 90–96 warp-on, which is not a
 speedup. Any fix must render the composite. A15 also remains due at Gate 3 and
 measured 0.600% of N against its 2% trigger across all four Phase 2 runs.
+
+## 2026-09-04 — Phase 2 (session 1, part 8) — the Gate 2 calibration, recorded
+
+Appended to correct a claim made in the Phase 3 handoff, which said these values
+were "preserved in `BUILD_LOG.md`". They were not. `calibration/warp.json` is
+gitignored, so the file was the only copy and resetting it would have destroyed
+them.
+
+`MEASURED` — **the keystone the operator set by hand at Gate 2**, on a
+deliberately tilted projector, at DEV_RESOLUTION 1280×720:
+
+| corner | normalized | pixels @1280×720 |
+|---|---|---|
+| TL | 0.0622, 0.1375 | 80, 99 |
+| TR | 0.9840, 0.4271 | 1260, 308 |
+| BR | 0.9120, 1.0000 | 1167, 720 |
+| BL | 0.0130, 0.7480 | 17, 539 |
+
+Quad area **0.5966** of the output rect, and strongly off-axis — the right edge
+drops 0.4271 → 1.0000 while the left drops 0.1375 → 0.7480, which is a projector
+rotated as well as tilted. Not a textbook symmetric keystone, and worth keeping
+for that reason.
+
+Two uses beyond the record:
+
+1. **A real Phase-2-format fixture for Phase 7.** Gate 7 requires that "a
+   Phase-2 calibration file either loads or is migrated — never silently
+   misinterpreted", and an earlier `IDEAS` note observed there was no committed
+   example of the format to test that against. This is one, and it is a quad a
+   person actually produced rather than one invented for a test.
+2. **A non-trivial input for the tessellation check.** `src/test/warp.test.ts`
+   grades the 40×40 mesh against a symmetric keystone and a synthetic harsh
+   quad. This is a measured third case.
+
+The projector has since been straightened, so this calibration no longer matches
+the physical setup and applying it now would bend a straight projection. It is
+recorded as data, not as a calibration to restore.
