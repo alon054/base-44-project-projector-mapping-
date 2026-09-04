@@ -27,8 +27,16 @@ import {
 import { PreviewCanvas } from './PreviewCanvas';
 import { LayerPanel } from './LayerPanel';
 import { useSceneRegistry } from './useSceneRegistry';
-import { createDefaultScene } from '../core/defaultScene';
+import { WarpPanel } from './WarpPanel';
+import { createAltScene, createDefaultScene } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
+import {
+  calibrationFor,
+  canonicalizeCalibration,
+  canonicalizeCalibrationFile,
+  createCalibration,
+  type ViewportCalibration,
+} from '../render/calibration';
 
 
 export function App(): React.JSX.Element {
@@ -58,6 +66,14 @@ export function App(): React.JSX.Element {
   const frameWaitRef = useRef<number[]>([]);
   const [measureLabel, setMeasureLabel] = useState('');
   const token = useRef(0);
+  /**
+   * I-5. Held here, sent on its OWN channel, and never folded into the scene —
+   * which is what makes "loading a different scene keeps the same calibration"
+   * a property of the design rather than of message ordering.
+   */
+  const [calibration, setCalibration] = useState<ViewportCalibration>(() =>
+    createCalibration(CALIBRATION_VIEWPORT),
+  );
 
   // The whole scene, on every edit. Small, operator-paced, and JSON only (I-7).
   useEffect(() => {
@@ -65,6 +81,34 @@ export function App(): React.JSX.Element {
   }, [scene]);
 
   useEffect(() => window.engine.onSceneFailures(setFailures), []);
+
+  // I-5: read the stored calibration once at launch. A read that fails leaves
+  // the identity calibration in place — unwarped is visible and correctable.
+  useEffect(() => {
+    void window.engine
+      .getCalibration()
+      .then((raw) => {
+        if (!raw || typeof raw !== 'object') return;
+        setCalibration(
+          'viewports' in (raw as object)
+            ? calibrationFor(canonicalizeCalibrationFile(raw), CALIBRATION_VIEWPORT)
+            : canonicalizeCalibration(raw, CALIBRATION_VIEWPORT),
+        );
+      })
+      .catch((err: unknown) => {
+        console.error(`[warp] could not read stored calibration: ${String(err)}`);
+      });
+  }, []);
+
+  const applyCalibration = useCallback((next: ViewportCalibration) => {
+    setCalibration(next);
+    // Plain JSON across the boundary (I-7); normalized corners only (I-1).
+    window.engine.setCalibration({
+      viewportId: next.viewportId,
+      enabled: next.enabled,
+      corners: next.corners.map((p) => ({ x: p.x, y: p.y })),
+    });
+  }, []);
 
   const refreshDisplays = useCallback(() => {
     void window.engine.listDisplays().then(setDisplays);
@@ -330,6 +374,38 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
           <PreviewCanvas speed={speed} nominalMs={nominalMs} scene={scene} />
         </Panel>
 
+        <Panel title="Warp — I-5 final stage, calibration/ not scenes">
+          <WarpPanel
+            calibration={calibration}
+            onChange={applyCalibration}
+            output={DEV_RESOLUTION}
+          />
+          <div style={{ marginTop: 10, borderTop: '1px solid #2b2f34', paddingTop: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createDefaultScene())}
+              >
+                Scene A
+              </button>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createAltScene())}
+              >
+                Scene B
+              </button>
+              <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: 12, color: '#8b939b' }}>
+              Gate 2: switching these must leave the corners above untouched. Two
+              constructed scenes through the existing editor path — the scene bank,
+              save/load and undo are all Phase 6 and are not built here.
+            </p>
+          </div>
+        </Panel>
+
         <Panel title="Layers — z-order, opacity, blend (I-1, I-6, I-8)">
           <LayerPanel
             scene={scene}
@@ -358,6 +434,9 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
     </div>
   );
 }
+
+/** I-9: the single viewport v1 drives. Calibration is keyed by it. */
+const CALIBRATION_VIEWPORT = 'main';
 
 const buttonStyle: React.CSSProperties = {
   marginTop: 8,

@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { createAltScene, createDefaultScene } from '../core/defaultScene';
 
 const SRC = join(import.meta.dirname, '..');
 
@@ -204,5 +205,33 @@ describe('the warp mesh is subdivided, not a bare quad', () => {
     const hard = maxDeviationPx(harsh, n);
     expect(gate).toBeLessThan(0.5);
     expect(hard).toBeLessThan(0.5);
+  });
+});
+
+/**
+ * Gate 2: "loading a different scene keeps the same calibration."
+ *
+ * The scene bank is Phase 6, so the honest test is a second CONSTRUCTED scene
+ * through the editor's existing path. Two things have to hold for that to mean
+ * anything, and only one of them is about the warp.
+ */
+describe('Gate 2 — the second scene is a real second scene', () => {
+  it('is not the default scene with a different id', () => {
+    const a = createDefaultScene();
+    const b = createAltScene();
+    expect(b.id).not.toBe(a.id);
+    // Phase 1 shipped two added layers that were pixel-identical and it cost
+    // three rounds of clicking at a wall. A scene switch the operator cannot
+    // SEE proves nothing about whether the calibration survived it.
+    expect(b.layers.map((l) => l.id)).not.toEqual(a.layers.map((l) => l.id));
+    expect(b.layers.length).toBeGreaterThan(2);
+    const tints = new Set(b.layers.map((l) => JSON.stringify(l.content)));
+    expect(tints.size).toBeGreaterThan(1);
+  });
+
+  it('carries no calibration of its own — the warp is not scene state (I-5)', () => {
+    for (const scene of [createDefaultScene(), createAltScene()]) {
+      expect(/warp|calibrat|corner/i.test(JSON.stringify(scene))).toBe(false);
+    }
   });
 });
