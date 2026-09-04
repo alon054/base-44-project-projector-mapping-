@@ -43,6 +43,19 @@ export const CH = {
   sceneSet: 'scene:set',
   /** output -> main -> editor: layers currently showing an I-13 placeholder. */
   sceneFailures: 'scene:failures',
+  /**
+   * I-5. editor -> main -> output: the whole warp calibration for one viewport.
+   * Main persists it to `calibration/` on the way through and forwards it; it
+   * never inspects it (see electron/calibration.ts).
+   *
+   * A separate channel from `scene:set` on purpose. Sharing one would make
+   * "loading a different scene keeps the same calibration" a property of
+   * message ordering rather than of the design, and I-5 says these are
+   * different kinds of state.
+   */
+  calibrationSet: 'calibration:set',
+  /** renderer -> main (invoke): the stored calibration, or null. Read at launch. */
+  calibrationGet: 'calibration:get',
   /** output -> main -> editor: HUD numbers, for the editor's always-on text mirror (C4). */
   metrics: 'metrics:report',
   /** editor -> main (invoke): enumerate displays. */
@@ -80,6 +93,18 @@ export interface SceneSet {
 }
 
 /** I-13: what the output is showing as broken, mirrored into the layer list. */
+/**
+ * The wire shape of one viewport's calibration. Structural and JSON-only (I-7):
+ * main relays it without understanding it, and the renderer canonicalizes on
+ * receipt exactly as it does for a scene. `corners` is TL, TR, BR, BL in
+ * normalized [0,1] output space (I-1) — no pixels cross this channel either.
+ */
+export interface CalibrationSet {
+  viewportId: string;
+  enabled: boolean;
+  corners: { x: number; y: number }[];
+}
+
 export interface SceneFailure {
   layerId: string;
   layerName: string;

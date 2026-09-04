@@ -25,9 +25,11 @@ import {
   type ProvocationSpec,
   type RunConditions,
   type SceneFailure,
+  type CalibrationSet,
   type SceneSet,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
+import { calibrationFilePath, loadCalibrationRaw, saveCalibrationRaw } from './calibration';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
 
@@ -452,6 +454,12 @@ function watchDisplays(): void {
  * renderer's `canonicalizeScene`).
  */
 let lastScene: SceneSet | null = null;
+/**
+ * I-5. Held so a reopened output window gets the live calibration rather than
+ * whatever was last flushed to disk, and — the Gate 2 condition — so it
+ * survives every scene change, because nothing on the scene path touches it.
+ */
+let lastCalibration: CalibrationSet | null = null;
 
 // ---------------------------------------------------------------------------
 // IPC relay. Every payload passes the I-7 guard on the way through.
@@ -465,6 +473,24 @@ function wireIpc(): void {
     lastScene = assertJsonOnly(payload);
     send(outputWin, CH.sceneSet, lastScene);
   });
+
+  /**
+   * I-5. Persist first, then forward. If the write fails the operator still
+   * sees the warp change on the wall — losing the *file* is recoverable, and
+   * refusing to apply a calibration because a disk write failed would be the
+   * wrong trade in front of an audience (I-13).
+   *
+   * Main does not validate the payload beyond the I-7 JSON guard. It does not
+   * know what a corner is, and nothing here should teach it.
+   */
+  ipcMain.on(CH.calibrationSet, (_e: IpcMainEvent, payload: CalibrationSet) => {
+    const cal = assertJsonOnly(payload);
+    lastCalibration = cal;
+    saveCalibrationRaw({ version: 1, viewports: [cal] });
+    send(outputWin, CH.calibrationSet, cal);
+  });
+
+  ipcMain.handle(CH.calibrationGet, (): unknown => lastCalibration ?? loadCalibrationRaw());
 
   ipcMain.on(CH.sceneFailures, (_e: IpcMainEvent, payload: SceneFailure[]) => {
     send(editorWin, CH.sceneFailures, assertJsonOnly(payload));

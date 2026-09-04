@@ -7,6 +7,11 @@ out/
 
 # app/installation prefs are machine-local, not shared state (SPEC.md §7)
 config/settings.json
+
+# Warp calibration describes one physical surface in one room (I-5). It is
+# machine-local for the same reason settings.json is, and sharing one would be
+# actively wrong: a calibration from another wall is worse than none.
+calibration/warp.json
 measurements/*.log
 
 # Golden-frame previews: written on every render-test run, for eyeballing a

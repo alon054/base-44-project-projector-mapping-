@@ -6,6 +6,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CH, assertJsonOnly } from './ipc';
 import type {
+  CalibrationSet,
   DisplayInfo,
   MetricsReport,
   OutputConfig,
@@ -43,6 +44,19 @@ const api = {
     const h = (_e: unknown, s: SceneSet) => cb(s);
     ipcRenderer.on(CH.sceneSet, h);
     return () => ipcRenderer.off(CH.sceneSet, h);
+  },
+  // I-5: editor -> main -> output. Main persists it on the way through.
+  setCalibration(c: CalibrationSet): void {
+    ipcRenderer.send(CH.calibrationSet, assertJsonOnly(c));
+  },
+  onCalibration(cb: (c: CalibrationSet) => void): () => void {
+    const h = (_e: unknown, c: CalibrationSet) => cb(c);
+    ipcRenderer.on(CH.calibrationSet, h);
+    return () => ipcRenderer.off(CH.calibrationSet, h);
+  },
+  /** The stored calibration file as raw JSON, or null. Canonicalized by the caller. */
+  getCalibration(): Promise<unknown> {
+    return ipcRenderer.invoke(CH.calibrationGet) as Promise<unknown>;
   },
   // output -> editor: I-13 flags for the layer list
   reportSceneFailures(f: SceneFailure[]): void {

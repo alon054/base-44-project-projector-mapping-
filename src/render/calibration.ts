@@ -246,6 +246,17 @@ export function canonicalizeCalibrationFile(raw: unknown): CalibrationFile {
   return { version: CALIBRATION_VERSION, viewports };
 }
 
+/**
+ * One viewport's calibration from whatever arrived over IPC. Tolerant in the
+ * same way and for the same reason as `canonicalizeCalibrationFile`: this is
+ * the validation boundary, and a malformed message leaves the warp showing what
+ * it already had rather than half-applying a new one (the same policy
+ * `canonicalizeScene` follows for scenes).
+ */
+export function canonicalizeCalibration(raw: unknown, viewportId: string): ViewportCalibration {
+  return readViewport(raw) ?? createCalibration(viewportId);
+}
+
 /** The viewport's calibration, or a fresh identity one if it has none yet. */
 export function calibrationFor(file: CalibrationFile, viewportId: string): ViewportCalibration {
   return file.viewports.find((v) => v.viewportId === viewportId) ?? createCalibration(viewportId);

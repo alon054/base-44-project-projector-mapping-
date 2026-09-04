@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { PARAM_TEST_PATTERN_SPEED, assertJsonOnly } from '@shared/ipc';
+import { CH, PARAM_TEST_PATTERN_SPEED, assertJsonOnly } from '@shared/ipc';
 import { createDefaultScene } from '../core/defaultScene';
 import { SceneFormatError, canonicalizeScene, deserializeScene, serializeScene } from '../core/scene';
 
@@ -115,5 +115,46 @@ describe('I-7 — every renderer send passes through the guard', () => {
       if (args.length < 2) continue;
       expect(call, `unguarded IPC send site: ${call}`).toContain('assertJsonOnly');
     }
+  });
+});
+
+/**
+ * I-5 + I-7 — the calibration channel.
+ *
+ * It is separate from `scene:set` on purpose. One shared channel would make
+ * "loading a different scene keeps the same calibration" (Gate 2) a property of
+ * message ordering rather than of the design, and I-5 says these are different
+ * kinds of state that are persisted to different places.
+ */
+describe('I-5 — calibration crosses on its own channel', () => {
+  it('is a distinct channel from the scene', () => {
+    expect(CH.calibrationSet).not.toBe(CH.sceneSet);
+    expect(CH.calibrationGet).not.toBe(CH.sceneSet);
+    // Distinct values, so a typo cannot alias two channels onto one string.
+    const values = Object.values(CH);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  it('a real calibration payload passes the guard', () => {
+    const payload = {
+      viewportId: 'main',
+      enabled: true,
+      corners: [
+        { x: 0.12, y: 0 },
+        { x: 0.88, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+      ],
+    };
+    expect(assertJsonOnly(payload)).toBe(payload);
+  });
+
+  it('refuses a pixel buffer smuggled in as corners', () => {
+    // The same I-7 hole `canonicalizeScene` had: a typed array is an object
+    // with numeric keys, so anything that only checks "is it an object" lets a
+    // frame buffer through on a channel that is supposed to carry eight floats.
+    expect(() =>
+      assertJsonOnly({ viewportId: 'main', enabled: true, corners: new Float32Array(8) }),
+    ).toThrow();
   });
 });

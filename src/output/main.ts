@@ -12,6 +12,14 @@ import {
 } from '@shared/ipc';
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
+import {
+  canonicalizeCalibration,
+  calibrationFor,
+  canonicalizeCalibrationFile,
+  createCalibration,
+  type ViewportCalibration,
+} from '../render/calibration';
+import { createOutputs, primaryViewport } from '../render/outputs';
 import { canonicalizeScene, layersInDrawOrder, type Scene } from '../core/scene';
 import { judgeSoak, type GpuSample } from '../debug/gpu';
 
@@ -46,6 +54,30 @@ let host: Awaited<ReturnType<typeof createRenderHost>> | null = null;
 const pendingSpeed: { v: { value: number; token: number; t0: number } | null } = { v: null };
 /** Same race as the speed above: a scene can arrive before Pixi has finished init. */
 const pendingScene: { v: Scene | null } = { v: null };
+/**
+ * I-5, and the same race again. The stored calibration is fetched in parallel
+ * with Pixi init, and an editor edit can land before either finishes.
+ */
+const pendingCalibration: { v: ViewportCalibration | null } = { v: null };
+
+/**
+ * I-9: the one place v1 is allowed to assume a single output. Calibration is
+ * keyed by this, so a second projector in Phase 11 is another entry in the
+ * file rather than a migration of it.
+ */
+const VIEWPORT_ID = primaryViewport(createOutputs(DEV_RESOLUTION.width, DEV_RESOLUTION.height)).id;
+
+function applyCalibration(cal: ViewportCalibration): void {
+  if (!host) {
+    pendingCalibration.v = cal;
+    return;
+  }
+  // The `[warp]` line is emitted from inside the stage, on change only, and
+  // states the toggle and all four corners. Phase 1's `[scene] applied` is what
+  // made three editor bugs findable; warp state is strictly harder to read off
+  // a projection than draw order is, so it gets the same treatment.
+  host.setCalibration(cal);
+}
 
 /**
  * I-13, mirrored back to the editor's layer list. Sent only when the set
@@ -219,10 +251,29 @@ window.engine.onParam((p) => {
 
 window.engine.onScene((s) => applyScene(s.scene));
 
+window.engine.onCalibration((c) => applyCalibration(canonicalizeCalibration(c, VIEWPORT_ID)));
+
 window.engine.onWarning((w) => {
   banner.textContent = w.text;
   banner.style.display = w.level === 'info' ? 'none' : 'block';
 });
+
+// Fetched before the await below so the stored calibration and Pixi init
+// overlap rather than queue. I-13: a rejected read is not fatal — the session
+// opens unwarped, which is a visible, correctable state.
+const storedCalibration: Promise<ViewportCalibration> = window.engine
+  .getCalibration()
+  .then((raw) => {
+    // A single viewport entry (what the live relay sends) or a whole file
+    // (what disk holds) are both accepted; the file is the general case.
+    const single = canonicalizeCalibration(raw, VIEWPORT_ID);
+    const fromFile = calibrationFor(canonicalizeCalibrationFile(raw), VIEWPORT_ID);
+    return raw && typeof raw === 'object' && 'viewports' in (raw as object) ? fromFile : single;
+  })
+  .catch((err: unknown) => {
+    console.error(`[warp] could not read stored calibration: ${String(err)}`);
+    return createCalibration(VIEWPORT_ID);
+  });
 
 host = await createRenderHost({
   parent: stage,
@@ -230,12 +281,27 @@ host = await createRenderHost({
   height: config.height,
   nominalMs: 0,
   onPresented: (token, t0) => window.engine.ackParam({ token, t0 }),
+  // I-5. Only the output window warps. The editor preview deliberately does
+  // not — D11 makes the preview the placement space, and placing objects on a
+  // distorted canvas teaches the wrong mental model from the start.
+  warp: true,
+  onWarpFallback: (reason) => {
+    // I-13: the warp is gone, the session is not. Say so where it can be seen.
+    banner.textContent = `warp disabled: ${reason}`;
+    banner.style.display = 'block';
+  },
 });
 
 if (pendingScene.v) {
   host.setScene(pendingScene.v);
   pendingScene.v = null;
 }
+
+// A live edit that landed during init wins over the stored file — it is newer.
+void storedCalibration.then((stored) => {
+  applyCalibration(pendingCalibration.v ?? stored);
+  pendingCalibration.v = null;
+});
 reportFailures();
 
 if (pendingSpeed.v) {
