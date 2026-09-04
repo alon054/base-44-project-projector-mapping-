@@ -2514,3 +2514,180 @@ The float dust (`0.9119999999999999` for what the operator dragged to 0.912,
 in the input. Worth keeping visible: I-1 stores normalized values and I-12
 judges round-trips by deep equality, so a Phase 7 migration that "cleans up"
 these values would fail its own round-trip test for a tidy-looking reason.
+
+## 2026-09-04 — Phase 3 (session 1) — the clock, and the ticker's funeral
+
+- DID: rolling checks reset for Phase 3 (I-10 activated, `[-]` → `[ ]`); three
+  rulings taken from the operator; `core/clock.ts` (I-2) built and Phase 0's
+  throwaway ticker deleted; `[clock]` log line and the transport/loop-ruler
+  built alongside it; a protocol defect found by that log line on the first
+  launch and fixed.
+- MEASURED: unit suite **262 → 313**, 51 of them the clock's. **19 golden
+  frames byte-identical, none re-blessed.** Smoke launch `[scale] buffer
+  1280×720 css 1280×720 dpr 1 displayScaleFactor 1 **1:1 to panel**`, `[warp]
+  main: OFF identity mesh=bypassed`.
+- BLOCKER: none.
+- NEXT: sprite-sheet layer, then video, then Lottie — each with its placeholder
+  path (I-13) and its registry keys (I-8) in the same commit. Then the two-probe
+  measure run and the A8 probe fix, which gate Gate 3.
+
+### Three rulings taken, so they are not re-litigated later
+
+**A8's probe — "fix subject + attack spread".** Render the compositor container
+explicitly instead of `app.stage`, so `k` means the same thing warp-on and
+warp-off; then attack the 0.9262–1.3269 spread with median-of-N bursts and
+alternating dev/target order per repeat, and report the dispersion beside the
+value rather than a bare point number. This is the only option under which the
+thermal derate is a measurement rather than a subtraction of two noisy draws.
+Not yet built — it is Gate 3 harness work, scheduled after the layer types.
+
+**The two-probe measure run — probe, §4 window, probe.** Probe at ~t=60 s after
+warmup and before the §4 window opens; the §4 window runs clean between the
+probes; probe again at t=1200 s. The run is continuous, which is what A1 asks;
+the measurement window simply restarts after the first probe, which §4 already
+sanctions. §4's number stays a cold-ish number and so stays comparable to the
+four Gate 0–2 runs. The alternative shapes (§4 window after both probes; two §4
+windows) were offered and not taken.
+
+**`lottie-web` — add it.** §5 names it; CLAUDE.md required the ask. Not yet
+installed; it lands with the Lottie layer.
+
+### `MEASURED` — the clock, and why its shape is what it is
+
+`Clock.advance(dtMs)` is driven from outside. The clock never reads
+`performance.now()`, so it is a pure function of the deltas it was fed and its
+51 tests need no renderer, no timers and no tolerance window. A clock that
+consulted a wall clock internally could only ever be tested approximately, and
+"approximately correct time" is the thing Gate 3 exists to rule out.
+
+**Phase is derived, never accumulated.** `phaseAt(timeMs, periodSeconds)`
+computes `(t / p) mod 1` from the authoritative time every time it is asked.
+Phase 0's ticker did the opposite (`phase += dt / LOOP_SECONDS`). That
+difference is the whole of Gate 3's phase-consistency condition: an accumulated
+phase cannot survive a scrub, because each loop would have integrated its own
+history and would land wherever that history put it. Derived, there is **no
+per-layer state a scrub could fail to update, because there is no per-layer
+state** — which also makes "pausing freezes every clock-driven layer
+simultaneously" structural rather than a thing to verify per layer.
+
+Rate scales the advance, not the read. Scaling at read would re-scale the whole
+of history the instant the operator moved the control, jumping every derived
+phase.
+
+**Phase 0's ticker is deleted, not preserved.** `SPEC.md` §0.2's sanctioned
+forward-reach came due and was taken out, per the handoff. `LayerFrame` gains
+`timeSeconds` beside the existing `phase`; `phase` keeps its meaning
+(`GLOBAL_LOOP_SECONDS = 4`, inherited from `LOOP_SECONDS`) specifically so the
+19 blessed goldens stay byte-identical. They did — `npm run test:render`
+reports all 19 matching with nothing re-blessed.
+
+`clock.playing`, `clock.rate` and `clock.time` are registered in the same commit
+(I-8, CLAUDE.md rule 9). Registered where the warp corners were a **ruled
+exclusion**, and the distinction is not "global vs per-layer": calibration
+describes a physical surface and a MIDI knob mapped to a keystone corner would
+bend the projection mid-show with no undo on a wall, whereas a play/pause
+footswitch and a rate knob are among the most obvious things Phase 11 will map.
+`clock.time` is in **seconds**, not milliseconds — a 0–3,600,000 range on a
+128-step control has no resolution anywhere.
+
+### `MEASURED` — the log line found a defect on its first launch
+
+This is the fourth consecutive instance of the project's own run logs finding
+what the unit suite did not, and it happened within minutes of the line being
+written.
+
+The handoff's item 10 asked for a `[clock]` line before debugging anything.
+Written, 4 Hz coalesced with a trailing emit like `[warp]`, with play/pause/rate
+never coalesced. The first smoke launch produced:
+
+```
+[clock] t=0.000s PLAYING rate=1.00x (none)
+[warp]  main: OFF identity ... mesh=bypassed
+[scale] buffer 1280x720  css 1280x720  dpr 1  displayScaleFactor 1  1:1 to panel
+[scene] applied "phase1-default" ... water(z0) -> tree(z1) -> glow(z2) -> testPattern(z3,hidden)
+[clock] t=0.000s PLAYING rate=1.00x (scrub)
+```
+
+That last line should not exist. Nothing scrubbed. **The editor's first
+`clock:set` was pulling the output window's already-running clock back to zero.**
+
+The cause: the editor holds *operator intent*, not a clock — there is no ticker
+in `useClock.ts` and there must not be, or I-2 has three time sources. Its
+`timeMs` is therefore stale by construction, and sending whole state on every
+change meant a **pause or a rate nudge carried that stale time along with it**.
+Live, that is a projection that jumps back to its start when the operator
+touches the rate. On a wall, in front of an audience.
+
+**Fix: `ClockTransport.scrubSeq`.** `timeMs` is authoritative only when the
+operator actually moved time; `playing` and `rate` always apply. The message
+stays **whole state** rather than becoming a command stream — re-applying one
+changes nothing, a dropped one is corrected by the next, and an output window
+reopened on a display re-select (I-13) comes up at the last time the operator
+asserted rather than at zero.
+
+One thing was got wrong on the way and is recorded because the wrong version is
+the tempting one: `lastScrubSeq` was first initialised to "has seen none", so a
+receiver's **first** message was authoritative. That is wrong in both
+directions — it rewinds an output window that started before the editor's first
+message (exactly the observed defect), and it would restart a reopened window at
+0 rather than at the show's position, because `timeMs` is 0 in a message from a
+sender that holds intent and not a clock. It starts at **0** instead, and the
+rule that falls out is the honest one: **the editor never knows the show's time,
+so it never asserts one it did not get from an operator.** Two tests hold each
+direction.
+
+Nothing in the unit suite would have caught this. Every test in `clock.test.ts`
+drives one clock in isolation; the defect lives in the seam between two
+processes. Nine of the eleven defects across Phases 1–3 so far have been found
+by an operator or a run log.
+
+### `MEASURED` — the thing built so the pause can be felt
+
+Phase 1's failure was a scene that could not demonstrate the invariant; Phase
+2's was a control that could not be operated. The handoff named the Phase 3
+analogue: a clock provably correct in tests whose pause and scrub cannot be
+felt. `clock.test.ts` proves phase-consistency across a scrub. **Nobody can see
+a proof.**
+
+So `TransportPanel.tsx` carries a **loop ruler**: three loops of 3 s, 4 s and 5 s
+drawn as markers, each positioned by `phaseAt` from the same clock time.
+Deliberately mutually non-dividing — 2 s and 4 s would agree at every seam and
+an accumulator bug could hide there. Pause, and all three stop in one frame.
+Scrub, and all three land where their own arithmetic puts them. That is Gate 3's
+first two conditions made watchable.
+
+The ruler reads the **preview host's running clock**, not the transport's intent
+state, and that is the point: a ruler driven by intent would animate smoothly
+even if the render host had stopped sampling the clock entirely, which is
+exactly the defect it exists to catch. Same reasoning puts the time readout and
+the scrub slider on the live clock — a scrubber that sat still while the show
+ran would report the last drag rather than the position, and dragging it would
+then jump the show backwards.
+
+The transport is `[~]`, not `[x]`. It cannot be judged until there is an
+animated layer whose freeze an operator can see, and that is the next
+deliverable.
+
+### `NOTE` — the I-5 registry grep has a prose false-positive mode
+
+`parameters.test.ts`'s "no source file registers a `warp.*` key" grep matches
+`/['"`]warp\.[A-Za-z]/`, which fires on a **backtick immediately before**
+`warp.ts` in a code comment. Writing "see `warp.ts`" in `clockLog.ts` failed the
+test. Not relaxed — the test is right and the prose changed to
+`src/render/warp.ts`. Recorded so the next person to trip it does not read it as
+a real I-5 violation and weaken the check. The false-positive rate is one
+occurrence in three phases, against a check that guards a decision nothing else
+enforces; the trade is worth keeping.
+
+### `IDEAS` — parked, not built
+
+- `clockLog.ts` duplicates the 4 Hz coalescer in `src/render/warp.ts` rather
+  than extracting it. `warp.ts` is a passed-gate surface (CLAUDE.md: "a passed
+  gate is a frozen surface") and refactoring Phase 2's code for Phase 3's
+  convenience is not sanctioned. This is the second instance; **a third would
+  justify the extraction.**
+- The preview clock and the output clock advance independently between operator
+  actions and will disagree by scheduling jitter. I-7 already states the preview
+  is an approximation, not a mirror, and Gate 3 is judged on the output window.
+  If a later phase wants them tighter, the shape is a periodic resync on the
+  existing `clock:set` channel — not a new one.
