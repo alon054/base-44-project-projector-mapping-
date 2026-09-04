@@ -3394,3 +3394,41 @@ instrument defect wearing new clothes.
 - **Wind does not depth-scale its `rotate` axis**, only its offsets. A distant
   tree bends by the same angle and merely looks smaller, which is physically
   right; if it reads wrong on the wall, that is a content note, not a bus one.
+
+### `MEASURED` — the clean re-take, and a hole it found in Gate 3's records
+
+`p4-soak-p3load-2`, `disturbed=false`, `focusChangedInWindow=false`,
+`throttled=false`, `1:1 to panel`. Phase 3's scene, 20 minutes, 604 rebuilds,
+**`flat: true`** — textures 11 → 11, bytes 17,596,424 → 17,596,424, buffers
+4 → 4, geometries 2 → 2, `driftTextureCount`/`Buffer`/`Geometry` all 0.
+M1 0.0000% late, worst interval 18.80 ms, clause 3 empty.
+
+**Gate 3's result is unchanged by the force bus**, which completes the
+attribution: the `flat: false` on `phase4-forces` is PixiJS `Graphics` pooling,
+reproduced on `phase1-default` with no forces active at all.
+
+Two numbers in this run needed checking rather than assuming, and both are
+recorded because the next person will see them too.
+
+**`textureSlots` grows 23 → 1221 over 20 minutes.** It does exactly the same in
+Gate 3's own soak, so it is pre-existing and not Phase 4's. It is also not a
+leak in any sense that matters: `textureCount` holds at 11 and
+`textureBytesEstimate` is byte-identical end to end. It is a slot counter, not
+memory.
+
+**Mean render duration at minute 20 is 0.1662 ms, against 0.0349 ms in Gate 3's
+soak of the same scene.** M2 passes either way — p99 1.800% of N against a 60%
+budget, and the mean is 1.0% of N — so this blocks nothing. It is also not the
+force bus arriving: the 60-second `p4-regression` at the same scene reads
+0.0239 ms, *lower* than Gate 3's soak. Something rises across 20 minutes on a
+video + Lottie scene, and this session cannot say what.
+
+**And the reason it cannot is worth recording as a defect in our own records:
+`p3-soak` — the run Gate 3's texture rolling check cites — is itself
+`disturbed=true`.** For a memory census that matters little, which is presumably
+why it was accepted. For a *timing* comparison it means there has never been a
+clean 20-minute M2 baseline at Phase 3's load, so there is nothing to say
+whether 0.1662 ms is a regression, thermal drift, or ordinary variance.
+Phase 9 owns the performance pass and the soak that would settle it; it is
+parked there rather than guessed at here. Nothing was weakened to accommodate
+it — M2 passes on its own terms.
