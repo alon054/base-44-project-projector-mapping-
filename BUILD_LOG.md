@@ -2160,3 +2160,131 @@ counted toward this condition.
 the two attempts (clipped handles, no grab offset, 6 px hit target), and the
 difference between the two sessions is the difference between a log full of one
 corner wandering and an operator reporting the job done.
+
+## 2026-09-04 — Phase 2 (session 1, part 5) — GATE 2 PASSED
+
+- DID: closed Gate 2. The last three wall checks came back clean.
+- MEASURED: the full set below.
+- BLOCKER: none for Phase 2. One `SPEC-CHANGE-PROPOSED` is due before Phase 3.
+- NEXT: Phase 3 — global clock, animated layers, bundled assets. `/compact`
+  first.
+
+`GATE-PASSED` — **Gate 2, 2026-09-04. DEV_RESOLUTION 1280×720 on the projector,
+`1:1 to panel`, under §4's measurement protocol.** No condition was weakened and
+no box was crossed unchecked.
+
+**Gate 2's five conditions, as evidence rather than impressions:**
+
+| Condition | How it was answered | Result |
+|---|---|---|
+| Keystone squares an angled projection on a real surface | operator, projector deliberately tilted | **met** — squared by hand, operator's hedge "as much as i can" recorded |
+| Disabling warp changes nothing; no scene code reads warp state | goldens + import graph + operator | **met** — `ba2e7858` three ways; no `core/` or `providers/` import; no visible change at identity on the wall |
+| Calibration survives relaunch | operator, one continuous gesture | **met** — set, quit, relaunch, corners returned, projection still square |
+| Loading a different scene keeps the same calibration | wall session log | **met** — consecutive `[scene] applied` with **no `[warp]` line between** |
+| Frame-time cost of the warp stage recorded | four §4 runs | **met** — **+10.65 µs = 0.064% of N** |
+
+**§4, four runs** — all `disturbed=false`, `1:1 to panel`, one `[run] START`
+each, no events, no renderer errors.
+
+| run | samples | fps | M1 late | worst interval | M2 p99 | render mean |
+|---|---|---|---|---|---|---|
+| `p2-warp-off` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | 62.23 µs |
+| `p2-warp-off-2` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | 68.20 µs |
+| `p2-warp-on` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | 74.48 µs |
+| `p2-warp-on-2` | 3600 | 59.999 | 0.0000% | 18.80 ms | 0.200 ms = 1.20% of N | 77.25 µs |
+
+Warp cost: paired deltas **12.25** and **9.05 µs**; delta of run means
+**10.65 µs = 0.064% of N**; groups do not overlap (max off 68.20 < min on
+74.48). A15: instrument per-frame max **0.100 ms = 0.600% of N** in all four.
+
+**§8.2 soak** — `p2-soak`, 6 minutes, **warp ON**, `disturbed=false`, **184
+scene rebuilds**: texture count 3 → 3, **texture bytes 3,686,408 → 3,686,408,
++0.00%**. 1280 × 720 × 4 = 3,686,400, so the composite render texture is what is
+being watched. Buffers/geometries settle 47→281 / 23→140 at t=110 s then
+**exactly flat for 249.8 s across 128 further rebuilds**.
+
+**§8.1** — 19 golden frames, exit 0. **All 15 Phase 1 frames byte-identical**
+across the whole phase: 60 insertions, 0 deletions in `frames.json`. 262 unit
+tests, both typechecks clean.
+
+**Geometry** — a 2×2 quad is off **91.58 px** from the exact projective map on
+Gate 2's own keystone (166.08 px on a harsher one). At 40×40: **0.09 px** and
+**0.26 px**.
+
+**A8** — k probe 0.9655 and 0.9815 this pair. Six samples on real scenes now
+span **0.97–1.42** against Gate 0's 0.379–5.000 on a trivial one. Source
+unchanged; still a Phase 3 ruling.
+
+`MEASURED` — **the phase's four defects, and where each was found.** The ratio
+is the same one Phase 1 recorded, and it did not improve.
+
+| # | Defect | Found by |
+|---|---|---|
+| 1 | Render texture destroyed while still bound to a shader | the golden harness treating renderer output as failure |
+| 2 | GPU census threw on a destroyed texture — **present since Phase 1**, in the p1-soak log, unnoticed | reading a run log |
+| 3 | A corner drag emitted ~300 `[warp]` lines and buried a projector hot-plug in the same log | reading a run log |
+| 4 | **Three of four corner handles could not be caught** | the operator failing to use it |
+
+Not one was found by a unit test. Two were found by *reading logs the project
+already produced*, which is an argument for the `[scene] applied` / `[warp]`
+convention rather than for more tests.
+
+`MEASURED` — **the handle defect is Phase 1's lesson arriving unchanged.** The
+warp model had 28 unit tests, correct clamping, correct refusal of degenerate
+quads, and an accurate `[warp]` line. The control on top of it was close to
+unusable: handles drawn at normalized `[0,1]` onto an SVG whose viewport is
+exactly that box sit **on** the boundary and get clipped to about a quarter of a
+6 px circle — and identity puts all four there at once, which is the state every
+new calibration starts in. The log proves it: TL never left `(0.1200,0.0000)`
+and BR/BL never moved, across two full attempts.
+
+Phase 1 wrote: *"the suite proved the engine while the SCENE could not
+demonstrate the invariant."* Phase 2's version is *the suite proved the geometry
+while the CONTROL could not be operated.* The countermeasure that worked both
+times is the same one: put the thing in front of a person.
+
+`MEASURED` — **an attribution was overturned, at the cost of one observation.**
+The blur on the wall was attributed at Gate 1 to the projector — "a wholly
+sufficient explanation". It is **sharp**: the discriminator, run with the warp
+off, resolves the 1–2 px grid and the magenta frame crisply. The cause is in the
+**content** — thin strokes, translucent ripple lines, a soft radial glow. Had
+the attribution stood, the next move would have been to re-focus or replace a
+projector that is doing its job. **A9 binds prose as much as numbers**, and this
+is the return on having written it as an attribution instead of a finding.
+
+`MEASURED` — **one claim was recorded and withdrawn inside this phase.** The
+identity-round-trip observation was reported, entered as `MEASURED`, then
+withdrawn when the operator said they needed to check it, then re-checked
+properly and confirmed. Kept visible in the log rather than tidied away, because
+the withdrawal is the part worth keeping: *"working"* and *"no visible change"*
+are not the same report, and the second is the only one that answers the
+question. Two ambiguous reports this session resolved the opposite way from the
+first reading.
+
+`MEASURED` — **M2 is a floor reading, not headroom.** `renderP99` has now
+recorded 1.20% of N against a 60% limit at Gate 0, Gate 1 and Gate 2, identical
+warp off and warp on, because `performance.now()` is coarsened to 100 µs and
+every render statistic is a multiple of 0.1 ms. Real cost at this load is
+62–77 µs = 0.37–0.46% of N. The apparent constancy across three gates says
+nothing, and **Phase 3 is the first phase where M2 will report a real number.**
+
+`DECISION` — **warp corners are not in the I-8 registry** (operator's ruling;
+enforced by a grep verified in both directions). **The warp stage runs in the
+output window only**, never the editor preview (D11). **Off means absent, not
+identity** — no render texture in the path when disabled, which is why Phase 1's
+goldens are untouched. Full reasoning in parts 1–4 of this phase.
+
+`BLOCKER` — **the A1 ↔ §4 reconciliation over "k recorded at every gate" is
+still an open `SPEC-CHANGE-PROPOSED` and is now due.** Phase 3 is next. A8's k
+probe and A15's statistic are both due at Gate 3 and each gained data points
+here.
+
+`IDEAS` — parked, not built:
+- Sharpness is a **content-authoring** property, not a hardware one. Stroke
+  width and gradient softness are what read as blurry on a 500 ANSI projector,
+  and Phase 3's first bundled sprite assets are where that starts to matter.
+- The `disturbed` flag watches for focus being LOST; one run this phase was
+  disturbed by focus being GAINED and the flag stayed false. It should assert
+  focus for the measured window rather than observe it.
+- `calibration/warp.json` is gitignored, so there is no committed example of the
+  format for Phase 7's migration test to load. It will need its own fixture.
