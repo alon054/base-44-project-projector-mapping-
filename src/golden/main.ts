@@ -34,6 +34,13 @@ import { createDefaultScene } from '../core/defaultScene';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { Compositor } from '../render/compositor';
+import { WarpStage } from '../render/warp';
+import {
+  createCalibration,
+  withCorner,
+  withEnabled,
+  type ViewportCalibration,
+} from '../render/calibration';
 
 /** A8: a literal, decided in Phase 1's setup. Read the block comment above. */
 const GOLDEN_RESOLUTION = { width: 1280, height: 720 } as const;
@@ -68,6 +75,12 @@ interface GoldenCase {
    * would pass a measure that reported zero for everything.
    */
   expectLayoutMismatch?: boolean;
+  /**
+   * I-5. Put the warp stage in this case's path with this calibration. Absent
+   * means the Phase 1 pipeline exactly — no render texture, no mesh — which is
+   * what the `warp-identity` and `warp-disabled` cases are compared against.
+   */
+  warp?: ViewportCalibration;
 }
 
 /**
@@ -198,7 +211,50 @@ function cases(): GoldenCase[] {
     { name: 'glow-add', scene: glowOverTree('add') },
     { name: 'blend-modes', scene: blendScene() },
     { name: 'resilience', scene: faulty },
+
+    // -----------------------------------------------------------------------
+    // I-5, Gate 2. Three of these four are about the warp NOT changing things.
+    //
+    // `warp-disabled` has the stage constructed and switched off; `warp-identity`
+    // has it switched on with the unit square. Both must hash EXACTLY equal to
+    // `default`, which has no warp stage at all. The second is the one worth
+    // distrusting: it is a full round trip through a render texture and a
+    // 20x20 mesh, and a half-pixel misalignment there would put a resample blur
+    // on the wall that the projector currently gets blamed for.
+    //
+    // `warp-keystone` must differ from `default`. A warp that changes nothing
+    // is the failure a hash alone would happily record.
+    // -----------------------------------------------------------------------
+    { name: 'warp-disabled', scene: createDefaultScene(), warp: warpOff() },
+    { name: 'warp-identity', scene: createDefaultScene(), warp: warpIdentity() },
+    { name: 'warp-keystone', scene: createDefaultScene(), warp: warpKeystone() },
+    // The eyeball case. A grid is the only thing in the scene bank that makes a
+    // projective bend visible to a person, and the `.golden-preview/` PNG is
+    // where the re-bless is judged rather than taken on trust.
+    { name: 'warp-keystone-grid', scene: testPatternScene(), warp: warpKeystone() },
   ];
+}
+
+/** The stage present and switched off — the toggle, not the absence of code. */
+function warpOff(): ViewportCalibration {
+  return createCalibration('golden');
+}
+
+function warpIdentity(): ViewportCalibration {
+  return withEnabled(createCalibration('golden'), true);
+}
+
+/**
+ * The shape a projector sitting below its surface and tilted up produces, and
+ * therefore the correction for it: the top corners pulled in. Deliberately a
+ * strong keystone — a subtle one would hide the affine bend a bare 2x2 quad
+ * produces, which is the whole reason the mesh is subdivided.
+ */
+function warpKeystone(): ViewportCalibration {
+  let cal = withEnabled(createCalibration('golden'), true);
+  cal = withCorner(cal, 0, { x: 0.12, y: 0 });
+  cal = withCorner(cal, 1, { x: 0.88, y: 0 });
+  return cal;
 }
 
 /** Moves one layer along x, in normalized space. The I-1 control's mislaying. */
@@ -451,11 +507,28 @@ async function run(): Promise<GoldenResult[]> {
       width: size.width,
       height: size.height,
     });
-    app.stage.addChild(compositor.view);
+    // The warp stage parents the composite itself when present — whether the
+    // composite is a stage child or feeds a render texture is what it owns.
+    const warp = c.warp
+      ? new WarpStage({
+          renderer: app.renderer,
+          stage: app.stage,
+          source: compositor.view,
+          width: size.width,
+          height: size.height,
+          // Quiet here; the `[warp]` line has its own unit tests, and the
+          // harness treats renderer output as a failure signal.
+          log: () => {},
+        })
+      : null;
+    if (!warp) app.stage.addChild(compositor.view);
+    warp?.setCalibration(c.warp!);
+
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.
       compositor.setScene(c.afterScene);
       compositor.update({ phase: GOLDEN_PHASE });
+      warp?.prepare();
       app.renderer.render(app.stage);
     }
     compositor.setScene(c.scene);
@@ -465,6 +538,7 @@ async function run(): Promise<GoldenResult[]> {
     // be testing (I-13).
     compositor.update({ phase: GOLDEN_PHASE });
     compositor.update({ phase: GOLDEN_PHASE });
+    warp?.prepare();
     app.renderer.render(app.stage);
 
     // The frame is stated explicitly. `extract.pixels(stage)` frames the
@@ -505,6 +579,7 @@ async function run(): Promise<GoldenResult[]> {
 
     compositor.destroy();
     app.destroy(true, { children: true });
+    warp?.destroy();
     stage.replaceChildren();
   }
 

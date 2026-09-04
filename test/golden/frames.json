@@ -240,5 +240,65 @@
       229
     ],
     "meanLuminance": 0.013142
+  },
+  "warp-disabled": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.109309
+  },
+  "warp-identity": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.109309
+  },
+  "warp-keystone": {
+    "width": 1280,
+    "height": 720,
+    "hash": "fc055613",
+    "coverage": 0.492595,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.115636
+  },
+  "warp-keystone-grid": {
+    "width": 1280,
+    "height": 720,
+    "hash": "69a32586",
+    "coverage": 0.050812,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      208,
+      208,
+      208
+    ],
+    "meanLuminance": 0.019535
   }
 }

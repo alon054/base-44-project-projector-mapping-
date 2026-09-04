@@ -24,6 +24,8 @@ import type { PlaceholderInfo } from '../core/resilience';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { Compositor } from './compositor';
+import { WarpStage } from './warp';
+import type { ViewportCalibration } from './calibration';
 
 export interface RenderHostOptions {
   parent: HTMLElement;
@@ -34,6 +36,19 @@ export interface RenderHostOptions {
   onPresented?: (token: number, t0: number) => void;
   /** I-13: a layer failed and is showing a placeholder. Once per failure. */
   onLayerFailed?: (info: PlaceholderInfo, error: unknown) => void;
+  /**
+   * I-5: put the warp stage in this host's path. The OUTPUT window sets it;
+   * the editor preview deliberately does not.
+   *
+   * D11 is the reason. Placement happens in scene (pre-warp) space, and the
+   * preview is the placement space — "a scene-space grid overlay, not a photo
+   * of the wall". A warped preview would put the operator's objects on a
+   * distorted canvas and teach exactly the mental model D11 says to avoid. The
+   * warp is judged on the surface it corrects, which is what Gate 2 asks for.
+   */
+  warp?: boolean;
+  /** I-13: the warp stage failed and fell back to an unwarped draw. Once. */
+  onWarpFallback?: (reason: string) => void;
 }
 
 export interface RenderHost {
@@ -41,6 +56,10 @@ export interface RenderHost {
   setSpeed(v: number): void;
   /** Replaces the whole layer stack. Operator-paced, never per-frame. */
   setScene(scene: Scene): void;
+  /** I-5. No-op on a host built without a warp stage (the editor preview). */
+  setCalibration(cal: ViewportCalibration): void;
+  /** True when the composite is going through the warp mesh this frame. */
+  warpActive(): boolean;
   /** I-13: layers currently showing a placeholder. */
   failures(): PlaceholderInfo[];
   markPending(token: number, t0: number): void;
@@ -94,7 +113,21 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     height: opts.height,
     ...(opts.onLayerFailed ? { onLayerFailed: opts.onLayerFailed } : {}),
   });
-  app.stage.addChild(compositor.view);
+  const warp = opts.warp
+    ? new WarpStage({
+        renderer: app.renderer,
+        stage: app.stage,
+        source: compositor.view,
+        width: opts.width,
+        height: opts.height,
+        ...(opts.onWarpFallback ? { onFallback: opts.onWarpFallback } : {}),
+      })
+    : null;
+  // The warp stage parents the composite itself, because whether the composite
+  // is a child of the stage or feeding a render texture is precisely what it
+  // owns. Without one, the Phase 1 path is unchanged.
+  if (!warp) app.stage.addChild(compositor.view);
+
   let currentScene: Scene = createDefaultScene();
   compositor.setScene(currentScene);
 
@@ -163,7 +196,11 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
     compositor.update({ phase });
 
+    // Both draws sit inside one timed region. The render-to-texture IS the
+    // warp stage's cost, and Gate 2 asks for that cost as a number — measuring
+    // it outside the clock that produces M2 would report a warp that is free.
     const t0 = performance.now();
+    warp?.prepare();
     app.renderer.render(app.stage);
     const t1 = performance.now();
     metrics.noteRenderDuration(t1 - t0);
@@ -190,6 +227,12 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       currentScene = scene;
       compositor.setScene(scene);
     },
+    setCalibration(cal) {
+      warp?.setCalibration(cal);
+    },
+    warpActive() {
+      return warp?.active ?? false;
+    },
     gpuResources() {
       return readGpuResources(app.renderer);
     },
@@ -208,6 +251,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     resize(width, height) {
       app.renderer.resize(width, height);
       compositor.resize(width, height);
+      warp?.resize(width, height);
       invalidateScale();
       metrics.setScale(readScale());
     },
@@ -232,6 +276,10 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       cancelAnimationFrame(raf);
       compositor.destroy();
       app.destroy(true, { children: true });
+      // AFTER the Application, deliberately. PixiJS caches batched textures in
+      // a module-global bind-group map with no eviction, so a render texture
+      // destroyed while the renderer is alive always warns. See warp.ts.
+      warp?.destroy();
     },
   };
 }

@@ -211,6 +211,40 @@ app.whenReady().then(async () => {
     problems.push('occlusion: the Gate 1 z-order cases are missing from the harness');
   }
 
+  // Gate 2 (I-5): the warp is a pure post-composite stage. Asserted in the
+  // runner, not only in the goldens, because all three of these claims are
+  // about frames being IDENTICAL — and a re-bless would happily record a warp
+  // stage that quietly resamples every frame, or one that does nothing at all.
+  const plain = observed['default'];
+  const wOff = observed['warp-disabled'];
+  const wId = observed['warp-identity'];
+  const wKey = observed['warp-keystone'];
+  if (plain && wOff && wId && wKey) {
+    if (wOff.hash !== plain.hash) {
+      problems.push(
+        `I-5: switching the warp OFF did not reproduce the unwarped frame — default ${plain.hash}, warp-disabled ${wOff.hash}`,
+      );
+    }
+    if (wId.hash !== plain.hash) {
+      problems.push(
+        `I-5: the warp at IDENTITY corners is not pixel-identical to no warp — default ${plain.hash}, warp-identity ${wId.hash}. ` +
+          'A round trip through the render texture is resampling the frame, which is a blur on the wall, not a hash detail.',
+      );
+    }
+    if (wKey.hash === plain.hash) {
+      problems.push(
+        `I-5: a keystone changed nothing — warp-keystone hashes identical to default (${plain.hash}). The warp stage is not in the path.`,
+      );
+    }
+    if (wOff.hash === plain.hash && wId.hash === plain.hash && wKey.hash !== plain.hash) {
+      process.stdout.write(
+        `I-5: warp off and warp-at-identity are both pixel-identical to no warp (${plain.hash}); a keystone differs (${wKey.hash})\n`,
+      );
+    }
+  } else {
+    problems.push('I-5: the Gate 2 warp cases are missing from the harness');
+  }
+
   if (errors.length > 0) problems.push(`renderer logged errors:\n    ${errors.join('\n    ')}`);
 
   if (problems.length > 0) {
