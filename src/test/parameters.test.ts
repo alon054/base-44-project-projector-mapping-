@@ -20,6 +20,7 @@ import {
   ProceduralProvider,
 } from '../providers/procedural/ProceduralProvider';
 import { createLayer, type Layer } from '../core/layer';
+import { createDefaultScene } from '../core/defaultScene';
 
 const num = (key: string, def = 0) =>
   cellParameter({ key, label: key, kind: 'number', default: def, min: 0, max: 1, step: 0.01 });
@@ -290,5 +291,68 @@ describe('rule 9 — every content key a provider reads is registered', () => {
     expect(r.keys('entity.g1')).toHaveLength(6);
     expect(r.unregisterPrefix('entity.g1')).toBe(6);
     expect(r.keys('entity.g1')).toEqual([]);
+  });
+});
+
+/**
+ * I-5 vs I-8 — warp calibration is deliberately NOT in the parameter registry,
+ * and the absence is checked rather than merely intended.
+ *
+ * Ruled on at the start of Phase 2. I-8's subject is forces, per-entity
+ * parameters and grade settings: things an operator modulates during a show.
+ * Calibration is a description of a physical surface, and I-5 keeps it isolated
+ * from scene logic in both directions. Registering the corners would make them
+ * MIDI-mappable in Phase 11, where one knock of a knob destroys a calibration
+ * that took a person on a ladder to make, with no undo on a wall.
+ *
+ * This is a grep because the failure mode is additive and quiet: someone adds a
+ * `warp.corner.tl.x` in good faith and nothing complains until a show does.
+ * Reversing the decision is fine — but it takes editing this test and saying
+ * why in `BUILD_LOG.md`, which is exactly the amount of friction it deserves.
+ */
+describe('warp calibration stays out of the registry (I-5)', () => {
+  it('no source file outside the tests registers a warp.* key', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const out: string[] = [];
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (e.name === 'test') continue;
+          out.push(...(await walk(full)));
+        } else if (/\.tsx?$/.test(e.name)) {
+          out.push(full);
+        }
+      }
+      return out;
+    };
+
+    const files = await walk(root);
+    expect(files.length).toBeGreaterThan(10);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = await fs.readFile(file, 'utf8');
+      if (/['"`]warp\.[A-Za-z]/.test(src)) offenders.push(path.relative(root, file));
+    }
+    expect(
+      offenders,
+      'a warp.* parameter key was registered. Calibration is I-5 state, not an I-8 ' +
+        'parameter — see the block comment above this test before changing it.',
+    ).toEqual([]);
+  });
+
+  it('a registry built from a real scene exposes no warp keys', () => {
+    const registry = new ParameterRegistry();
+    const scene = createDefaultScene();
+    for (const layer of scene.layers) {
+      registry.registerAll(defineLayerParameters(layer.id, () => layer, () => {}));
+    }
+    expect(registry.keys('warp')).toEqual([]);
+    expect(registry.has('warp.enabled')).toBe(false);
   });
 });
