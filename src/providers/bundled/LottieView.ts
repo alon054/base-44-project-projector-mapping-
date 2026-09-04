@@ -32,21 +32,55 @@
  * render target). Canvas gives one `HTMLCanvasElement` we upload as a texture.
  */
 import { Container, Sprite, Texture } from 'pixi.js';
-// THE LIGHT CANVAS BUILD, and this is a CSP requirement rather than a size
-// preference. The default `lottie-web` entry evaluates Lottie *expressions*
-// with a direct `eval`, and this app runs a hardened CSP with no
-// 'unsafe-eval' — the same constraint that makes `render/host.ts` import
-// `pixi.js/unsafe-eval`. The full build's eval is reachable only from
-// expression-bearing animations, so it would have loaded fine and then failed
-// on somebody's downloaded LottieFile in Phase 8, which is the worst possible
-// moment to discover it. `lottie_light_canvas` contains zero `eval(` (checked,
-// not assumed) and drops the SVG and HTML renderers we do not use.
-import lottie from 'lottie-web/build/player/esm/lottie_light_canvas.min.js';
-import type { AnimationItem } from 'lottie-web';
+import type { AnimationItem, LottiePlayer } from 'lottie-web';
 import type { LottieAsset } from '../../core/library';
 import type { LayerFrame, LayerView } from '../ContentProvider';
 import { createPlaceholderGraphic } from '../../render/placeholder';
 import { phaseAt } from '../../core/clock';
+
+/**
+ * THE LIGHT CANVAS BUILD, LOADED LAZILY. Two separate decisions.
+ *
+ * **Why that build.** The default `lottie-web` entry evaluates Lottie
+ * *expressions* with a direct `eval`, and this app runs a hardened CSP with no
+ * 'unsafe-eval' — the same constraint that makes `render/host.ts` import
+ * `pixi.js/unsafe-eval`. The full build's eval is reachable only from
+ * expression-bearing animations, so it would have loaded fine and then failed
+ * on somebody's downloaded LottieFile in Phase 8, which is the worst possible
+ * moment to discover it. `lottie_light_canvas` contains zero `eval(` — checked
+ * against the file, not assumed — and drops the SVG and HTML renderers.
+ *
+ * **Why lazily.** lottie-web calls `document.createElement` at module scope. A
+ * static import therefore made every module that could reach this one require a
+ * DOM — including `core/defaultScene.ts`, by way of a provider-id constant —
+ * and three unit-test files that had never heard of Lottie failed to load with
+ * `ReferenceError: document is not defined`. SPEC.md §8.1 says the unit suite
+ * is "pure logic, no GPU"; a scene model that cannot be constructed without a
+ * browser is not that. Running those tests in a DOM environment instead would
+ * have hidden the coupling rather than removed it.
+ *
+ * It also means a scene with no Lottie layer never parses ~300 KB it will not
+ * use, which is the spirit of §5's "cap the count".
+ */
+let lottie: LottiePlayer | null = null;
+let lottieLoading: Promise<void> | null = null;
+
+/**
+ * Loads the player. Idempotent, and safe to call before it is needed.
+ *
+ * Callers that want the FIRST Lottie layer to render without a frame of
+ * placeholder — the golden harness, and the render host at startup — await this
+ * up front. A view created before it resolves shows its I-13 placeholder and
+ * swaps in afterwards, which is the same populate-yourself contract every other
+ * view in this directory follows (I-3).
+ */
+export async function ensureLottie(): Promise<void> {
+  if (lottie) return;
+  lottieLoading ??= import('lottie-web/build/player/esm/lottie_light_canvas.min.js').then((m) => {
+    lottie = m.default;
+  });
+  return lottieLoading;
+}
 
 export interface LottieViewOptions {
   asset: LottieAsset;
@@ -113,7 +147,10 @@ export function createLottieView(opts: LottieViewOptions): LayerView {
   // Still wrapped, and still ending at an I-13 placeholder rather than a throw:
   // `loadAnimation` on a malformed animation throws, and by Phase 8 this data
   // will be arriving from a catalog rather than from the build.
-  try {
+  const build = (): void => {
+    const player = lottie;
+    if (!player || destroyed) return;
+    try {
     // NO `container`, and that is load-bearing rather than an omission.
     //
     // `CanvasRendererBase.prototype.configAnimation` branches on it:
@@ -134,7 +171,7 @@ export function createLottieView(opts: LottieViewOptions): LayerView {
     // The cast is because the published type marks `container` required for
     // every renderer, which is true of the SVG and HTML ones and not of this
     // path.
-    anim = lottie.loadAnimation<'canvas'>({
+    anim = player.loadAnimation<'canvas'>({
       renderer: 'canvas',
       // I-2: no autoplay, no internal timeline. See this file's header.
       loop: false,
@@ -145,7 +182,7 @@ export function createLottieView(opts: LottieViewOptions): LayerView {
         clearCanvas: true,
         preserveAspectRatio: 'xMidYMid meet',
       },
-    } as unknown as Parameters<typeof lottie.loadAnimation<'canvas'>>[0]);
+    } as unknown as Parameters<typeof player.loadAnimation<'canvas'>>[0]);
     totalFrames = anim.totalFrames;
     if (!Number.isFinite(totalFrames) || totalFrames <= 0) {
       fail('lottie reported no frames');
@@ -156,9 +193,13 @@ export function createLottieView(opts: LottieViewOptions): LayerView {
       ph.view.visible = false;
       layout();
     }
-  } catch (e) {
-    fail(e instanceof Error ? e.message : String(e));
-  }
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  if (lottie) build();
+  else void ensureLottie().then(build).catch((e: unknown) => fail(String(e)));
 
   return {
     view,

@@ -30,6 +30,7 @@ import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
 import { createBundledLibrary } from '../providers/bundled/manifest';
+import { ensureLottie } from '../providers/bundled/LottieView';
 import { Compositor } from './compositor';
 import { WarpStage } from './warp';
 import type { ViewportCalibration } from './calibration';
@@ -145,6 +146,10 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   const providers = new ProviderRegistry();
   providers.register(new ProceduralProvider());
+  // Warm the Lottie player without blocking host creation. A scene with no
+  // Lottie never touches it; a scene with one gets it a beat sooner than the
+  // first frame that needs it, so the layer does not flash its placeholder.
+  void ensureLottie();
   // D6's second provider. The library is built here rather than shared across
   // hosts because the preview and the output are separate processes anyway
   // (I-7), and a module-global would only look shared.

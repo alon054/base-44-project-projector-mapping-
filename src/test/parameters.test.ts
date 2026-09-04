@@ -240,6 +240,51 @@ describe('rule 9 — every content key a provider reads is registered', () => {
     }
   });
 
+  it('BundledProvider declares every non-structural key it consumes', async () => {
+    const fs = await import('node:fs/promises');
+    // The provider reads content in two files — the class itself and, for the
+    // views, whatever it passes down. Both are grepped, because a key read in a
+    // view is just as unaddressable as one read in the provider.
+    const dir = new URL('../providers/bundled/', import.meta.url).pathname;
+    const files = (await fs.readdir(dir)).filter((f) => /\.ts$/.test(f));
+    let src = '';
+    for (const f of files) src += await fs.readFile(dir + f, 'utf8');
+
+    const consumed = new Set([...src.matchAll(/content\['([A-Za-z0-9_]+)'\]/g)].map((m) => m[1]!));
+    expect(consumed.size).toBeGreaterThan(1);
+
+    const idSrc = await fs.readFile(dir + 'id.ts', 'utf8');
+    const structural = new Set(
+      (idSrc.match(/const STRUCTURAL_CONTENT_KEYS = \[([^\]]*)\]/)?.[1] ?? '')
+        .split(',')
+        .map((x) => x.trim().replace(/['"]/g, ''))
+        .filter(Boolean),
+    );
+    expect(structural.size).toBeGreaterThan(0);
+
+    const { BundledProvider } = await import('../providers/bundled/BundledProvider');
+    const { createBundledLibrary } = await import('../providers/bundled/manifest');
+    const library = createBundledLibrary();
+    const provider = new BundledProvider({ library, decodeVideo: false, lottieResolution: 1 });
+
+    // Asked once per SHIPPED asset, not once per kind: the declared set depends
+    // on the asset (a still exposes no seam), so a key that only appears for
+    // one kind would otherwise slip through.
+    const declared = new Set<string>();
+    for (const a of library.all()) {
+      for (const spec of provider.contentParameters({ assetId: a.id })) declared.add(spec.key);
+    }
+
+    for (const key of consumed) {
+      if (structural.has(key)) continue;
+      expect(
+        declared.has(key),
+        `content key "${key}" is read by BundledProvider but not declared as a parameter ` +
+          '(rule 9). Either register it, or add it to STRUCTURAL_CONTENT_KEYS with a reason.',
+      ).toBe(true);
+    }
+  });
+
   it('registers content parameters under entity.<id>.*, bound to scene state', () => {
     let layer: Layer = createLayer({
       id: 'w1',

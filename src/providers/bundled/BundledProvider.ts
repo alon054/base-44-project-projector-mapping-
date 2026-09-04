@@ -26,16 +26,12 @@ import { createStillView, createSpriteSheetView } from './imageViews';
 import { createVideoView, type VideoStage } from './VideoView';
 import { createLottieView } from './LottieView';
 import { defaultSeamMode, isSeamMode, SEAM_MODES, type SeamMode } from './seam';
+import { BUNDLED_PROVIDER_ID } from './id';
 
-export const BUNDLED_PROVIDER_ID = 'bundled';
-
-/**
- * Structural keys: they select WHICH asset a layer is, not a value on it.
- * `assetId` is excluded from the parameter registry for the same reason
- * `ProceduralProvider` excludes `kind` — changing it does not modulate the
- * layer, it replaces it. Rule 9's grep test knows about this list.
- */
-const STRUCTURAL_CONTENT_KEYS = ['assetId'] as const;
+// Re-exported so callers that already have the provider need not know the id
+// lives elsewhere. `defaultScene.ts` imports it from `./id` directly — see that
+// file for why a constant may not drag `lottie-web` into a pure test.
+export { BUNDLED_PROVIDER_ID, STRUCTURAL_CONTENT_KEYS } from './id';
 
 export interface BundledProviderOptions {
   library: AssetLibrary;
@@ -141,6 +137,3 @@ export class BundledProvider implements ContentProvider {
     return defaultSeamMode(seamless, kind);
   }
 }
-
-/** Exported for the rule-9 grep test, which reads this list rather than guessing. */
-export const BUNDLED_STRUCTURAL_KEYS = STRUCTURAL_CONTENT_KEYS;

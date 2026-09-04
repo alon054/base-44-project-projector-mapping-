@@ -73,14 +73,20 @@ export function noSeam(phase: number): SeamWeights {
  * different artefact in place of the one being removed.
  */
 export function crossfadeSeam(phase: number): SeamWeights {
+  // Guarded on the INPUT, not on the sum. `wrap01(NaN)` is 0, and phase 0 is a
+  // perfectly real phase whose weights are `weightA: 0, weightB: 1` — correct
+  // at the seam and useless as a fallback, because it would silently hand a
+  // layer with a broken period the mid-animation copy at full weight and look
+  // like it was working.
+  if (!Number.isFinite(phase)) return noSeam(0);
   const p = wrap01(phase);
   const phaseB = wrap01(p + 0.5);
   const a = Math.sin(Math.PI * p);
   const b = Math.abs(Math.cos(Math.PI * p));
   const sum = a + b;
-  // `sum` is bounded below by 1 (at p = 0, 0.5 and 1) and above by sqrt(2), so
-  // it can never be 0. The guard is for a non-finite phase, not for the maths.
-  if (!Number.isFinite(sum) || sum <= 0) return noSeam(p);
+  // Bounded below by 1 (at p = 0, 0.5 and 1) and above by sqrt(2), so it can
+  // never be 0 for a finite `p`. Kept as a total function anyway.
+  if (sum <= 0) return noSeam(p);
   return { phaseA: p, phaseB, weightA: a / sum, weightB: b / sum };
 }
 

@@ -11,7 +11,7 @@
 import { createLayer } from './layer';
 import { createScene, type Scene } from './scene';
 import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
-import { BUNDLED_PROVIDER_ID } from '../providers/bundled/BundledProvider';
+import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
 
 export function createDefaultScene(): Scene {
   return createScene({

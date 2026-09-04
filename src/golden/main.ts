@@ -35,6 +35,7 @@ import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider, BUNDLED_PROVIDER_ID } from '../providers/bundled/BundledProvider';
 import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manifest';
+import { ensureLottie } from '../providers/bundled/LottieView';
 import { Compositor } from '../render/compositor';
 import { WarpStage } from '../render/warp';
 import {
@@ -749,6 +750,12 @@ async function run(): Promise<GoldenResult[]> {
       : null;
     if (!warp) app.stage.addChild(compositor.view);
     warp?.setCalibration(c.warp!);
+
+    // The Lottie player is loaded lazily (see `LottieView.ts`), so a golden
+    // taken before it arrives would be a stable hash of a placeholder. Awaited
+    // for EVERY case rather than only the Lottie ones: it is idempotent, and a
+    // per-case flag is a thing to forget when the next Lottie case is added.
+    await ensureLottie();
 
     if (c.preload && c.preload.length > 0) {
       // A load that fails is not fatal here: the case then hashes its I-13
