@@ -2096,3 +2096,67 @@ keystone can square a projection. Re-run on the fixed control.
   thin strokes and soft gradients are what read as blurry on a 500 ANSI
   projector, and stroke width is a scene-authoring parameter nobody has thought
   about. Not a Phase 2 concern, but the first bundled sprite assets will be.
+
+## 2026-09-04 — Phase 2 (session 1, part 4)
+
+- DID: Gate 2's first condition met on a real surface. One observation from the
+  previous entry withdrawn.
+- MEASURED: below.
+- BLOCKER: Gate 2 still open — three checks left.
+- NEXT: re-check the identity case, the calibration round trip, I-6 by eye.
+
+`CORRECTION` — **the identity-round-trip observation recorded in part 3 is
+WITHDRAWN.** That entry recorded:
+
+> `MEASURED` — the identity round trip is visually lossless on real hardware.
+> With corners reset to identity, toggling the warp ON and OFF produces no
+> change the operator can see.
+
+The operator has since said they need to check it, so it was not an observation
+of the identity case. It is withdrawn rather than softened: the difference
+between "confirmed" and "not yet checked" is the whole content of the claim.
+
+This entry is appended rather than the previous one edited — `BUILD_LOG.md` is
+append-only, and a log that can be rewritten is not evidence.
+
+**What is unaffected:** the golden assertion that `default`, `warp-disabled` and
+`warp-identity` all hash `ba2e7858` while a keystone differs. That is mechanical,
+it is asserted in `scripts/golden.mjs` rather than merely stored, and it never
+depended on anybody's eyes. `CHECKLIST.md`'s box for "disabling warp changes
+nothing" rests on that plus the import graph, and it stood on those before the
+withdrawn observation was added.
+
+**What is affected:** the *hardware* confirmation of it. The value of that check
+is that it is the one thing that would catch the headless harness and the
+shipping renderer disagreeing — a hash cannot report that, by construction. It
+is back to unchecked.
+
+`GATE-CONDITION MET` — **the keystone squares a deliberately angled projection
+on a real surface, 2026-09-04.** Gate 2's first condition, and the one nothing
+in the repo could substitute for.
+
+The operator tilted the projector until the image was visibly not square, then
+pulled it back with the four corners: *"i tilted the projector and played with
+the warp and managed to make it square and normal again."*
+
+Recorded with the hedge the operator actually used — *"as much as i can"* —
+rather than smoothed into a clean pass. That hedge is in scope for Phase 2 and
+out of scope to fix here: SPEC.md §11 calls this warp "deliberately early and
+deliberately rough", and Phase 7 is the phase that owns precision, an N×M
+control grid, and a curved surface. How much residual is left at the limits is a
+Phase 7 input, and it is worth asking again then rather than resolving now.
+
+**This is the product premise.** A projector sitting crooked and a square image
+on the wall is what the whole instrument is for, and until today it had only
+ever been true in a hash. The 40×40 projective mesh was chosen from a
+measurement that said a 2×2 quad would be off by 91.58 px on this exact
+keystone; the wall is where that stops being arithmetic.
+
+The attempt made before the handle fix is **void, not failed** — one usable
+handle out of four is not a test of whether a keystone can be set — and is not
+counted toward this condition.
+
+`MEASURED` — **the handle fix works.** The corner control was rebuilt between
+the two attempts (clipped handles, no grab offset, 6 px hit target), and the
+difference between the two sessions is the difference between a log full of one
+corner wandering and an operator reporting the job done.
