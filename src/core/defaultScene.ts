@@ -11,6 +11,7 @@
 import { createLayer, type Layer } from './layer';
 import { createScene, type Scene } from './scene';
 import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
+import { FORCE_DEFINITIONS } from './forceDefs';
 import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
 
 export function createDefaultScene(): Scene {
@@ -585,6 +586,98 @@ export function createPhase4FifthForceScene(): Scene {
 }
 
 /**
+ * **The reference-patch scene — a diagnostic instrument, not a demo.**
+ *
+ * Built to answer one question the operator asked on the wall: *"every time I
+ * change anything — opacity, a force, the scale of something — the projector's
+ * colours shift a little, across the whole wall."*
+ *
+ * That report has three candidate causes and no unit test can separate them:
+ * the projector's own adaptive brightness re-grading the frame when the average
+ * light level moves; a bug in the per-frame `holder.tint` write the compositor
+ * gained in Phase 4; or correct `add`-blend compositing being read as a colour
+ * change (I-6). What separates them is having ONE THING ON THE WALL THAT CANNOT
+ * CHANGE.
+ *
+ * `reference` is that thing. It states `susceptibility: 0` for every shipped
+ * force explicitly — not by omission, because an omitted force falls back to
+ * its definition's default and `timeOfDay` defaults to 1 — and sits at
+ * `depth 0`, so parallax cannot move it either. Its modulation is the identity
+ * for any force values whatever, and `forces.test.ts` asserts exactly that, so
+ * the engine's half of the question is closed before anyone looks at a wall.
+ *
+ * **The test, and its pass condition inverts.** Drag any control and watch only
+ * the patch:
+ *
+ *  - The patch does NOT change → the engine is behaving, and a whole-wall shift
+ *    is happening downstream, in the projector. **This check passes by nothing
+ *    happening**, which is stated here because Phase 3 lost three rounds of
+ *    questions to an "all good" that covered a check of exactly this shape.
+ *  - The patch DOES change while its neighbours move → the engine is implicated
+ *    and the susceptibility-zero path is broken.
+ *
+ * Two neighbours are present so that "nothing happened" can be told apart from
+ * "nothing is running": `witness-wind` moves when wind moves, `witness-tint`
+ * changes colour when `timeOfDay` moves. A frozen patch beside two moving
+ * witnesses is evidence; a frozen patch beside a frozen scene is a screenshot.
+ *
+ * **It is deliberately NOT part of `phase4-forces`.** Adding a twelfth layer to
+ * the gate scene would change the layer load §4's window was measured at and
+ * re-bless thirteen golden frames, to answer a question that has nothing to do
+ * with either.
+ */
+export function createPhase4ReferenceScene(): Scene {
+  /** Explicit zeroes. An OMITTED force is not zero — it takes its default. */
+  const deaf: Record<string, number> = {};
+  for (const def of FORCE_DEFINITIONS) deaf[def.id] = 0;
+
+  return createScene({
+    id: 'phase4-reference',
+    name: 'Phase 4 — reference patch (colour-shift diagnosis)',
+    seed: 0x4f1,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'reference',
+        name: 'REFERENCE — must never change',
+        providerId: PROCEDURAL_PROVIDER_ID,
+        // Mid grey, large, and centred. Mid grey because a shift is easiest to
+        // see where no channel is clipped; large because the operator is
+        // judging it from across a room.
+        content: { kind: 'rect', tint: 0x808080 },
+        transform: { x: 0.5, y: 0.5, width: 0.34, height: 0.44, rotation: 0 },
+        zOrder: 2,
+        opacity: 1,
+        blendMode: 'normal',
+        depth: 0,
+        susceptibility: deaf,
+      }),
+      createLayer({
+        id: 'witness-wind',
+        name: 'Witness — moves with wind',
+        providerId: PROCEDURAL_PROVIDER_ID,
+        content: { kind: 'rect', tint: 0x35c8c8 },
+        transform: { x: 0.16, y: 0.5, width: 0.08, height: 0.44, rotation: 0 },
+        zOrder: 0,
+        depth: 0.9,
+        susceptibility: { ...deaf, wind: 1 },
+      }),
+      createLayer({
+        id: 'witness-tint',
+        name: 'Witness — changes with timeOfDay',
+        providerId: PROCEDURAL_PROVIDER_ID,
+        content: { kind: 'rect', tint: 0x808080 },
+        transform: { x: 0.84, y: 0.5, width: 0.08, height: 0.44, rotation: 0 },
+        zOrder: 1,
+        depth: 0,
+        susceptibility: { ...deaf, timeOfDay: 1, temperature: 1, rain: 1, fog: 1 },
+      }),
+    ],
+    forces: { wind: { strength: 0.6, direction: 0, gustiness: 0.5 }, timeOfDay: { hour: 12 } },
+  });
+}
+
+/**
  * The named scenes this build can open at, by id.
  *
  * A real scene bank is Phase 6 (D12); this is the minimum that lets `§4`'s
@@ -610,6 +703,8 @@ export const NAMED_SCENES: Readonly<Record<string, () => Scene>> = {
   // measurement window is taken at; `phase4-fifth` is the I-14 fixture.
   'phase4-forces': createPhase4Scene,
   'phase4-fifth': createPhase4FifthForceScene,
+  // The colour-shift diagnostic. Not a demo — see its own header.
+  'phase4-reference': createPhase4ReferenceScene,
 };
 
 /** Undefined for an unknown id — the caller keeps its current scene (I-13). */

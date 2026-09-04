@@ -38,6 +38,7 @@ import {
   createResilienceVideoScene,
   sceneById,
   createPhase4Scene,
+  createPhase4ReferenceScene,
 } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
 import { ForcePanel } from './ForcePanel';
@@ -495,6 +496,14 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
                 onClick={() => setScene(createPhase4Scene())}
               >
                 Phase 4 forces
+              </button>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createPhase4ReferenceScene())}
+                title="Diagnostic: the grey patch must never change, whatever you drag"
+              >
+                Reference patch
               </button>
               <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
             </div>

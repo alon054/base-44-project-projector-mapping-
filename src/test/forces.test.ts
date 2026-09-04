@@ -34,6 +34,7 @@ import {
 } from '../core/forces';
 import { FOG, FORCE_DEFINITIONS, RAIN, TIME_OF_DAY, WIND, forceById } from '../core/forceDefs';
 import { createLayer } from '../core/layer';
+import { createPhase4ReferenceScene } from '../core/defaultScene';
 
 /** A plain subject. `Layer` satisfies this structurally; the bus needs no scene. */
 function subject(over: Partial<ForceSubject> = {}): ForceSubject {
@@ -608,6 +609,66 @@ describe('fog — the fifth force, shipped (Gate 4, I-14)', () => {
   it('is inert at its default, like every other force', () => {
     expect(FOG.params.find((p) => p.key === 'density')!.default).toBe(0);
     expect(isIdentityModulation(field([FOG]).modulationFor(subject()))).toBe(true);
+  });
+});
+
+/**
+ * The engine's half of the operator's colour-shift report (see
+ * `createPhase4ReferenceScene`). If the reference patch is provably immune to
+ * every force at every value, then a patch that DOES shift on the wall is
+ * evidence about the projector rather than about this code — which is the only
+ * way to tell the two apart, since both look like "the colours moved a bit".
+ */
+describe('the reference patch cannot be modulated (colour-shift diagnosis)', () => {
+  const scene = createPhase4ReferenceScene();
+  const patch = scene.layers.find((l) => l.id === 'reference')!;
+
+  it('states an explicit zero for every shipped force', () => {
+    // Explicit, not omitted: an omitted force takes its definition's default,
+    // and `timeOfDay` defaults to 1. Omission would make the patch the most
+    // tint-susceptible thing on the wall rather than the least.
+    for (const def of FORCE_DEFINITIONS) {
+      expect(patch.susceptibility[def.id], def.id).toBe(0);
+    }
+    expect(patch.depth, 'depth 0 so parallax cannot move it either').toBe(0);
+  });
+
+  it('is the identity under every force at full travel, at any time', () => {
+    const extremes: Record<string, Record<string, number>> = {
+      wind: { strength: 1, direction: 0.37, gustiness: 1 },
+      rain: { intensity: 1, wetness: 1 },
+      timeOfDay: { hour: 0 },
+      temperature: { warmth: 1 },
+      fog: { density: 1 },
+    };
+    for (let t = 0; t < 30; t += 0.37) {
+      const f = evaluateForces({
+        definitions: FORCE_DEFINITIONS,
+        values: extremes,
+        timeSeconds: t,
+        seed: scene.seed,
+        // Parallax swept to the corner as well — `depth 0` is what stops it.
+        parallax: { x: 1, y: 0 },
+      });
+      expect(isIdentityModulation(f.modulationFor(patch)), `t=${t.toFixed(2)}`).toBe(true);
+    }
+  });
+
+  it('and the witnesses DO move, so a frozen patch is not a frozen scene', () => {
+    const f = evaluateForces({
+      definitions: FORCE_DEFINITIONS,
+      values: { wind: { strength: 1 }, timeOfDay: { hour: 0 } },
+      timeSeconds: 3,
+      seed: scene.seed,
+    });
+    const wind = scene.layers.find((l) => l.id === 'witness-wind')!;
+    const tint = scene.layers.find((l) => l.id === 'witness-tint')!;
+    expect(f.modulationFor(wind).offsetX).not.toBe(0);
+    expect(f.modulationFor(tint).tintR).toBeLessThan(1);
+    // ...and each witness moves on ONLY its own axis, so the operator can
+    // attribute what they see to the control they touched.
+    expect(f.modulationFor(wind).tintR).toBe(1);
+    expect(f.modulationFor(tint).offsetX).toBe(0);
   });
 });
 

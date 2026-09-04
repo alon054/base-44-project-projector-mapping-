@@ -3134,3 +3134,263 @@ see breached is a cap nobody will notice breaching.
 editor interaction and belongs to **Phase 5**, not here (CLAUDE.md rule 1: one
 phase at a time). Gate 3's condition is "caps **decided and recorded**", which
 this discharges; enforcement lands where the layer-adding UI does.
+
+---
+
+## 2026-09-04 — Phase 4 (session 1) — forces, parallax, and a fifth force
+
+- DID: built the whole of Phase 4 — the force bus (I-4, I-14), four v1 forces
+  plus a fifth, per-entity susceptibility, parallax by depth (D3), the rain
+  provider, the `[force]` log line, the editor's force panel, 13 golden cases
+  and 92 new unit tests. Reset the rolling checks for the phase first.
+- MEASURED: §4's window at the Phase 4 load, a regression at Phase 3's load,
+  and three memory soaks. Numbers below.
+- NEXT: the wall session. Four of Gate 4's six conditions need it, and one
+  rolling check and two spec rows need the operator.
+
+### `MEASURED` — Gate 4's §4 run, and the regression beside it
+
+`p4-gate`, scene `phase4-forces` (11 layers, all procedural), warp off,
+`disturbed=false`, `throttled=false`, `[scale] 1:1 to panel`,
+`pin=PINNED (pinned-exact-id)`, fps 60.000067 vs nominal 60.000004,
+3601 samples over 60.0 s.
+
+| metric | value | verdict |
+|---|---|---|
+| M1 late | **0.0000%** | PASS |
+| M1 worst run | 0 | PASS |
+| M1 worst interval | 18.80 ms (floor 25.0 ms) | PASS |
+| M1 clause 3 | empty | PASS |
+| M2 p99 | **0.2000 ms = 1.200% of N** | PASS |
+| M2 mean (informational) | 0.0649 ms = 0.390% of N | — |
+| `k_dev` / `k_target` | 90.996 / 88.951, ratio 1.0230 | — |
+
+**M2 is an upper bound and is recorded as one.** `performance.now()` resolves
+0.100000 ms — printed as `[timer]` on every launch — so 1.200% is exactly two
+quanta of a clock coarser than its subject. Gate 3 read 0.600% (one quantum) on
+a cheaper frame. The ruling is still open and still the operator's: drop the
+preload sandbox, serve from a custom protocol with COOP/COEP, or accept p99 as
+a ceiling and judge on `renderMeanMs`. Until then every M2 number in this
+project is an upper bound.
+
+**The regression is the more informative number.** `p4-regression`, at Phase 3's
+*own* scene with the force bus now in the render path:
+**M1 0.0000% late, clause 3 empty, M2 p99 0.1000 ms = 0.600% of N — identical
+to Gate 3's figure**, `renderMeanMs` 0.0239 ms inside Phase 3's measured
+0.021–0.047 band. The force bus is free at Phase 3's load. That is what makes
+Phase 4's own 1.200% attributable to eleven `Graphics` layers rather than to the
+mechanism this phase added.
+
+**A8's derate is still unresolvable, exactly as the open ruling says.**
+`derate.meaningful: false` — devDelta 5.17% inside a probe spread of 38.4%.
+Gate 9 judges on minute-20 k. This still needs deciding before then, not at it.
+
+**§11 Phase 4 states no layer load, and this is a judgement call, recorded as
+one.** §4 says runs happen "at the phase's stated layer load"; Phase 3's is
+spelled out and Phase 4's is not. `phase4-forces` was taken as the load because
+it is the scene the gate is judged on, and `p4-regression` was added so the
+number stays comparable to Gate 3 instead of becoming a new baseline nobody can
+read. No spec statement was invented.
+
+### `BLOCKER` — the memory soak returns `flat: false`, and it is not Phase 4
+
+Three soaks, one question: is the buffer growth a leak?
+
+| run | scene | textures | bytes | buffers | geometries | `flat` |
+|---|---|---|---|---|---|---|
+| `p4-soak` | `phase4-forces` | 2 → 2 | 8 → 8 | 74 → **454** | 37 → 227 | **false** |
+| `p4-soak-p1` | `phase1-default` | 2 → 2 | 8 → 8 | 46 → **274** | 23 → 137 | **false** |
+| `p4-soak-p3load` | `phase3-load` | 11 → 11 | 17,596,424 → same | **4 → 4** | 2 → 2 | true *(DISTURBED)* |
+
+**Texture memory is flat.** `driftTextureCount 0` on all three, over 20 minutes
+and 604 rebuilds. That is the subject the rolling check names.
+
+**The buffer/geometry growth is real, bounded, and predates Phase 4.**
+`phase1-default` — four layers, wind at its zero default, no rain, no Phase 4
+content whatsoever — shows the identical signature: growth to a plateau at
+**110 s**, then `steadyDriftBufferCount: 0` across 188 rebuilds. `phase4-forces`
+does the same at the same 110 s and then holds **bit-exact for 1090 s across 548
+rebuilds**. The texture-heavy Phase 3 scene never leaves 4 buffers, which is why
+nobody has seen this before: it is PixiJS `Graphics` pooling reaching a
+high-water mark, and Phases 1–2 never soaked a Graphics-heavy scene.
+
+A leak that stops is not a leak. But **the box is marked `[~]`, not `[x]`**,
+because the instrument says `flat: false` and Phase 3's lesson was a soak that
+reported a *false* 5209% leak — overruling one's own instrument by argument is
+how that happens in the other direction. **The operator rules.** Three options,
+in the order I would take them:
+
+1. **Accept and narrow the check.** Its stated subject is texture memory, which
+   is flat. The harness's `flat` folds in buffers/geometries; split the verdict.
+2. **Explain the 110 s.** It is suspiciously identical across two unrelated
+   scenes. Worth one measurement in Phase 9, not one at this gate.
+3. **Nothing.** Bounded 5-6x growth that holds bit-exact for 18 minutes is not a
+   live-session risk. Phase 9 owns performance.
+
+Whichever is chosen should be written down, because the next Graphics-heavy
+scene will report it again.
+
+### `MEASURED` — a run I disturbed myself, and it is not being kept
+
+`p4-soak-p3load` came back **`disturbed=true`**. The cause was mine: I ran
+`ls`, `cat` and `date` at 16:15 UTC to check on the batch, inside the window,
+having said in the same session that I would not. Its numbers happen to match
+Gate 3's exactly (buffers 4 → 4, texture bytes byte-identical) and its worst
+interval is the only one of the five runs to sit at 33.40 ms rather than 18.80.
+A disturbed run is not a run; it is re-taken rather than kept because it agrees
+with what I expected. That is the whole point of the flag.
+
+### `MEASURED` — two defects found before they shipped, neither by design
+
+**1. Every Phase 1-3 scene would have started swaying.** `wind.strength`
+defaulted to 0.25, and `createScene` fills `scene.forces` from the definitions'
+defaults — so adding the force bus would have silently changed the look of every
+scene in the project. Caught by a test written for a different reason ("every
+force is inert at its own defaults"). **A force's defaults must be the identity**
+is now a stated rule on any force added later, and it is what made the fifth
+force provably free: all 41 goldens matched after adding it.
+
+**2. Parallax exposed a black band down one edge of the frame.** Found by
+*looking at a golden preview*, which is now the fourth time in this project that
+a picture caught what a passing test could not. The sky was authored at
+`depth 0.02`, so a full parallax sweep slid it 23 px and revealed the black
+behind it. **There is no way to author around it: I-1 caps a layer's `width` at
+1**, so a full-frame layer cannot be over-sized to give itself bleed the way a
+conventional parallax backdrop would be. The invariant is not the thing to
+change. `DEPTH_GAIN_FAR` is now 0 — the far plane does not move, which is also
+what "far plane" means — and the authoring rule is recorded in two places:
+**a layer that spans the frame is authored at `depth 0`.**
+
+### `MEASURED` — the fifth force, timed (Gate 4, I-14)
+
+**1 minute 34 seconds**, start to green, including two failing runs and their
+fixes, against a 30-minute budget.
+
+- **Production diff: one file, `core/forceDefs.ts`, +53 lines** — the definition
+  and its comment. Nothing in `core/forces.ts`, `render/compositor.ts`,
+  `core/parameters.ts`, `core/scene.ts`, `editor/ForcePanel.tsx` or
+  `debug/forceLog.ts`.
+- `force.fog.density` appeared in the registry, a slider and a per-entity
+  susceptibility column appeared in the editor, and `[force] fog density=0.000
+  -> 11/11 entities` appeared in `p4-gate.log`, without any of them being told
+  fog exists.
+- **All 41 golden frames still matched afterwards.** A new force changed no
+  rendered pixel, because every force is inert at its own defaults.
+
+**The honest cost: three TEST files changed.** They used `fog` as their own
+synthetic fifth force and collided with the real id; renamed to `current`, which
+is I-14's own second example. Not one changed because the mechanism changed. The
+one substantive change was "ships exactly the four SPEC.md names", now five —
+the deliberate friction of shipping a force.
+
+### `BLOCKER` — the operator's colour-shift report, and the instrument built for it
+
+> "every time I change the scale of something, opacity, strength of a force,
+> rain or anything, the projector changes lights a bit, like the colours change"
+> — and, asked to discriminate: **it affects the whole wall, and it probably
+> happened in Phase 3 too.**
+
+**Part of this is correct behaviour.** `rain`, `timeOfDay`, `temperature` and
+`fog` are tint forces reaching 11/11 entities; the whole scene changing colour
+when they move is Gate 4's second condition working. If it did *not*, that would
+be the defect.
+
+**The rest is not, and points away from the engine on two independent grounds.**
+The engine has no path that changes the whole wall when one layer's opacity
+moves — modulation is per-entity. And `holder.tint` is new *today*: a symptom
+that existed in Phase 3 cannot be caused by a mechanism that did not exist then.
+The leading candidate is **the projector's adaptive brightness / dynamic
+contrast**, re-grading the frame when the average light level moves. §10 row 1
+established that auto-keystone and auto-focus are fully disableable on the Mars
+II Pro; this is the third auto-feature and nobody has checked it.
+
+**Not closed on that reasoning.** Gate 2 overturned "the blur is the projector"
+into "the blur is content", and the reverse mistake is just as available: a
+whole-wall shift is also what a global engine bug looks like, and "I think it
+happened in Phase 3" is a recollection, not a run. So the engine's half is now
+closed by construction and the projector's half has a test.
+
+**`scenes: phase4-reference` — the instrument.** A mid-grey patch stating
+`susceptibility: 0` for *every* shipped force **explicitly** — not by omission,
+because an omitted force takes its definition's default and `timeOfDay` defaults
+to 1 — at `depth 0` so parallax cannot move it either. `forces.test.ts` asserts
+its modulation is the identity under every force at full travel, at 81 clock
+times, with parallax swept to the corner. Two witnesses stand beside it, one
+that moves only on wind and one that changes only on tint, so that "nothing
+happened" can be told apart from "nothing is running".
+
+It is deliberately **not** part of `phase4-forces`: a twelfth layer would change
+the load §4's window was measured at and re-bless thirteen goldens, to answer a
+question unrelated to either.
+
+**The pass condition inverts, and is stated that way on purpose** — Phase 3 lost
+three rounds of questions to an "all good" covering a check of exactly this
+shape. Drag any control and watch **only the patch**:
+
+- **The patch does not change → PASS**, and the whole-wall shift is downstream,
+  in the projector. This check passes by *nothing happening*.
+- The patch changes while its witnesses move → the engine is implicated.
+
+Order of work for the operator: **turn off adaptive/dynamic brightness in the
+projector's menu first**, then re-test. This wants doing *before* the wall
+session, because "`timeOfDay` sweeps the whole scene's light smoothly" is a
+judgement about light on a wall, and a projector re-grading underneath the sweep
+can make a smooth ramp look like it steps.
+
+### `SPEC-CHANGE-PROPOSED` — §10, two rows
+
+**Row 2 is still outstanding from Phase 3 and is not the agent's to edit.** The
+caps were ratified 2026-09-04 — **concurrent video 4, concurrent live Lottie 4,
+behaviour WARN not refuse** — and are wired as `MAX_CONCURRENT_VIDEO` /
+`MAX_CONCURRENT_LOTTIE` with a `[caps]` log line. The row itself still reads
+"Phase 3, confirmed Phase 9" and carries no number. The Lottie figure should be
+recorded as **by analogy and unmeasured**; no run ever isolated Lottie count
+from video count.
+
+**A NEW row is proposed: the projector's adaptive picture features are
+disabled.** A7 closed auto-keystone and auto-focus in row 1. Adaptive
+brightness / dynamic contrast is the same class of thing — a projector feature
+that silently re-grades the image — and it is a **measurement precondition**,
+not a preference: every colour judgement from Gate 4 onward, D15's colour
+coherence and Phase 9's grade pass all depend on the panel not moving underneath
+them. It belongs in the spec rather than in somebody's memory.
+
+Note this does **not** contaminate today's §4 numbers. M1 and M2 are frame
+timing, not photometry.
+
+### `NOTE` — the coalescer's third instance, and why it is a new file
+
+`debug/coalesce.ts` is the third implementation of the 4 Hz trailing-emit
+coalescer (`render/warp.ts`, `debug/clockLog.ts`, now `[force]`), which is the
+threshold the Phase 3 `IDEAS` note named. It is a **new module used only by the
+new logger**, not a refactor of the two existing ones: both sit behind passed
+gates and CLAUDE.md is explicit that a passed gate is a frozen surface. The
+extraction is available to either the next time its surface is legitimately
+open. Until then there are three implementations of one idea, recorded rather
+than hidden.
+
+It is keyed per force, which the other two are not: the clock has one subject
+and the bus has five, and a global window would let a wind-slider drag suppress
+the one `[force] rain …` line explaining what the operator was looking at.
+
+A defect in it was caught by its own tests before it ever ran: the first line
+for each key was being *held* for a quarter second rather than emitted, because
+`lastAt` started at 0 and a coalescer constructed near its clock's epoch has
+`now() - 0 < interval`. A run log whose opening state arrives late is the Phase 3
+instrument defect wearing new clothes.
+
+### `IDEAS` — parked, not built
+
+- **Extract the coalescer** across `warp.ts` and `clockLog.ts` when either
+  surface is next open. Three copies is one too many.
+- **A per-region golden assertion.** The reference patch's invariance is proved
+  by unit test; proving it *in pixels* would need the harness to hash a
+  sub-rectangle, which it cannot. Worth it if the same question recurs.
+- **`timeOfDay` cannot brighten.** The tint axes are multiply-only because
+  PixiJS `Container.tint` is; noon is `(1,1,1)` and the day ramp runs downward
+  from full output. A *lifted* look is `grade.*` and belongs to Phase 9, where
+  D15 already lives. Golden-hour consequently reads as a desaturated warm rather
+  than an orange sky, which is honest and worth a look on the wall.
+- **Wind does not depth-scale its `rotate` axis**, only its offsets. A distant
+  tree bends by the same angle and merely looks smaller, which is physically
+  right; if it reads wrong on the wall, that is a content note, not a bus one.
