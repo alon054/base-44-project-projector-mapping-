@@ -2691,3 +2691,373 @@ enforces; the trade is worth keeping.
   is an approximation, not a mirror, and Gate 3 is judged on the output window.
   If a later phase wants them tighter, the shape is a periodic resync on the
   existing `clock:set` channel — not a new one.
+
+## 2026-09-04 — Phase 3 (session 2) — GATE 3, all conditions but one
+
+- DID: built the rest of Phase 3 — bundled library, three layer types, seam
+  handling, the transport — took the Gate 3 measurements, and fixed six
+  instrument defects found along the way.
+- MEASURED: everything below. **Gate 3's ten technical conditions pass.**
+- BLOCKER: **one condition cannot be closed by this agent.** §10 row 2's
+  video/Lottie caps are a `SPEC.md` change, and CLAUDE.md makes that the
+  operator's. The proposal is at the end of this entry. Under rule 3 the gate
+  is not crossed until it is ratified.
+- NEXT: ratify the caps, then Phase 4 — forces and parallax, the first demoable
+  milestone.
+
+### `MEASURED` — Gate 3's §4 run, at the stated layer load
+
+`p3-gate`, 1 video + 2 sprite + 1 Lottie (`phase3-load`), DEV_RESOLUTION
+1280×720, **1:1 to panel**, warp OFF, HUD on, `PINNED (pinned-exact-id)`,
+fullscreen on `T749-fHD720` @ 60.000004 Hz, **N = 16.6667 ms**.
+`disturbed=false`, `throttled=false`, no focus change, 3601 samples covering
+60.0 s, **fps 60.0004 against a nominal 60.0000**.
+
+| | |
+|---|---|
+| **M1 presentation** | **0.0000% late**, worst run **0**, worst interval **17.80 ms** (1.07 × N) |
+| **M1 clause 3 (A12)** | **zero** events over 3 × N, in the window and lifetime |
+| **M2 headroom** | **p99 0.1000 ms = 0.600% of N**, against the 60% limit |
+| p95 (information) | 0.1000 ms |
+| mean (information) | 0.0212 ms = **0.127% of N** |
+| **Measured headroom** | **59.4 percentage points**. Render cost is **1/100th** of the budget |
+
+Warp deliberately off: A8's probe measured the mesh rather than the composite
+whenever it was on, and although that is now fixed, keeping the §4 runs
+warp-off makes them comparable to the four Gate 0–2 runs.
+
+**M2 finally moved — and not for a good reason.** It read 0.200 ms = 1.200% of
+N at Gate 0, Gate 1, Gate 2, and at every Phase 3 run until this one. Here it
+reads 0.600%. That is not the metric waking up; it is the same 100 µs quantum
+with a cheaper frame under it, so p99 landed on ONE tick instead of two. See
+the clock section below.
+
+### `MEASURED` — A15's review, due at this gate
+
+**Per-frame instrument max 0.1000 ms = 0.600% of N**, against A15's **2%**
+trigger, at Phase 3's stated layer load. Mean per-frame 0.00125 ms; tick
+0.300 ms. Consistent across every Phase 3 run: 0.600% at x1–x4 and at the
+resilience and soak runs, 1.200% at x5–x6.
+
+**A15 does not trigger. The HUD draw stays on the render path.** Phase 0's
+1.2% on a trivial scene did not discharge this; a measurement at the phase's
+own layer load does, which is what the clause asked for.
+
+### `MEASURED` — the memory soak (§8.2, and the rolling check)
+
+`p3-soak`, 20 minutes continuous, `phase3-load`, scene re-applied every 2 s.
+**604 rebuilds.**
+
+| | first sample | last sample |
+|---|---|---|
+| live texture count | **11** | **11** |
+| texture bytes (estimate) | **17,596,424** | **17,596,424** |
+| buffers | 4 | 4 |
+| geometries | 2 | 2 |
+| `managedTextures` array slots | 23 | 1221 |
+
+`driftTextureCount = 0.0000`, **`flat: true`**. The rolling check passes, and
+for the first time on a subject that genuinely churns — Phase 2's soak watched
+a single composite render texture that was never destroyed.
+
+The last column is the census defect, recorded below.
+
+### `MEASURED` — k and the thermal derate (A1, A8), the first time they are owed
+
+Two probes in one continuous run: settle → **cold probe** → §4 window → **warm
+probe**. Subject `composite` in both, median of 5 repeats with the dev/target
+order alternating, min–max reported.
+
+**Gate run, 71 s apart:**
+
+| | k_dev | k_target | ratio |
+|---|---|---|---|
+| cold | **90.48** (81.62–95.38, spread 15.2%) | **90.48** (82.90–106.98) | 1.0000 |
+| warm | **104.17** (85.59–106.98, spread 20.5%) | **94.25** (87.48–103.49) | 1.1053 |
+
+Derate **+15.13%** over 71 s, against a probe spread of **20.5%** →
+**`meaningful: false`**.
+
+**Soak run, 1211 s apart — the actual minute-1 → minute-20 comparison A1 asks
+for:**
+
+| | k_dev | k_target |
+|---|---|---|
+| cold | **89.96** (spread 23.2%) | 96.54 |
+| warm | **82.04** (spread 14.4%) | 84.22 |
+
+Derate **−8.81%** over **1211 s**, against a spread of **23.2%** →
+**`meaningful: false`**.
+
+**Recorded, and recorded as not measurable.** Three independent runs put the
+delta inside the instrument's own dispersion, and the sign is not even
+consistent — +15.13%, −8.81%, and −15.38% on an earlier soak. There is no
+thermal derate to find at this load, which is exactly what §4's own reasoning
+predicted when A1 was narrowed to Phases 3 and 9: "an earlier gate has no
+sustained GPU work to throttle."
+
+A8's probe went into this gate with two known defects and both are fixed. The
+subject one mattered most: it rendered `app.stage`, so with the warp on it
+timed the **mesh** — k_dev 42–50 warp-off against 90–96 warp-on, which is not a
+speedup but a different subject. It renders `compositor.view` now, a grep
+enforces it, and `KReport.subject` records which was measured so two k values
+can never again be compared across a change of subject. On the spread: median
+of 5, alternating order, render targets allocated once per run instead of per
+repeat, a 1-pixel GPU sync instead of an 8 MB readback, a full discarded warm-up
+burst, iterations 32 → 96, and A9 rejection of bursts that measured nothing.
+Dispersion went from **108%** to **14–23%**. Still not enough to resolve a
+derate, and saying so is the point.
+
+### `MEASURED` — I-13, the corrupt video (Gate 3 condition)
+
+`p3-resilience`, `disturbed=false`. A deliberately corrupted MP4 beside a
+missing asset and a working sprite.
+
+- **M1 0.0000% late, worst interval 17.80 ms** — against the **50 ms** hard
+  floor the condition names. The session did not notice.
+- The chain resolved as the run log shows, and the ORDER is the interesting
+  part: `[video] broken: placeholder — decode failed` then
+  `[video] broken: poster — poster ready`. The decoder failed **before** the
+  poster arrived, and the layer still ended on the poster.
+
+That ordering is why the chain is now a table (`videoStage.ts`, 12 tests)
+rather than a sequence of assignments: the poster is a small JPEG and the video
+a megabyte of H.264, so which settles first is a race, and the end state must
+not depend on it.
+
+### `MEASURED` — the headroom ladder, and the cap it found
+
+§4: "the Phase-3 load is a **floor** to validate the pipeline, not the ceiling.
+Raise it deliberately, measuring at each step." `phase3-x{n}` is n videos, 2n
+sprites and n Lotties. All six runs valid: no focus changes, none throttled.
+
+| load | videos | fps | M1 | late | worst run | worst interval | clause 3 | M2 p99 | mean |
+|---|---|---|---|---|---|---|---|---|---|
+| x1 | 1 | 59.999 | pass | 0.0000% | 0 | 17.70 ms | 0 | 1.200% | 0.281% |
+| x2 | 2 | 60.000 | pass | 0.0000% | 0 | 17.70 ms | 0 | 1.200% | 0.287% |
+| x3 | 3 | 59.999 | pass | 0.0000% | 0 | 17.80 ms | 0 | 1.200% | 0.247% |
+| x4 | 4 | 60.001 | pass | 0.0000% | 0 | 17.70 ms | 0 | 1.200% | 0.303% |
+| x5 | 5 | 60.000 | pass | 0.0000% | 0 | 17.70 ms | 0 | 1.200% | 0.409% |
+| **x6** | **6** | **59.234** | **FAIL** | **0.4219%** | **14** | **150.00 ms** | **9** | 2.400% | 0.697% |
+
+**A clean cliff between five and six videos.** x6 fails M1 on two clauses at
+once: a run of **14 consecutive late frames** against a limit of 2, and **nine**
+intervals over 3 × N against A12's allowance of one unattributed event.
+
+**Read the failure's shape, not just its size.** M2 is comfortable at x6 —
+2.400% of a 60% budget — while presentation collapses. And the nine clause-3
+events are a **burst**, all inside t = 1.667–2.367 s, intervals of 150.0, 133.3,
+100.0, 83.6, 83.3, 83.3, 66.7, 66.5 and 50.0 ms. That is not a load ceiling
+being reached; that is a **simultaneous seek**.
+
+The mechanism is D5 doing exactly what it was told. Video realigns at loop
+boundaries, and `phase3-x6` alternates a 4-second clip with a 3-second one, so
+three decoders reach a boundary in the same frame and every twelve seconds all
+six do. Nothing staggers them. §5 predicted "video count and live-Lottie count
+will be the first things that blow the budget" and it was right about which
+knob, but the cost is not per-decoder steady state — it is decoders seeking
+together.
+
+**Retraction, on the record.** Mid-session this agent reported the cliff, then
+retracted it as its own interference, then found it again on a clean run. The
+retraction was wrong. The runs it rested on were disturbed by the agent
+polling the machine during them, which is the same mistake that cost four runs
+this session.
+
+### `MEASURED` — six instrument defects, and how each was found
+
+Not one by a unit test. That is now eleven of thirteen defects across three
+phases found by an operator or a run log.
+
+**1. The false texture leak.** The first 20-minute soak reported textures
+rising **23 → 1221** across 604 rebuilds: 5209% drift, rolling check failed.
+Nothing leaked — bytes were pinned at 12,861,448 the entire time, buffers 4→4,
+geometries 2→2. PixiJS nulls an entry in `managedTextures` when a source is
+destroyed and never compacts the array, and the census counted `length`.
+Phase 1 had no textures; Phase 2 had one composite render texture that was
+never destroyed; Phase 3 is the first phase to destroy a texture per video and
+per Lottie on every rebuild. `textureCount` is now the live count and
+`textureSlots` reports the array length as information. An existing test had
+asserted the wrong behaviour and is corrected with a note. **A9 names this
+exactly, and a FALSE leak is the worse kind — it sends someone hunting what is
+not there and makes the next real one easier to disbelieve.**
+
+**2. The window that only covered its last minute.** The soak reported
+`late 0.0000%` beside `worst interval 33.40 ms`. Both correct, describing
+different spans: samples evict on a rolling 60-second window while
+`worstIntervalMs` is a lifetime max. So a 20-minute soak's M1, percentiles and
+clause-3 **list** all described its final minute — and §4 requires every
+interval over 3 × N to be attributed, which cannot happen for an evicted one.
+The report now carries `coveredSeconds` and `magnitudeEventsLifetime`. Latent
+since Phase 0; only reachable once a phase ran a window longer than the
+eviction window.
+
+**3. The clock had never been paused.** Found by re-reading a stale checklist
+note. Every log in `measurements/` held exactly one `[clock]` line — `PLAYING`,
+at startup. `VideoView`'s `el.pause()` had never executed in a live process:
+the unit suite covers the clock, the goldens render `playing: false`, but the
+goldens run with `decodeVideo: false` and skip the branch. **Nothing had ever
+checked that a decoder obeys the clock.** `PROJENGINE_TRANSPORT=1` now exercises
+pause → scrub → resume → rate 0 → rate 1 → scrub during the settle.
+
+**4. The decoder thrash, found by (3) on its first run.** At rate 0 the decoder
+was started and stopped **sixty times a second** — two independent `if`s in the
+per-frame update, one resuming a paused element, the other pausing a running
+one. Nothing in the unit suite could have caught it: each branch was correct
+alone and the defect lived only in their interaction across a frame boundary.
+Gate 3 asks that "video pauses too, at frame granularity", and a decoder
+thrashing at 60 Hz might well have read as a frozen frame to someone watching a
+wall. Now one function, one answer, applied once (`decoderAction`), with a
+120-frame idempotence test. The exercise now reads:
+
+```
+[clock] t=1.583s PAUSED       [video] decoder HELD at 1.571s
+[clock] t=7.300s PAUSED       (scrub — no seek, resync at next boundary)
+[clock] t=7.300s PLAYING      [video] decoder resumed
+[clock] t=9.300s rate=0.00x   [video] decoder HELD at 1.314s
+[clock] t=9.300s rate=1.00x   [video] decoder resumed
+```
+
+**5. The clock the instrument measures with.** `performance.now()` is coarsened
+to 100 µs in a renderer — **measured, not assumed: `resolution=0.100000ms`** —
+and Phase 3's render cost is 0.021–0.047 ms. The ruler's smallest mark is wider
+than everything on it, which is why M2 read an identical 1.200% of N at four
+consecutive gates and across five load steps. `debug/clock-source.ts` now
+calibrates both candidate clocks at startup — cost per call and real resolution
+— and prints which it took and why, with an explicit warning when the chosen
+clock cannot resolve its subject. **The finer clock is unavailable on this
+build**: the preload is sandboxed and a sandboxed preload gets a stripped
+`process` with no `hrtime`. Learning that cost a crash — the first version
+called it unguarded and killed the output window before it drew a frame, losing
+a whole measurement run. Every call into a candidate is now guarded.
+
+**6. The disturbance flag, twice.** Gate 2 carried forward that `disturbed`
+watched only for focus being LOST, so a run that started backgrounded and
+GAINED focus reported clean. The fix — require focus HELD for the whole window
+— over-corrected: this app has two windows, only one can hold DOM focus, and it
+is normally the editor. Two runs came back "disturbed" with **zero focus
+events** and **60.0005 / 59.9995 fps across 3601 samples**; Chromium throttles a
+genuinely backgrounded window to about 1 Hz. The verdict is now stability and
+throughput rather than possession: any focus CHANGE in the window, visibility
+going hidden, or the presentation rate departing from the display's nominal by
+more than 5%. That last test is new and is strictly stronger than what it
+replaced — a throttled run now fails on physics rather than on a proxy.
+
+### `MEASURED` — four defects in the CONTENT, all found by looking at goldens
+
+The seven new golden cases were inspected by eye rather than blessed on trust,
+and four of them were wrong the first time.
+
+- **lottie-web's default entry uses a direct `eval`** for expressions, and this
+  app runs a hardened CSP with no `unsafe-eval`. It would have loaded fine and
+  failed on a downloaded LottieFile in Phase 8. Now on the light canvas build,
+  which contains zero `eval(` — checked against the file.
+- **Passing `container` to lottie makes it build its own canvas and ignore the
+  supplied context** (`CanvasRendererBase.configAnimation` branches on it), so
+  the texture stayed blank with no error and no placeholder. The golden was an
+  empty rectangle.
+- **The first sprite sheets were 100% opaque.** An ffmpeg chain negotiated a
+  non-alpha pixel format; they rendered as black boxes. The sources are also
+  palette PNGs trimmed to per-frame bounding boxes, so frames are converted
+  individually before tiling.
+- **ffmpeg's `geq` wraps a negative result modulo 256** rather than clamping, so
+  a channel value of −4 came out as 252 and the test clip grew hard-edged red
+  and green blobs at its zero crossings.
+
+The clips are also dark rather than a rainbow test card: I-6 and D1 build the
+engine around additive light on black, and an `add` layer over a bright
+background is not a test of anything.
+
+### `MEASURED` — the operator's wall session, 2026-09-04
+
+Four conditions no instrument can judge. Each was asked with its pass condition
+stated explicitly, because two operator reports last session resolved the
+OPPOSITE way from their first reading.
+
+- **Pause freezes every clock-driven layer simultaneously — PASS.**
+- **Two loops of different lengths stay phase-consistent after a scrub — PASS.**
+  The same scrub position gives the same picture every time, across three
+  mutually non-dividing periods (2.5 s / 1.8 s / 3 s).
+- **Video re-syncs at its next loop boundary — PASS, confirmed in the right
+  direction.** It drifted out of step and caught up within a few seconds.
+  Snapping into step instantly would have been the FAILURE, because it would
+  mean per-frame seeking, which D5 rules out as visibly stuttering. The
+  operator was asked against that specific alternative, not against "looked
+  fine".
+- **A known non-seamless loop shows no visible pop with seam handling on —
+  PASS. The pass condition here is INVERTED and was confirmed that way:** with
+  `crossfade` the operator saw *nothing happen* over three or four loops.
+  **And the control was run:** switching that layer's seam to `none` made the
+  pop appear. Without that control the first answer would only have shown the
+  asset might be seamless anyway — Phase 1's "a scene that could not
+  demonstrate the invariant".
+
+### `SPEC-CHANGE-PROPOSED` — §10 row 2, the concurrent video and Lottie caps
+
+Due this phase ("Phase 3 decides, Phase 9 confirms"). **This is the one Gate 3
+condition this agent cannot close**: `SPEC.md` is the operator's.
+
+**The evidence** is the ladder above. Five videos + ten sprites + five Lotties
+passes both §4 metrics with zero late frames. Six of each fails M1 on two
+clauses. The failure is a burst of simultaneous loop-boundary seeks, not a
+steady-state ceiling — M2 sits at 2.400% of a 60% budget while presentation
+collapses.
+
+**Option A — cap concurrent video at 4, live Lottie at 4.** One step below the
+measured failure, which is the ordinary engineering margin. Matches §5's "use
+sparingly, cap hard". Costs a ceiling that is probably artificially low, since
+the failure is a collision rather than a load.
+
+**Option B — cap at 5, the highest measured pass.** No margin. Defensible only
+because the failure at 6 was not marginal (14 consecutive late frames, not
+three), so the boundary is sharp rather than noisy.
+
+**Option C — stagger the loop-boundary realignments, then re-measure.**
+Treats the actual cause. D5 realigns each video at its own loop boundary and
+nothing offsets them, so N videos sharing a period stall together. Giving each
+layer a deterministic per-layer offset would spread the seeks. This may raise
+the ceiling a long way — the per-decoder cost is nearly flat from one to five —
+but it **changes D5's behaviour** and so is not something this agent will build
+without a ruling.
+
+**Recommendation: A now, C before Phase 9.** Cap at 4 and record why, so v1 has
+a number it can defend; then treat the collision in Phase 9, where §4 already
+plans a 20-minute soak and where the cap is confirmed rather than set.
+
+**The Lottie cap is proposed by analogy, not by measurement, and that should be
+recorded as a weakness.** No run isolated Lottie count from video count — the
+ladder raised all three kinds together. §5 names Lottie as a main-thread
+re-render and an active CPU cost, and the mean render duration does climb with
+the ladder (0.281% → 0.409% of N from x1 to x5), but nothing here separates
+that from the sprites. **If the Lottie cap matters, it needs its own ladder.**
+
+### `BLOCKER` — two rulings, neither blocking the gate, both wanted before Phase 9
+
+**A8 / A1 — should Gate 9 keep asking for a thermal derate?** The probe now
+disperses 14–23% after six separate fixes. Three runs put the derate inside
+that dispersion with inconsistent sign. Either the probe needs to get better by
+an order of magnitude, or the derate needs to be defined against something the
+instrument can resolve. Phase 9 judges its gate on minute-20 k, so this is
+decided before then, not at it.
+
+**§4 metric 2 — is p99 a measurement or a ceiling?** It is currently a ceiling:
+a 100 µs quantum over a 21–47 µs subject. Three ways out, all of them the
+operator's: drop the preload sandbox so `process.hrtime` is reachable; serve the
+app from a custom protocol with COOP/COEP so the renderer is cross-origin
+isolated and `performance.now()` falls to 5 µs; or accept p99 as a ceiling and
+judge headroom on the informational mean. **Until one is chosen, every M2
+number this project records is an upper bound and should be read as one.**
+
+### `IDEAS` — parked
+
+- `clockLog.ts` duplicates the 4 Hz coalescer in `src/render/warp.ts`. Second
+  instance; a third justifies extracting it.
+- The preview clock and the output clock advance independently between operator
+  actions. I-7 already states the preview is an approximation. If a later phase
+  wants them tighter, the shape is a periodic resync on the existing
+  `clock:set` channel, not a new one.
+- `PROJENGINE_TRANSPORT=1` currently runs a fixed script. A phase that wants to
+  fuzz the transport would want it to take a sequence.
+- The Kenney source frames are trimmed to per-frame bounding boxes with no
+  offset metadata, so the sheets are centre-registered. Good enough for a puff
+  expanding from its centre; a walk cycle would need real registration.

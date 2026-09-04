@@ -735,9 +735,16 @@ function startMeasurementRun(
   // `document.hasFocus()` rather than the `focusIsLost` flag: the flag is
   // maintained by events, and at this instant the request above may not have
   // produced one yet. This is the live answer.
+  //
+  // Recorded as INFORMATION, not as a verdict. See the disturbance rule in the
+  // summary below for why possession of DOM focus is the wrong question in a
+  // two-window app.
   focusHeldAtWindowOpen = document.hasFocus();
   if (!focusHeldAtWindowOpen) {
-    console.warn('[run] WINDOW opened WITHOUT focus — this run cannot be a gate run');
+    console.log(
+      '[run] window opened without DOM focus (the editor window likely holds it). ' +
+        'Not a disturbance on its own — the presentation rate below is what decides.',
+    );
   }
 
   for (const cue of cues) {
@@ -777,20 +784,59 @@ function startMeasurementRun(
         `ratio=${k.ratio.toFixed(4)} subject=${k.subject} repeats=${k.repeats}`,
     );
     const disturbing = runEvents.filter((e) => e.disturbing && e.t >= 0);
-    // Held for the WHOLE window: focus at open, and no focus change of any
-    // direction inside it. A `focus gained` event during the window means the
-    // window did not have focus before it, which is the case that slipped
-    // through when only `focus LOST` counted.
+    // ---------------------------------------------------------------------
+    // WHAT COUNTS AS A DISTURBANCE — corrected, with the evidence.
+    //
+    // Gate 2 carried forward a real defect: `disturbed` watched only for focus
+    // being LOST, so a run that started in the background and GAINED focus
+    // mid-window reported clean. The fix for that was to require focus to be
+    // HELD for the whole window — and that over-corrected into a different
+    // wrong answer.
+    //
+    // This app has two windows. The OUTPUT window is frameless and fullscreen
+    // on the projector; the EDITOR is where a person types. Only one can hold
+    // DOM focus, and it is normally the editor — during a show, and during
+    // every measurement run where the editor happens to be frontmost. Under
+    // the over-corrected rule the output window could essentially never
+    // produce a gate run, which is not a stricter gate, it is a broken one.
+    //
+    // Two runs made the case unarguable: both reported `focusAtWindowOpen:
+    // false` with ZERO focus events in the window, and both presented at
+    // 60.0005 / 59.9995 fps across 3601 samples with 0.0000% late. Chromium
+    // throttles a genuinely backgrounded window to about 1 Hz. These windows
+    // were not backgrounded; they simply did not hold the keyboard.
+    //
+    // So the question is STABILITY and THROUGHPUT, not possession:
+    //   - any focus change inside the window (either direction) — the state
+    //     was not stable, which is the Gate 2 defect properly stated;
+    //   - visibility going hidden — the real backgrounding signal;
+    //   - the presentation rate departing from the display's nominal — the
+    //     PHYSICAL test, which no focus bookkeeping can fool.
+    // ---------------------------------------------------------------------
     const focusChangedInWindow = runEvents.some(
       (e) => e.t >= 0 && (e.what === 'focus LOST' || e.what === 'focus gained'),
     );
+    // A throttled window cannot hit its display's rate. 5% is far wider than
+    // any scheduling jitter and far narrower than throttling, which is orders
+    // of magnitude.
+    const nominalFps = r.nominalMs > 0 ? 1000 / r.nominalMs : 0;
+    const throttled =
+      r.valid && nominalFps > 0 && Math.abs(r.fps - nominalFps) / nominalFps > 0.05;
     const focusHeld = focusHeldAtWindowOpen && !focusChangedInWindow;
     const summary = {
       label,
-      disturbed: disturbing.length > 0 || !focusHeld,
-      /** Reported separately so a disturbance can be told from a focus lapse. */
+      disturbed: disturbing.length > 0 || focusChangedInWindow || throttled,
+      /**
+       * Reported separately, and NOT part of the verdict — see the rule above.
+       * `focusHeld` false with no focus events and a nominal frame rate means
+       * the editor window held the keyboard, which is the ordinary case.
+       */
       focusHeld,
       focusAtWindowOpen: focusHeldAtWindowOpen,
+      focusChangedInWindow,
+      /** The physical backgrounding test: did it present at the display's rate? */
+      throttled,
+      nominalFps,
       nominalMs: r.nominalMs,
       valid: r.valid,
       samples: r.samples,
