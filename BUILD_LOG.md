@@ -2492,3 +2492,25 @@ Two uses beyond the record:
 The projector has since been straightened, so this calibration no longer matches
 the physical setup and applying it now would bend a straight projection. It is
 recorded as data, not as a calibration to restore.
+
+`ADDENDUM` — **the Gate 2 keystone at full stored precision**, appended
+immediately before `calibration/warp.json` was reset to identity. The table in
+part 8 rounds to 4 d.p., which is ample for the two uses named there but is not
+the file's contents. These are:
+
+```json
+{ "x": 0.06220942568841951, "y": 0.13745612212276218 }
+{ "x": 0.984,               "y": 0.4270596926950128  }
+{ "x": 0.9119999999999999,  "y": 1                   }
+{ "x": 0.013000000000000005,"y": 0.7480112841671995  }
+```
+
+TL, TR, BR, BL. Recorded at full precision because a Phase 7 migration fixture
+should round-trip exactly rather than approximately, and because the file was
+the only copy — it no longer exists.
+
+The float dust (`0.9119999999999999` for what the operator dragged to 0.912,
+`0.013000000000000005` for 0.013) is the arithmetic in `withCorner`, not noise
+in the input. Worth keeping visible: I-1 stores normalized values and I-12
+judges round-trips by deep equality, so a Phase 7 migration that "cleans up"
+these values would fail its own round-trip test for a tidy-looking reason.
