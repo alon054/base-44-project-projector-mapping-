@@ -27,7 +27,10 @@ import {
 import { PreviewCanvas } from './PreviewCanvas';
 import { LayerPanel } from './LayerPanel';
 import { useSceneRegistry } from './useSceneRegistry';
+import { useClock } from './useClock';
+import { TransportPanel } from './TransportPanel';
 import { WarpPanel } from './WarpPanel';
+import type { Clock } from '../core/clock';
 import { createAltScene, createDefaultScene } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
 import {
@@ -44,6 +47,19 @@ export function App(): React.JSX.Element {
   const [scene, setScene] = useState<Scene>(createDefaultScene);
   const [failures, setFailures] = useState<SceneFailure[]>([]);
   const registry = useSceneRegistry(scene, setScene);
+  // I-2. Operator intent, registered under `clock.*` and sent on `clock:set`.
+  // The preview's live clock, for the transport's readout and loop ruler. A
+  // ruler driven by intent would animate smoothly even if the render host had
+  // stopped sampling the clock, which is the defect it exists to catch.
+  const [previewClock, setPreviewClock] = useState<Clock | null>(null);
+  const previewClockRef = useRef<Clock | null>(null);
+  previewClockRef.current = previewClock;
+  const clockTransport = useClock(
+    registry,
+    // Read through a ref: the hook is created before the preview host exists,
+    // and a relative nudge must step from the show's time once it does.
+    useCallback(() => previewClockRef.current?.timeMs ?? null, []),
+  );
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [metrics, setMetrics] = useState<MetricsReport | null>(null);
   const [uncapped, setUncapped] = useState(false);
@@ -371,7 +387,17 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Panel title="Preview (I-7: approximation, not a mirror)">
-          <PreviewCanvas speed={speed} nominalMs={nominalMs} scene={scene} />
+          <PreviewCanvas
+            speed={speed}
+            nominalMs={nominalMs}
+            scene={scene}
+            clockState={clockTransport.state}
+            onClockReady={setPreviewClock}
+          />
+        </Panel>
+
+        <Panel title="Transport — I-2, one clock for everything">
+          <TransportPanel transport={clockTransport} clock={previewClock} />
         </Panel>
 
         <Panel title="Warp — I-5 final stage, calibration/ not scenes">

@@ -41,12 +41,29 @@ export interface ProviderContext {
   readonly height: number;
 }
 
-/** What the provider renders into, per frame. */
+/**
+ * What the provider renders into, per frame. Every field is derived from the
+ * one global clock (I-2) — a provider that wants time asks for it here and
+ * never reads a wall clock of its own.
+ */
 export interface LayerFrame {
   /**
-   * Normalized [0, 1) position in the global loop. Phase 1 passes the throwaway
-   * host ticker's phase; Phase 3 replaces the source with `core/clock.ts` (I-2)
-   * without changing this signature.
+   * Authoritative scene time in seconds. **This is the I-2 handle.**
+   *
+   * A provider with a loop length of its own — a sprite sheet, a video, a
+   * Lottie composition — derives its own position from this, with
+   * `phaseAt(timeMs, period)`. It must not accumulate: an accumulated position
+   * cannot survive a scrub, and Gate 3 asks precisely that two loops of
+   * different lengths stay phase-consistent after one.
+   */
+  timeSeconds: number;
+  /**
+   * Normalized [0, 1) position in the engine's default loop
+   * (`GLOBAL_LOOP_SECONDS`), for providers with no period of their own.
+   *
+   * Phase 1 passed the throwaway host ticker's accumulated phase. Phase 3
+   * deleted that ticker; this is now derived from the clock, and the signature
+   * is unchanged so the 19 blessed golden frames stay byte-identical.
    */
   phase: number;
 }

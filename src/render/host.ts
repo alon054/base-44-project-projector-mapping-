@@ -2,11 +2,15 @@
  * Pixi application host, shared by the output window and the editor preview at
  * different sizes (I-7: separate render targets, same scene model).
  *
- * The frame ticker here is Phase 0 scaffolding and is DELETED in Phase 3 when
- * `core/clock.ts` (I-2) lands. Permitted by SPEC.md §0.2, "when an invariant
- * starts applying". Phase 1 replaced the test pattern with the compositor but
- * deliberately left the ticker alone — it is the other half of that same
- * sanctioned exception, and it dies on schedule.
+ * **Phase 0's throwaway ticker is gone.** It accumulated its own phase
+ * (`phase += dt / LOOP_SECONDS`) and was the sanctioned forward-reach SPEC.md
+ * §0.2 permitted until I-2 started applying. It came due in Phase 3 and was
+ * deleted, not preserved: the host no longer owns any notion of time. It owns a
+ * `Clock` and feeds it real deltas, and every phase the compositor sees is
+ * derived from that clock's authoritative time.
+ *
+ * The frame loop is still the ONLY caller of `clock.advance`. Two callers would
+ * be two time sources, which is the thing I-2 forbids.
  */
 // A hardened CSP (no 'unsafe-eval') forbids the `new Function` that Pixi v8
 // uses to generate shader/uniform sync code. This side-effect import installs
@@ -19,6 +23,7 @@ import { FrameMetrics } from '../debug/hud';
 import { runRenderMultiplierProbe } from '../debug/probe';
 import { readGpuResources, type GpuResourceReport } from '../debug/gpu';
 import { createDefaultScene } from '../core/defaultScene';
+import { Clock, type ClockTransport } from '../core/clock';
 import type { Scene } from '../core/scene';
 import type { PlaceholderInfo } from '../core/resilience';
 import { ProviderRegistry } from '../providers/ContentProvider';
@@ -53,7 +58,26 @@ export interface RenderHostOptions {
 
 export interface RenderHost {
   readonly metrics: FrameMetrics;
+  /** I-2: the one authoritative time source in this host. */
+  readonly clock: Clock;
+  /**
+   * Phase 0's test-pattern speed slider, now driving the clock's rate.
+   *
+   * The control and its IPC path are unchanged — the same channel, the same
+   * 0-4 range, the same `debug.testPattern.speed` registry key. What changed is
+   * what sits at the far end of it: a slider that used to scale a throwaway
+   * ticker now scales the clock, which is the only thing in the engine that
+   * could still honestly be called a speed.
+   */
   setSpeed(v: number): void;
+  /**
+   * I-7: whole clock state from the editor, as JSON. Never per frame.
+   *
+   * Takes a `ClockTransport` and not a bare `ClockState` deliberately — the
+   * `scrubSeq` is what tells this host whether the sender meant "go to this
+   * time" or merely happened to include one.
+   */
+  setClock(state: ClockTransport): void;
   /** Replaces the whole layer stack. Operator-paced, never per-frame. */
   setScene(scene: Scene): void;
   /** I-5. No-op on a host built without a warp stage (the editor preview). */
@@ -75,8 +99,6 @@ export interface RenderHost {
   reapplyScene(): void;
   destroy(): void;
 }
-
-const LOOP_SECONDS = 4;
 
 export async function createRenderHost(opts: RenderHostOptions): Promise<RenderHost> {
   const app = new Application();
@@ -133,8 +155,9 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   const metrics = new FrameMetrics(opts.nominalMs);
 
-  let speed = 1;
-  let phase = 0;
+  // I-2. One per host: the output window and the editor preview are separate
+  // processes with separate hosts (I-7), and only scene state crosses.
+  const clock = new Clock();
   let lastTick: number | null = null;
   let renderedPending: { token: number; t0: number } | null = null;
   let pending: { token: number; t0: number } | null = null;
@@ -188,13 +211,13 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       renderedPending = null;
     }
 
-    // --- Phase 0 throwaway ticker. Deleted in Phase 3 (I-2). -----------------
-    const dt = lastTick === null ? 0 : (now - lastTick) / 1000;
+    // I-2. The clock is advanced by real elapsed milliseconds and decides for
+    // itself what that means — pause holds it, rate scales it. The host does
+    // not know and must not care.
+    clock.advance(lastTick === null ? 0 : now - lastTick);
     lastTick = now;
-    phase = (phase + (dt * speed) / LOOP_SECONDS) % 1;
-    // ------------------------------------------------------------------------
 
-    compositor.update({ phase });
+    compositor.update({ timeSeconds: clock.timeSeconds, phase: clock.globalPhase });
 
     // Both draws sit inside one timed region. The render-to-texture IS the
     // warp stage's cost, and Gate 2 asks for that cost as a number — measuring
@@ -220,8 +243,12 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   return {
     metrics,
+    clock,
     setSpeed(v) {
-      speed = v;
+      clock.setRate(v);
+    },
+    setClock(state) {
+      clock.applyTransport(state);
     },
     setScene(scene) {
       currentScene = scene;

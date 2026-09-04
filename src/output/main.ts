@@ -12,6 +12,8 @@ import {
 } from '@shared/ipc';
 import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresentation } from '../debug/hud';
 import { createRenderHost } from '../render/host';
+import { canonicalizeClockTransport } from '../core/clock';
+import { attachClockLog } from '../debug/clockLog';
 import {
   canonicalizeCalibration,
   calibrationFor,
@@ -52,6 +54,13 @@ let host: Awaited<ReturnType<typeof createRenderHost>> | null = null;
 // Held in a box: a bare `let` assigned only inside a callback gets narrowed to
 // `never` by control-flow analysis at the top-level read below.
 const pendingSpeed: { v: { value: number; token: number; t0: number } | null } = { v: null };
+/**
+ * I-2. A clock state that arrived before the host existed — main replays the
+ * last one at `did-finish-load`, which is reliably earlier than
+ * `await createRenderHost`. Without this the first thing a reopened output
+ * window does is silently ignore the show's time.
+ */
+const pendingClock: { v: ReturnType<typeof canonicalizeClockTransport> | null } = { v: null };
 /** Same race as the speed above: a scene can arrive before Pixi has finished init. */
 const pendingScene: { v: Scene | null } = { v: null };
 /**
@@ -251,6 +260,15 @@ window.engine.onParam((p) => {
 
 window.engine.onScene((s) => applyScene(s.scene));
 
+window.engine.onClock((c) => {
+  const state = canonicalizeClockTransport(c);
+  if (!host) {
+    pendingClock.v = state;
+    return;
+  }
+  host.setClock(state);
+});
+
 window.engine.onCalibration((c) => applyCalibration(canonicalizeCalibration(c, VIEWPORT_ID)));
 
 window.engine.onWarning((w) => {
@@ -308,6 +326,16 @@ if (pendingSpeed.v) {
   host.setSpeed(pendingSpeed.v.value);
   host.markPending(pendingSpeed.v.token, pendingSpeed.v.t0);
   pendingSpeed.v = null;
+}
+
+// The `[clock]` line, attached before the pending state is applied so the run
+// log records the state the window came up in AND the state it was moved to.
+// `[scene] applied` and `[warp]` between them found four Phase 2 defects that
+// no unit test caught; this is the third line of that kind.
+attachClockLog(host.clock);
+if (pendingClock.v) {
+  host.setClock(pendingClock.v);
+  pendingClock.v = null;
 }
 
 // Pull the config, in case the push arrived before this module was ready.

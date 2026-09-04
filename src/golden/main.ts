@@ -45,8 +45,21 @@ import {
 /** A8: a literal, decided in Phase 1's setup. Read the block comment above. */
 const GOLDEN_RESOLUTION = { width: 1280, height: 720 } as const;
 
-/** I-2 is not here yet; the clock is "paused" by pinning phase to a constant. */
+/**
+ * I-12's deterministic subset: fixed seed, no video, clock paused.
+ *
+ * The clock is paused by *not existing here at all* — the golden harness drives
+ * the compositor directly with a fixed frame, so there is no `Clock` to pause
+ * and nothing that could drift between a bless and a check.
+ *
+ * `GOLDEN_PHASE` predates I-2 and is kept at 0.25 deliberately: re-deriving it
+ * from `GLOBAL_LOOP_SECONDS` would change nothing about the frames but would
+ * re-bless all 19 for a reason nobody could state later. `GOLDEN_TIME_SECONDS`
+ * is the same instant expressed as clock time — 0.25 of a 4-second loop — so a
+ * provider reading either field sees one consistent moment.
+ */
 const GOLDEN_PHASE = 0.25;
+const GOLDEN_TIME_SECONDS = 1;
 
 const PROVIDER_ID = 'procedural';
 
@@ -527,7 +540,7 @@ async function run(): Promise<GoldenResult[]> {
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.
       compositor.setScene(c.afterScene);
-      compositor.update({ phase: GOLDEN_PHASE });
+      compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
       warp?.prepare();
       app.renderer.render(app.stage);
     }
@@ -536,8 +549,8 @@ async function run(): Promise<GoldenResult[]> {
     // placeholder on the frame it throws, so a single-frame harness would hash
     // the frame before the swap and never see the placeholder it is meant to
     // be testing (I-13).
-    compositor.update({ phase: GOLDEN_PHASE });
-    compositor.update({ phase: GOLDEN_PHASE });
+    compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
+    compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
     warp?.prepare();
     app.renderer.render(app.stage);
 

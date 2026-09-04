@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CH, assertJsonOnly } from './ipc';
 import type {
   CalibrationSet,
+  ClockSet,
   DisplayInfo,
   MetricsReport,
   OutputConfig,
@@ -44,6 +45,15 @@ const api = {
     const h = (_e: unknown, s: SceneSet) => cb(s);
     ipcRenderer.on(CH.sceneSet, h);
     return () => ipcRenderer.off(CH.sceneSet, h);
+  },
+  // I-2 / I-7: editor -> main -> output. Whole clock state, JSON only.
+  setClock(c: ClockSet): void {
+    ipcRenderer.send(CH.clockSet, assertJsonOnly(c));
+  },
+  onClock(cb: (c: ClockSet) => void): () => void {
+    const h = (_e: unknown, c: ClockSet) => cb(c);
+    ipcRenderer.on(CH.clockSet, h);
+    return () => ipcRenderer.off(CH.clockSet, h);
   },
   // I-5: editor -> main -> output. Main persists it on the way through.
   setCalibration(c: CalibrationSet): void {

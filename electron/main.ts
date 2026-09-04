@@ -26,6 +26,7 @@ import {
   type RunConditions,
   type SceneFailure,
   type CalibrationSet,
+  type ClockSet,
   type SceneSet,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
@@ -331,6 +332,7 @@ function openOutputWindow(why: string): void {
     // default, so main keeps the last scene and replays it here. Main does not
     // interpret the scene; it is an opaque JSON blob on this path.
     if (lastScene !== null) send(win, CH.sceneSet, lastScene);
+    if (lastClock !== null) send(win, CH.clockSet, lastClock);
     if (!goFullscreen) {
       send(win, CH.warning, {
         level: 'warn',
@@ -455,6 +457,13 @@ function watchDisplays(): void {
  */
 let lastScene: SceneSet | null = null;
 /**
+ * I-2. The last clock state, replayed to an output window that opens later, so
+ * a display re-select mid-show does not restart the show's time. Opaque JSON on
+ * this path for the same reason the scene is — the receiving renderer's
+ * `canonicalizeClockState` is the validation boundary.
+ */
+let lastClock: ClockSet | null = null;
+/**
  * I-5. Held so a reopened output window gets the live calibration rather than
  * whatever was last flushed to disk, and — the Gate 2 condition — so it
  * survives every scene change, because nothing on the scene path touches it.
@@ -472,6 +481,14 @@ function wireIpc(): void {
   ipcMain.on(CH.sceneSet, (_e: IpcMainEvent, payload: SceneSet) => {
     lastScene = assertJsonOnly(payload);
     send(outputWin, CH.sceneSet, lastScene);
+  });
+
+  // I-2. Held and replayed like the scene: an output window that reopens
+  // mid-show (a display re-select, I-13) must come back at the show's time and
+  // in the show's run state, not at t=0 playing.
+  ipcMain.on(CH.clockSet, (_e: IpcMainEvent, payload: ClockSet) => {
+    lastClock = assertJsonOnly(payload);
+    send(outputWin, CH.clockSet, lastClock);
   });
 
   /**

@@ -16,6 +16,7 @@
  */
 import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
 import { BLEND_MODES, isBlendMode, type JsonValue, type Layer } from './layer';
+import { CLOCK_MAX_MS, CLOCK_RATE_MAX, CLOCK_RATE_MIN } from './clock';
 import type { ContentParamSpec } from '../providers/ContentProvider';
 
 export type ParameterValue = number | boolean | string;
@@ -371,4 +372,63 @@ export function defineContentParameters(
         } as EnumParameterDef;
     }
   });
+}
+
+/**
+ * The `clock.*` keys (I-8, CLAUDE.md rule 9). Registered in the same commit
+ * that introduces the clock.
+ *
+ * These are registered where the warp's corners deliberately were not. The
+ * distinction is not "global vs. per-layer": calibration is I-5 state, which
+ * describes the room and belongs in `calibration/`, and a MIDI knob mapped to a
+ * keystone corner would be a way to bend the projection mid-show by accident.
+ * The clock is the opposite case — a play/pause footswitch and a rate knob are
+ * among the most obvious things Phase 11 will want to map, and I-2 makes the
+ * clock the one place either could be wired to.
+ *
+ * `clock.time` is a parameter and not merely a control because a scrub is
+ * exactly the kind of thing a mapped fader does. Its range is the clock's own
+ * ceiling in SECONDS, not milliseconds, because a range of 0-3,600,000 on a
+ * fader has no usable resolution anywhere.
+ */
+export function defineClockParameters(clock: {
+  readonly playing: boolean;
+  readonly rate: number;
+  readonly timeSeconds: number;
+  setPlaying(v: boolean): void;
+  setRate(v: number): void;
+  scrubToSeconds(v: number): void;
+}): ParameterDef[] {
+  return [
+    {
+      key: 'clock.playing',
+      label: 'Playing',
+      kind: 'boolean',
+      default: true,
+      get: () => clock.playing,
+      set: (v: boolean) => clock.setPlaying(v),
+    },
+    {
+      key: 'clock.rate',
+      label: 'Rate',
+      kind: 'number',
+      default: 1,
+      min: CLOCK_RATE_MIN,
+      max: CLOCK_RATE_MAX,
+      step: 0.01,
+      get: () => clock.rate,
+      set: (v: number) => clock.setRate(v),
+    },
+    {
+      key: 'clock.time',
+      label: 'Time (s)',
+      kind: 'number',
+      default: 0,
+      min: 0,
+      max: CLOCK_MAX_MS / 1000,
+      step: 0.001,
+      get: () => clock.timeSeconds,
+      set: (v: number) => clock.scrubToSeconds(v),
+    },
+  ];
 }

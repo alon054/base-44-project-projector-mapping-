@@ -44,6 +44,23 @@ export const CH = {
   /** output -> main -> editor: layers currently showing an I-13 placeholder. */
   sceneFailures: 'scene:failures',
   /**
+   * I-2 / I-7. editor -> main -> output: the whole clock state, as JSON.
+   *
+   * A separate channel from `scene:set`, for the same reason `calibration:set`
+   * is one. The clock is not scene content: loading a different scene must not
+   * stop the show's time, and pausing must not have to carry a scene payload
+   * with it. Sharing a channel would make both of those properties of message
+   * ordering rather than of the design.
+   *
+   * Whole state, never a delta or a bare command. `{timeMs, playing, rate}` is
+   * three numbers; a `pause` message would make the output's clock depend on
+   * having received every previous message in order, and a dropped or replayed
+   * one would leave the two windows disagreeing about the time with nothing in
+   * either log to say so. Main replays the last one to a reopened output
+   * window, exactly as it replays the last scene.
+   */
+  clockSet: 'clock:set',
+  /**
    * I-5. editor -> main -> output: the whole warp calibration for one viewport.
    * Main persists it to `calibration/` on the way through and forwards it; it
    * never inspects it (see electron/calibration.ts).
@@ -103,6 +120,24 @@ export interface CalibrationSet {
   viewportId: string;
   enabled: boolean;
   corners: { x: number; y: number }[];
+}
+
+/**
+ * I-2's state, on the wire. Mirrors `ClockTransport` in `src/core/clock.ts`,
+ * which this dependency-free module cannot import — the receiving renderer runs
+ * `canonicalizeClockTransport()`, which is the validation boundary.
+ */
+export interface ClockSet {
+  timeMs: number;
+  playing: boolean;
+  rate: number;
+  /**
+   * Increments only when the operator moves time. The receiver applies
+   * `timeMs` when this is new to it and ignores it otherwise — see
+   * `ClockTransport` in `src/core/clock.ts` for the defect this exists to
+   * prevent, which is a show that jumps to its start on a rate nudge.
+   */
+  scrubSeq: number;
 }
 
 export interface SceneFailure {
