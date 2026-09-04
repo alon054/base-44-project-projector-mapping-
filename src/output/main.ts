@@ -799,7 +799,12 @@ function startMeasurementRun(
       lateFraction: r.lateFraction,
       worstLateRun: r.worstLateRun,
       worstIntervalMs: r.worstIntervalMs,
+      // How much of the run the windowed figures above describe. On a soak
+      // that is 60 seconds out of 1200, and saying so is the difference
+      // between a summary and a misleading one.
+      coveredSeconds: r.coveredSeconds,
       clause3: r.magnitudeEvents,
+      clause3Total: r.magnitudeEventsLifetime,
       m2Pass: passesHeadroom(r),
       renderP99Ms: r.renderP99Ms,
       renderP99OfNominal: r.renderP99OfNominal,

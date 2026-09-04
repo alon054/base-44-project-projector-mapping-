@@ -524,6 +524,26 @@ export interface MetricsReport {
   warmedUp: boolean;
   /** Informational, not gated: worst post-warmup interval in the window. */
   worstIntervalMs: number;
+  /**
+   * Seconds of samples the WINDOWED figures actually describe.
+   *
+   * Samples are evicted on a rolling 60-second window because that is §4's
+   * gate window, so on a gate run this equals the run. On §8.2's 20-minute
+   * soak it is still ~60 — `lateFraction`, `worstLateRun`, the percentiles and
+   * the clause-3 LIST all describe the final minute, not the soak. Reported
+   * because a summary that says `m1Pass: true` for a 20-minute run had better
+   * say how much of it M1 looked at.
+   */
+  coveredSeconds: number;
+  /**
+   * Total intervals over 3 x N since reset — including ones evicted from the
+   * list above, and ones past its length cap.
+   *
+   * §4 requires every such interval to be attributed in `BUILD_LOG.md`. An
+   * event the report never mentions cannot be attributed, so the COUNT is kept
+   * even where the detail is not.
+   */
+  magnitudeEventsLifetime: number;
   /** A8: null until the probe is run. */
   k: KReport | null;
   /** A3: null until the renderer reports its geometry. */

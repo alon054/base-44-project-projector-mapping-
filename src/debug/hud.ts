@@ -111,6 +111,17 @@ export class FrameMetrics {
   private lastPresent: number | null = null;
   private pendingRender = 0;
   private worstInterval = 0;
+  /**
+   * Clause-3 events since `reset()`, NOT evicted with the rolling window.
+   *
+   * `this.magnitude` holds the last 60 seconds' worth, because that is what
+   * §4's gate window is. Over a 20-minute soak the rest were silently dropped
+   * — and §4 says every interval over 3 x N "must be attributed in
+   * BUILD_LOG.md", which cannot happen for an event the report never mentions.
+   * Latent since the eviction was written; Phase 3 is the first phase to run a
+   * window longer than the eviction window, which is what exposed it.
+   */
+  private magnitudeLifetime = 0;
   /** Informational, not gated (SPEC.md §4): hitches seen during warmup. */
   private warmupWorst = 0;
   /** A12: intervals over 3 x N in the current window, each needing attribution. */
@@ -187,6 +198,7 @@ export class FrameMetrics {
     this.startedAt = null;
     this.lastPresent = null;
     this.worstInterval = 0;
+    this.magnitudeLifetime = 0;
     this.warmupWorst = 0;
     this.magnitude.length = 0;
     this.postWarmupCount = 0;
@@ -259,6 +271,11 @@ export class FrameMetrics {
     // license an unexplained stall, so every interval over 3 x N is kept with
     // the sample number it happened at — a hitch that recurs at the same n is
     // ours, one that wanders is the OS.
+    if (validateNominal(this.nominalMs).valid && interval > this.nominalMs * MAGNITUDE_FACTOR) {
+      // Counted before the cap and before eviction, so the TOTAL is always
+      // truthful even when the listed detail is not exhaustive.
+      this.magnitudeLifetime++;
+    }
     if (
       validateNominal(this.nominalMs).valid &&
       interval > this.nominalMs * MAGNITUDE_FACTOR &&
@@ -361,6 +378,14 @@ export class FrameMetrics {
     return { maxIntervalMs, samples, clause3 };
   }
 
+  /** Span of the samples currently retained, in seconds. */
+  private coveredSeconds(): number {
+    if (this.count < 2 || this.startedAt === null) return 0;
+    const first = this.ts[this.head]!;
+    const last = this.ts[(this.head + this.count - 1) % this.capacity]!;
+    return (last - first) / 1000;
+  }
+
   report(): MetricsReport {
     const n = this.count;
     const validity = validateNominal(this.nominalMs);
@@ -405,7 +430,29 @@ export class FrameMetrics {
       fps: elapsed > 0 ? (n / elapsed) * 1000 : 0,
       samples: n,
       warmedUp: this.warmedUp,
+      /**
+       * Lifetime max since `reset()` — NOT windowed, unlike everything above.
+       *
+       * The asymmetry is deliberate but it has to be stated, because it is
+       * how a 20-minute soak came back reporting `late 0.0000%` beside a
+       * `worst interval 33.40 ms`: the 33.4 ms spike was real and had been
+       * evicted from the rolling window that `lateFraction` is computed over.
+       * Read the two together with `coveredSeconds` below.
+       */
       worstIntervalMs: this.worstInterval,
+      /**
+       * Seconds of samples the windowed figures above actually describe.
+       *
+       * §4's window is 60 seconds and eviction enforces that, so on a §4 gate
+       * run this equals the run. On §8.2's 20-minute soak it is still 60 —
+       * meaning `lateFraction`, `worstLateRun`, the percentiles and the
+       * clause-3 LIST all describe the final minute of the soak and not the
+       * soak. That was not visible anywhere in the summary before Phase 3
+       * needed a window longer than the eviction window.
+       */
+      coveredSeconds: this.coveredSeconds(),
+      /** Total clause-3 events since reset, including evicted and uncapped ones. */
+      magnitudeEventsLifetime: this.magnitudeLifetime,
       k: this.kReport,
       scale: this.scaleReport,
       gpu: this.gpuReport,

@@ -559,3 +559,84 @@ describe('render mean — informational, resolves below the timer quantum', () =
     expect(new FrameMetrics(16.6667).report().renderMeanMs).toBe(0);
   });
 });
+
+/**
+ * The rolling window, and what it does to a run longer than itself.
+ *
+ * Samples are evicted on a 60-second window because that is §4's gate window.
+ * `worstIntervalMs` is a LIFETIME max and is not evicted. On a 60-second gate
+ * run the two agree; on §8.2's 20-minute soak they cannot, and the summary
+ * said nothing about it.
+ *
+ * It surfaced as a 20-minute soak reporting `late 0.0000%` beside
+ * `worst interval 33.40 ms` — 2 x N, plainly a late frame, and plainly not
+ * counted. Both numbers were correct; they described different spans, and
+ * nothing said so. Latent since eviction was written, and only reachable once
+ * a phase ran a window longer than the eviction window.
+ */
+describe('a run longer than the eviction window reports what it actually covered', () => {
+  const N = 16.6667;
+  const build = (): FrameMetrics => {
+    const m = new FrameMetrics(N, { warmupMs: 0, windowMs: 1000 });
+    return m;
+  };
+
+  it('coveredSeconds is the span of retained samples, not the run', () => {
+    const m = build();
+    // 3 seconds of frames through a 1-second window.
+    for (let t = 0; t <= 3000; t += 16.6667) m.notePresentation(t);
+    const r = m.report();
+    expect(r.coveredSeconds).toBeGreaterThan(0.9);
+    expect(r.coveredSeconds).toBeLessThanOrEqual(1.05);
+  });
+
+  it('a spike outside the window survives in worstIntervalMs and NOT in lateFraction', () => {
+    const m = build();
+    let t = 0;
+    // One 100 ms stall right at the start...
+    m.notePresentation(t);
+    t += 100;
+    m.notePresentation(t);
+    // ...then three clean seconds, which evict it from the window.
+    for (let i = 0; i < 200; i++) {
+      t += 16.6667;
+      m.notePresentation(t);
+    }
+    const r = m.report();
+    // The lifetime max still remembers it — that is the honest record.
+    expect(r.worstIntervalMs).toBeCloseTo(100, 5);
+    // The windowed rate does not, and that is exactly the pair of numbers that
+    // looked contradictory in the soak summary.
+    expect(r.lateFraction).toBe(0);
+  });
+
+  it('the clause-3 TOTAL survives eviction even when the listed detail does not', () => {
+    const m = build();
+    let t = 0;
+    m.notePresentation(t);
+    // Two stalls over 3 x N, then enough clean frames to evict both.
+    for (const stall of [80, 90]) {
+      t += stall;
+      m.notePresentation(t);
+    }
+    for (let i = 0; i < 200; i++) {
+      t += 16.6667;
+      m.notePresentation(t);
+    }
+    const r = m.report();
+    // §4: every interval over 3 x N "must be attributed in BUILD_LOG.md".
+    // An event the report never mentions cannot be attributed, so the count
+    // outlives the list.
+    expect(r.magnitudeEventsLifetime).toBe(2);
+    expect(r.magnitudeEvents.length).toBe(0);
+  });
+
+  it('on a run shorter than the window, covered span equals the run', () => {
+    // The §4 gate case, where none of the above can bite.
+    const m = build();
+    for (let t = 0; t <= 500; t += 16.6667) m.notePresentation(t);
+    const r = m.report();
+    expect(r.coveredSeconds).toBeCloseTo(0.5, 1);
+    expect(r.magnitudeEventsLifetime).toBe(r.magnitudeEvents.length);
+  });
+});
