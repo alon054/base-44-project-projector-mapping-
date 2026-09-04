@@ -11,7 +11,9 @@
  * rule 6).
  */
 import { Container, Graphics } from 'pixi.js';
+import type { JsonObject } from '../../core/layer';
 import type {
+  ContentParamSpec,
   ContentProvider,
   LayerFrame,
   LayerView,
@@ -27,8 +29,63 @@ export function isProceduralKind(v: unknown): v is ProceduralKind {
   return typeof v === 'string' && (PROCEDURAL_KINDS as readonly string[]).includes(v);
 }
 
+/**
+ * Structural keys: they select WHICH object a layer is, not a value on it.
+ * `kind` is excluded because changing it does not modulate the layer, it
+ * replaces it — that is an edit to the scene, not a parameter to map a knob to.
+ * `when` is the I-13 fault fixture's switch and is the same kind of thing.
+ * Everything else a provider reads MUST be declared (rule 9), and a unit test
+ * greps this file to enforce it.
+ */
+const STRUCTURAL_CONTENT_KEYS = ['kind', 'when'] as const;
+
 export class ProceduralProvider implements ContentProvider {
   readonly id = PROCEDURAL_PROVIDER_ID;
+
+  contentParameters(content: JsonObject): ContentParamSpec[] {
+    const kind = content['kind'];
+    // Every kind carries a tint; the rest depend on what is being drawn.
+    const tint: ContentParamSpec = {
+      key: 'tint',
+      label: 'Tint',
+      kind: 'number',
+      default: 0xffffff,
+      min: 0,
+      max: 0xffffff,
+      step: 1,
+    };
+    switch (kind) {
+      case 'water':
+        return [
+          tint,
+          { key: 'bands', label: 'Bands', kind: 'number', default: 14, min: 1, max: 200, step: 1 },
+          {
+            key: 'bodyAlpha',
+            label: 'Body alpha',
+            kind: 'number',
+            default: 0.72,
+            min: 0,
+            max: 1,
+            step: 0.01,
+          },
+        ];
+      case 'glow':
+        return [
+          tint,
+          { key: 'rings', label: 'Rings', kind: 'number', default: 20, min: 2, max: 128, step: 1 },
+        ];
+      case 'testPattern':
+        return [
+          tint,
+          { key: 'cells', label: 'Cells', kind: 'number', default: 8, min: 1, max: 64, step: 1 },
+        ];
+      case 'tree':
+      case 'rect':
+        return [tint];
+      default:
+        return [];
+    }
+  }
 
   create(ctx: ProviderContext): LayerView {
     const kind = ctx.content['kind'];

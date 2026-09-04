@@ -15,7 +15,8 @@
  * exactly one. The registry is an *index* onto state, not a second store.
  */
 import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
-import { BLEND_MODES, isBlendMode, type Layer } from './layer';
+import { BLEND_MODES, isBlendMode, type JsonValue, type Layer } from './layer';
+import type { ContentParamSpec } from '../providers/ContentProvider';
 
 export type ParameterValue = number | boolean | string;
 
@@ -315,4 +316,59 @@ export function defineLayerParameters(
       },
     },
   ];
+}
+
+/**
+ * I-8 / rule 9: register a provider's content values under `entity.<id>.<key>`.
+ *
+ * Bound to `layer.content` through accessors, exactly like the layer-level
+ * parameters above — the scene stays the one source of truth (I-12) and the
+ * registry stays an index onto it. A provider declares WHICH keys it exposes
+ * (`ContentProvider.contentParameters`), because content is opaque to the
+ * compositor by design (I-3) and only the provider knows what its blob means.
+ */
+export function defineContentParameters(
+  layerId: string,
+  specs: readonly ContentParamSpec[],
+  read: () => Layer,
+  write: (content: Record<string, JsonValue>) => void,
+): ParameterDef[] {
+  return specs.map((spec) => {
+    const get = (): ParameterValue => {
+      const v = read().content[spec.key];
+      // The stored blob may legitimately omit a key; the spec's default is then
+      // what the provider will actually use, so it is what the registry reports.
+      return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string'
+        ? v
+        : spec.default;
+    };
+    const set = (v: ParameterValue): void => {
+      write({ ...read().content, [spec.key]: v });
+    };
+    const base = { key: `entity.${layerId}.${spec.key}`, label: spec.label, get, set };
+    switch (spec.kind) {
+      case 'number':
+        return {
+          ...base,
+          kind: 'number',
+          default: typeof spec.default === 'number' ? spec.default : 0,
+          min: spec.min ?? 0,
+          max: spec.max ?? 1,
+          step: spec.step ?? 0.01,
+        } as NumberParameterDef;
+      case 'boolean':
+        return {
+          ...base,
+          kind: 'boolean',
+          default: spec.default === true,
+        } as BooleanParameterDef;
+      case 'enum':
+        return {
+          ...base,
+          kind: 'enum',
+          default: typeof spec.default === 'string' ? spec.default : '',
+          options: spec.options ?? [],
+        } as EnumParameterDef;
+    }
+  });
 }

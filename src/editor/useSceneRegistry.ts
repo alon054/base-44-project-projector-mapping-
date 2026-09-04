@@ -16,10 +16,21 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Layer } from '../core/layer';
 import {
   ParameterRegistry,
+  defineContentParameters,
   defineLayerParameters,
   defineTestPatternSpeed,
 } from '../core/parameters';
+import { ProviderRegistry } from '../providers/ContentProvider';
+import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import type { Scene } from '../core/scene';
+
+/**
+ * The editor's own provider registry. It exists only to ask providers which
+ * content keys they expose (rule 9); the editor never renders through it —
+ * that is the output window's and the preview's job (I-7).
+ */
+const providers = new ProviderRegistry();
+providers.register(new ProceduralProvider());
 
 export function useSceneRegistry(
   scene: Scene,
@@ -44,21 +55,25 @@ export function useSceneRegistry(
     const ids = layerIds === '' ? [] : layerIds.split(' ');
     for (const id of ids) {
       if (registry.has(`entity.${id}.opacity`)) continue;
+      const readLayer = () => {
+        const layer = sceneRef.current.layers.find((l) => l.id === id);
+        if (!layer) throw new Error(`layer ${id} is gone`);
+        return layer;
+      };
+      const patchLayer = (patch: Partial<Layer>): void => {
+        setScene((prev) => ({
+          ...prev,
+          layers: prev.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        }));
+      };
+      registry.registerAll(defineLayerParameters(id, readLayer, patchLayer));
+
+      // Rule 9: whatever the provider invented is addressable too, or half the
+      // instrument is unreachable when Phase 11 goes looking for it.
+      const layer = readLayer();
+      const specs = providers.get(layer.providerId)?.contentParameters?.(layer.content) ?? [];
       registry.registerAll(
-        defineLayerParameters(
-          id,
-          () => {
-            const layer = sceneRef.current.layers.find((l) => l.id === id);
-            if (!layer) throw new Error(`layer ${id} is gone`);
-            return layer;
-          },
-          (patch: Partial<Layer>) => {
-            setScene((prev) => ({
-              ...prev,
-              layers: prev.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-            }));
-          },
-        ),
+        defineContentParameters(id, specs, readLayer, (content) => patchLayer({ content })),
       );
     }
     // A deleted layer must give its keys back, or re-adding a layer with the

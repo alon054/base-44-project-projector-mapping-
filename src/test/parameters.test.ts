@@ -11,9 +11,14 @@ import {
   ParameterRegistry,
   assertValidKey,
   cellParameter,
+  defineContentParameters,
   defineLayerParameters,
   defineTestPatternSpeed,
 } from '../core/parameters';
+import {
+  PROCEDURAL_KINDS,
+  ProceduralProvider,
+} from '../providers/procedural/ProceduralProvider';
 import { createLayer, type Layer } from '../core/layer';
 
 const num = (key: string, def = 0) =>
@@ -184,5 +189,106 @@ describe('layer parameters are an index onto scene state, not a copy', () => {
     expect(() => r.registerAll(defineLayerParameters('b', () => b, () => {}))).not.toThrow();
     expect(r.keys('entity.a')).toHaveLength(4);
     expect(r.keys('entity.b')).toHaveLength(4);
+  });
+});
+
+/**
+ * CLAUDE.md rule 9, mechanised for providers.
+ *
+ * "Every new parameter goes in the registry under a hierarchical key (I-8), in
+ * the same commit that introduces it, from Phase 1 onward."
+ *
+ * This was missed once already: `tint`, `bands`, `rings`, `cells` and
+ * `bodyAlpha` were introduced across Phase 1 as provider content and none of
+ * them reached the registry, because nothing checked and "content" felt like a
+ * different category from "parameter". It is not — MIDI mapping in Phase 11
+ * would have found half the instrument unaddressable. The rule is a grep now
+ * rather than a habit.
+ */
+describe('rule 9 — every content key a provider reads is registered', () => {
+  it('ProceduralProvider declares every non-structural key it consumes', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../providers/procedural/ProceduralProvider.ts', import.meta.url).pathname,
+      'utf8',
+    );
+    const consumed = new Set([...src.matchAll(/content\['([A-Za-z0-9_]+)'\]/g)].map((m) => m[1]!));
+    expect(consumed.size).toBeGreaterThan(3);
+
+    const structural = new Set(
+      (src.match(/const STRUCTURAL_CONTENT_KEYS = \[([^\]]*)\]/)?.[1] ?? '')
+        .split(',')
+        .map((s) => s.trim().replace(/['"]/g, ''))
+        .filter(Boolean),
+    );
+    expect(structural.size).toBeGreaterThan(0);
+
+    const provider = new ProceduralProvider();
+    const declared = new Set<string>();
+    for (const kind of PROCEDURAL_KINDS) {
+      for (const spec of provider.contentParameters({ kind })) declared.add(spec.key);
+    }
+
+    for (const key of consumed) {
+      if (structural.has(key)) continue;
+      expect(
+        declared.has(key),
+        `content key "${key}" is read by the provider but not declared as a parameter (rule 9). ` +
+          'Either register it, or add it to STRUCTURAL_CONTENT_KEYS with a reason.',
+      ).toBe(true);
+    }
+  });
+
+  it('registers content parameters under entity.<id>.*, bound to scene state', () => {
+    let layer: Layer = createLayer({
+      id: 'w1',
+      providerId: 'procedural',
+      content: { kind: 'water', bands: 16 },
+    });
+    const provider = new ProceduralProvider();
+    const r = new ParameterRegistry();
+    r.registerAll(
+      defineContentParameters(
+        'w1',
+        provider.contentParameters(layer.content),
+        () => layer,
+        (content) => {
+          layer = { ...layer, content };
+        },
+      ),
+    );
+
+    expect(r.keys('entity.w1')).toEqual([
+      'entity.w1.bands',
+      'entity.w1.bodyAlpha',
+      'entity.w1.tint',
+    ]);
+    // Reads the stored value...
+    expect(r.read('entity.w1.bands')).toBe(16);
+    // ...and the provider's default where the blob omits the key, because that
+    // is the value the provider will actually use.
+    expect(r.read('entity.w1.bodyAlpha')).toBe(0.72);
+
+    r.write('entity.w1.bodyAlpha', 0.3);
+    expect(layer.content['bodyAlpha']).toBe(0.3);
+    r.write('entity.w1.bands', 999);
+    expect(layer.content['bands']).toBe(200);
+  });
+
+  it('a layer with content parameters still gives every key back on delete', () => {
+    const layer = createLayer({
+      id: 'g1',
+      providerId: 'procedural',
+      content: { kind: 'glow' },
+    });
+    const provider = new ProceduralProvider();
+    const r = new ParameterRegistry();
+    r.registerAll(defineLayerParameters('g1', () => layer, () => {}));
+    r.registerAll(
+      defineContentParameters('g1', provider.contentParameters(layer.content), () => layer, () => {}),
+    );
+    expect(r.keys('entity.g1')).toHaveLength(6);
+    expect(r.unregisterPrefix('entity.g1')).toBe(6);
+    expect(r.keys('entity.g1')).toEqual([]);
   });
 });

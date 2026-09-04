@@ -61,9 +61,38 @@ export interface LayerView {
   destroy(): void;
 }
 
+/**
+ * I-8 / CLAUDE.md rule 9: a content value this provider exposes as an
+ * addressable parameter, registered under `entity.<id>.<key>`.
+ *
+ * Provider content is opaque to the compositor (I-3), which is why the provider
+ * and not the registry declares these. Without this hook, every value a
+ * provider invented — a tint, a band count — would be a per-entity parameter
+ * living outside the registry, and Phase 11's MIDI mapping would find half the
+ * instrument unaddressable.
+ */
+export interface ContentParamSpec {
+  /** Suffix under `entity.<id>.`, e.g. `tint`. */
+  key: string;
+  label: string;
+  kind: 'number' | 'boolean' | 'enum';
+  default: number | boolean | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: readonly string[];
+}
+
 export interface ContentProvider {
   /** Matches `Layer.providerId`. */
   readonly id: string;
+
+  /**
+   * The content values this provider exposes as parameters, for the given
+   * content blob. Structural choices are deliberately NOT included — see
+   * `ProceduralProvider` for which and why.
+   */
+  contentParameters?(content: JsonObject): ContentParamSpec[];
   /**
    * Build a view for one layer. May throw; the compositor substitutes a
    * placeholder rather than blanking the frame (I-13).
