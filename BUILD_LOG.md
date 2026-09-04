@@ -1447,3 +1447,218 @@ unanswered, so neither was decided unilaterally:
   here that is fully opaque, which is what makes "is this layer on top" a fact
   rather than a judgement about alpha. It may be worth keeping as a plain
   colour-field layer regardless.
+
+## 2026-09-04 — Phase 1 (session 2)
+
+- DID: closed Gate 1. §4 measurement at Phase 1 layer load, the §8.2 soak and
+  the GPU census that makes it possible, drag-and-drop reordering, and four
+  defects found by the operator using the thing rather than by any test.
+- MEASURED: full set below.
+- BLOCKER: none. Gate 1 is closed.
+- NEXT: Phase 2 — Warp v0. `/compact` first.
+
+`GATE-PASSED` — **Gate 1, 2026-09-04. DEV_RESOLUTION 1280×720 on the
+projector, `1:1 to panel`, under §4's measurement protocol.**
+
+**§4, run `p1-load`** — `disturbed=false`, valid, 3601 samples, 59.999 fps,
+N=16.6667 ms read from `Display.displayFrequency` and A9-validated.
+
+| | |
+|---|---|
+| M1 | **PASS** — late **0.0000%**, worst late run 0, worst interval 17.70 ms, clause 3 empty |
+| M2 | **PASS** — render p99 **0.200 ms = 1.20% of N** against the 60% limit (p95 0.200 ms, informational) |
+| A3 | buffer 1280×720 / css 1280×720 / dpr 1 — **1:1 to panel** |
+| A14 | per-frame mean 0.0009 ms, max 0.100 ms = **0.60% of N** |
+
+Load: the Phase 1 default scene — `water` (16 bands × 24 segments redrawn every
+frame, the only per-frame work) + `tree` + `glow` on `add`, `testPattern`
+hidden.
+
+**§8.2 soak, run `p1-soak`** — 8 minutes, `disturbed=false`, 244 scene
+rebuilds driven at 2 s intervals.
+
+| t (s) | textures | buffers | geometries |
+|---|---|---|---|
+| 0.0 | 2 | 38 | 19 |
+| 50.0 | 2 | 182 | 91 |
+| 110.0 | 2 | 272 | 136 |
+| 479.8 | 2 | 272 | 136 |
+
+**§8.2's condition as written passes outright: texture count 2 → 2, +0.00%
+across the whole window.** The stricter buffer/geometry census settles at
+t=110 s and is then **exactly flat for 6.2 minutes while absorbing ~190
+further rebuilds**. A per-rebuild leak cannot stop, so that is pool warm-up,
+not leakage.
+
+**Gate 1's own conditions, as numbers rather than impressions:**
+
+| Condition | Measure | Value |
+|---|---|---|
+| I-6 additive brightening | mean frame luminance, `add` ÷ `normal` | **1.1441×** |
+| Occlusion, both directions | centre pixel | `0xd02020` / `0x2040d0` exactly |
+| I-1 across resolutions | max per-cell delta, 32×18 signature | **0.0109** |
+| I-1 negative control | one layer moved 0.05 of frame width | **0.1204** (limit 0.08) |
+| I-12 | round-trip | deep-equal, byte-identical on a second pass |
+| §8.1 | golden frames | 15 cases, exit 0; a tampered hash exits 1 |
+
+`DECISION` — **the golden-frame resolution is 1280×720, and the harness runs
+under Electron.** Electron because it is already a dependency and is *the
+renderer that ships*: a golden produced by a different GL implementation can
+pass in CI and differ on the wall. 1280×720 currently **equals
+`DEV_RESOLUTION`**, which is the whole hazard A8 names — tidying the literal
+into an import would look like a cleanup and would silently delete the net.
+Guarded mechanically: tests assert the harness declares it as an object
+literal, imports neither resolution constant nor `@shared/ipc` at all, and
+never reads a resolution from a display, window, `devicePixelRatio` or env.
+
+`DECISION` — **rotation is stored in turns, not radians.** It puts every field
+of a stored transform inside [0,1], making `isNormalizedTransform` a *total*
+I-1 check rather than a per-field special case. Radians would put a legal
+`3.14` in stored state with no way to tell it from a pixel value by inspection.
+
+`DECISION` — **`ContentProvider.create` is synchronous.** `Promise<LayerView>`
+is the tempting shape and the wrong one for a live instrument: awaiting a
+provider means a scene switch mid-show stalls on a network fetch. A view exists
+from the first frame and populates itself — the same placeholder → poster →
+content chain I-13 already requires of video in Phase 3.
+
+`DECISION` — **the I-8 registry holds accessors, not values.** `entity.<id>.*`
+reads and writes through to scene state, so there is no second copy of a number
+the scene already determines (I-12). The editor's controls write *through* the
+registry, so I-8 is load-bearing from Phase 1 rather than a table nothing reads
+until Phase 11.
+
+`DECISION` — **drag-and-drop reordering is in phase.** Phase 1's deliverable is
+"editor can add / remove / reorder layers" and does not specify the affordance.
+`reorderLayer` clamps out-of-range destinations where `moveLayer` returns the
+scene unchanged: a button press past the end is a mistake, a drag past the end
+is a request.
+
+`MEASURED` — **seven defects. Two were found by tests; five were found by the
+operator using the thing, and that ratio is the lesson of this session.**
+
+Found by writing the check:
+
+1. **`moveLayer` was a silent no-op.** It swapped array positions then called
+   `reindexZOrder`, which re-indexes by *current draw order* — sorting by the
+   very `zOrder` values the swap was meant to exchange. Invisible to the golden
+   harness, which builds scenes directly, and to typecheck. Caught by the first
+   unit test written against it, which is the argument for having pulled those
+   operations out of the click handlers into `core/sceneEdit.ts`.
+2. **`canonicalizeScene` converted a typed array instead of refusing it.** A
+   `Uint8ClampedArray` is an object with numeric keys, so `Object.entries`
+   would turn a 4 MB pixel buffer into a four-million-key plain object and call
+   it valid scene state — an I-7 violation arriving through the scene rather
+   than through IPC. Now refused at both boundaries.
+
+Found by using it:
+
+3. **Two Phase 0 `invoke` sites carried unguarded payloads** while Gate 0's
+   checklist claimed `assertJsonOnly` was on every send site. Neither can carry
+   pixels, so an **overstated claim rather than a live defect** — recorded as
+   such. Now true, and checked by a grep over `preload.ts`.
+4. **The focus badge painted a yellow bar across the projection on every editor
+   click.** Harmless while the editor had one slider nobody clicked; wrong the
+   moment there was an editor worth using, because clicking the control panel
+   takes focus off the output window *by definition*. Restricted to measurement
+   runs; the A12 logging stays unconditional.
+5. **The first fix for (4) killed the output window before it drew a frame** —
+   `applyConfig` calls the badge sync, and main pushes the config while the
+   module is still evaluating, during `await createRenderHost`.
+6. **Added layers were pixel-identical.** Every new layer got the same
+   transform and no tint, so two added `rect`s were two identical white squares
+   in the same place and reordering them was a genuine visual no-op. My own
+   instructions told the operator to do exactly that.
+7. **The water layer could not demonstrate occlusion.** Ripple lines, thin,
+   translucent, on black: moving it through the entire draw order changed the
+   frame by **0.5%** of mean luminance. The operator reported "everything
+   reorders except the water" twice, and both times the ordering was provably
+   correct. Water is a surface, not a set of lines; with a body it is **8.1%**.
+
+**(6) and (7) are the same defect twice: the suite kept proving the engine
+while the scene kept being unable to show it.** A placeholder object that
+cannot demonstrate the invariant it sits under is the wrong placeholder, and
+"the tests are green" is not the same claim as "a person can see it work."
+
+`MEASURED` — **a rule-9 miss, found by auditing before closing the gate rather
+than by any test.** `tint`, `bands`, `rings`, `cells` and `bodyAlpha` were
+introduced across Phase 1 as provider content and **none reached the
+registry** — five keys over four commits, against a rule that says *same
+commit, from Phase 1 onward*.
+
+Why it slipped is the part worth keeping: "content" felt like a different
+category from "parameter", because `layer.content` is opaque to the compositor
+by design (I-3). But **opaque to the compositor is not the same as outside the
+instrument.** Phase 11's MIDI mapping would have gone looking for
+`entity.tree.tint` and found half the instrument unaddressable.
+
+Providers now declare their own parameter keys, bound to `layer.content`
+through accessors. `kind` and `when` are excluded with a stated reason rather
+than by omission — `kind` does not modulate a layer, it replaces it.
+**Rule 9 is now a grep, not a habit:** a test extracts every `content['x']` the
+provider reads, subtracts declared structural keys, and fails on any that is
+not registered, naming the key and both ways to fix it. Verified in both
+directions. **That guard is the deliverable; the five keys were a symptom of
+nothing checking.**
+
+`MEASURED` — **coverage lesson, recorded because it cost three rounds at the
+wall with every test green.** The suite proved the transform, the round-trip,
+the draw order, the compositor and the live teardown-rebuild, and **not one of
+them proved a person could see the result.** The golden harness also only ever
+called `setScene` *once* per Application, so the editor's actual path — hand a
+new scene to a live compositor — had no coverage at all. Both gaps are now
+committed cases: `occlusion-reordered-live`, and an `editor-two-rects` pair
+that renders the operator's exact click sequence and fails if the layer list
+ever stops being able to demonstrate z-order.
+
+`MEASURED` — **two runs discarded to focus loss, both kept.** The first §4 run
+reported `disturbed=true` from a `focus LOST` at t=2.52 s and **its numbers
+were fine** — which is exactly why the rule exists: a disturbed run that
+happens to look good is the easiest one to talk yourself into keeping. The
+soak run lost focus at t=35.8 s having *gained* it 2.3 s earlier, so something
+activated the app. External disturbance, not a harness defect. **If a third run
+is lost the same way, the harness should hold focus for the window rather than
+merely notice losing it.**
+
+`MEASURED` — **the display mode had drifted, and the instrument caught it.**
+The projector reported **1920×1080** at this session's first launch, not the
+1280×720 native mode every Gate 0 number was taken at, and A3 fired:
+`buffer 1280x720 / css 1920x1080 — NOT 1:1, a scaler is in the path`. The
+operator restored the mode and every number in this entry was taken at
+`1:1 to panel`. **A stale caveat about this was left sitting inside a Gate 1
+box for several hours and has been removed** — a gate box carrying an expired
+warning is the same defect Gate 0 hit twice with its own stale lines.
+
+`DECISION` — **the blur is attributed to the projector, and the attribution is
+unconfirmed.** A 500 ANSI 720p DLP with auto-focus deliberately disabled at
+Gate 0 is a wholly sufficient explanation, and the operator's own read. The
+discriminator was never run: make the `testPattern` layer visible and see
+whether its 1–2 px grid and magenta frame are crisp. **Recorded as an
+attribution rather than a finding** — A9's principle binds prose as much as
+numbers, and "probably the projector" is not a measurement.
+
+`BLOCKER` — **two rulings from Gate 0 remain open and were not decided here.**
+Both were put to the operator and neither came back; neither was decided
+unilaterally.
+
+- **A8's k probe.** Phase 1 produced **1.3269** (clean run) and **1.4158**
+  (discarded run) on the same scene — two samples 6.7% apart, against Gate 0's
+  0.379–5.000 across nine samples on a trivial scene. `GATE0-RUNS.md` §4.4
+  predicted exactly this. **The probe source is unchanged, so this is evidence
+  for the Phase 3 ruling, not a fix.**
+- **A15's statistic.** Per-frame instrument max measured **0.60% of N** at a
+  real layer load, comfortably under the 2% trigger; Gate 0's 1.8–4.2% was on a
+  trivial scene. One data point toward Gate 3, not a discharge of it.
+
+The **A1 ↔ §4 reconciliation** over "k recorded at every gate" is still due
+before Phase 3 and is still a `SPEC-CHANGE-PROPOSED`, not a checklist fix.
+
+`IDEAS` — parked, not built:
+- The compositor rebuilds the whole layer stack on `setScene`. Honest for
+  Phase 1 and measured not to leak. If Phase 6's live scene switching makes it
+  hurt, that is the phase that will know.
+- The default scene demonstrates I-6 well and occlusion poorly. Two opaque
+  overlapping objects in it would make the wall check work on launch instead of
+  after two clicks.
+- `readGpuResources` reaches into two Pixi internals. It reports INVALID rather
+  than zero if they move, but a version bump should expect to touch it.
