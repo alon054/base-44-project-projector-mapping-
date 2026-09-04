@@ -56,6 +56,9 @@ import {
  */
 const VERTICES = 40;
 
+/** Coalescing window for `[warp]` lines during a corner drag. */
+const LOG_INTERVAL_MS = 250;
+
 export interface WarpStageOptions {
   renderer: Renderer;
   /** What the warped mesh is added to. Usually `app.stage`. */
@@ -85,6 +88,8 @@ export class WarpStage {
   /** Set once the stage has failed. It never retries inside a live session. */
   private broken = false;
   private lastLogged = '';
+  private lastLogAt = 0;
+  private trailingLog: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: WarpStageOptions) {
     this.renderer = opts.renderer;
@@ -113,21 +118,52 @@ export class WarpStage {
   }
 
   setCalibration(cal: ViewportCalibration): void {
+    const prev = this.calibration;
     this.calibration = cal;
     if (cal.enabled) this.attach();
     else this.detach();
     this.applyCorners();
 
-    // Logged on change, not per frame. This line is the reason a warp bug is
+    // Logged on change, never per frame. This line is why a warp bug is
     // findable from a wall rather than arguable: Phase 1's `[scene] applied`
     // equivalent found three editor defects, and warp state is strictly harder
     // to read off a projection than draw order is.
-    const line = `${describeCalibration(cal)} mesh=${this.active ? `${VERTICES}x${VERTICES}` : 'bypassed'}${
-      this.broken ? ' DEGRADED' : ''
-    }`;
-    if (line !== this.lastLogged) {
+    //
+    // Corner moves are COALESCED, and that is not tidiness. A pointer drag
+    // calls this at pointer-move rate: the first p2 measurement run recorded
+    // ~300 `[warp]` lines from one drag, which buried `[scene] applied` and
+    // every display event in the same log. A line nobody can find is not
+    // instrumentation. Toggling and degrading are never coalesced — those are
+    // state changes an operator needs to see the instant they happen.
+    this.emit(!prev || prev.enabled !== cal.enabled);
+  }
+
+  /** ~4 Hz for corner moves, immediate for state changes, always trailing. */
+  private emit(immediate: boolean): void {
+    const line = `${describeCalibration(this.calibration)} mesh=${
+      this.active ? `${VERTICES}x${VERTICES}` : 'bypassed'
+    }${this.broken ? ' DEGRADED' : ''}`;
+    if (line === this.lastLogged) return;
+
+    const now = Date.now();
+    if (immediate || now - this.lastLogAt >= LOG_INTERVAL_MS) {
+      if (this.trailingLog !== null) {
+        clearTimeout(this.trailingLog);
+        this.trailingLog = null;
+      }
       this.lastLogged = line;
+      this.lastLogAt = now;
       this.log(line);
+      return;
+    }
+    // A drag must not end on a stale line: the LAST position is the one the
+    // operator will read off the log later, so a trailing emit is scheduled
+    // rather than the move simply being dropped.
+    if (this.trailingLog === null) {
+      this.trailingLog = setTimeout(() => {
+        this.trailingLog = null;
+        this.emit(true);
+      }, LOG_INTERVAL_MS - (now - this.lastLogAt));
     }
   }
 
@@ -188,6 +224,10 @@ export class WarpStage {
    * plausible suspect in the first soak that was not flat.
    */
   private release(): void {
+    if (this.trailingLog !== null) {
+      clearTimeout(this.trailingLog);
+      this.trailingLog = null;
+    }
     if (this.mesh && !this.mesh.destroyed) {
       if (this.mesh.parent) this.mesh.parent.removeChild(this.mesh);
       this.mesh.texture = Texture.EMPTY;

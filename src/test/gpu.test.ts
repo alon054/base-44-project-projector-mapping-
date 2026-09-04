@@ -167,3 +167,28 @@ describe('steady state is reported alongside the verdict, never instead of it', 
     expect(v.rebuildsAfterSettled).toBe(0);
   });
 });
+
+/**
+ * A null slot in `managedTextures`. PixiJS nulls the entry when a texture
+ * source is destroyed rather than compacting the array, and the census read
+ * `t.pixelWidth` straight off it — which throws.
+ *
+ * Recorded here rather than only fixed, because of how it was found: it was
+ * an uncaught error at teardown in the p1-soak log AND the p2-warp-off log,
+ * sitting in plain sight in both, and nothing was watching for it. Phase 1 had
+ * no textures so it never fired mid-run; Phase 2's composite render texture
+ * puts it on the path of the very check it would break.
+ */
+describe('the GPU census survives a destroyed texture', () => {
+  it('skips null slots instead of throwing', () => {
+    const renderer = {
+      texture: { managedTextures: [{ pixelWidth: 1280, pixelHeight: 720 }, null] },
+      buffer: { _managedBuffers: { items: {} } },
+      geometry: { _managedGeometries: { items: {} } },
+    };
+    const report = readGpuResources(renderer);
+    expect(report.textureCount).toBe(2);
+    expect(report.textureBytesEstimate).toBe(1280 * 720 * 4);
+    expect(report.valid).toBe(true);
+  });
+});

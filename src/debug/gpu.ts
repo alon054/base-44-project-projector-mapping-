@@ -83,6 +83,17 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
   if (Array.isArray(textures)) {
     textureCount = textures.length;
     for (const t of textures) {
+      // `managedTextures` can hold a null slot: PixiJS nulls an entry when a
+      // texture source is destroyed rather than compacting the array, so
+      // `typeof t.pixelWidth` throws on the very run this census exists to
+      // watch. Observed as an uncaught "Cannot read properties of null
+      // (reading 'pixelWidth')" at teardown in BOTH p1-soak and p2-warp-off —
+      // it has been there since the census was written and was never recorded.
+      //
+      // It mattered little in Phase 1, which had no textures at all. From
+      // Phase 2 there is a composite render texture, so this is now on the
+      // path of the soak check itself.
+      if (!t) continue;
       const w = typeof t.pixelWidth === 'number' ? t.pixelWidth : 0;
       const h = typeof t.pixelHeight === 'number' ? t.pixelHeight : 0;
       textureBytesEstimate += w * h * 4;
