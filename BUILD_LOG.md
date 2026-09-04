@@ -1978,3 +1978,121 @@ is now overdue-adjacent**: it is due before Phase 3, and Phase 3 is next.
 - The soak drives rebuilds every 2 s, which makes its render mean (80.45 µs)
   incomparable to the clean pair. If the soak is ever wanted as a frame-time
   source too, it needs a quiet variant.
+
+## 2026-09-04 — Phase 2 (session 1, part 3)
+
+- DID: first wall session. Two Gate 2 conditions closed on a real projection,
+  one defect found by the operator using the thing, and **one recorded
+  attribution overturned by the discriminator that was never run.**
+- MEASURED: below.
+- BLOCKER: Gate 2 still open. Three checks remain, all the operator's.
+- NEXT: the keystone by eye, the calibration round trip as one gesture, and
+  I-6 by eye.
+
+`MEASURED` — **the blur is NOT the projector. The attribution recorded at
+Gate 1 is falsified.**
+
+The discriminator was finally run: `testPattern` visible, **warp OFF** so the
+path is the Phase 1 pipeline byte for byte. The operator reports the 1–2 px
+grid and the magenta frame as **sharp — crisp thin lines**.
+
+Gate 1 recorded this, deliberately, as an attribution rather than a finding:
+
+> `DECISION` — the blur is attributed to the projector, and the attribution is
+> unconfirmed. A 500 ANSI 720p DLP with auto-focus deliberately disabled at
+> Gate 0 is a wholly sufficient explanation, and the operator's own read.
+
+A wholly sufficient explanation that turns out to be the wrong one. **This is
+exactly why A9 binds prose as well as numbers**, and why that entry was written
+as an attribution: it cost one observation to overturn, and nothing was built on
+it in the meantime.
+
+What the result proves: the path from framebuffer to panel resolves 1–2 px
+features crisply at 1:1, so there is no scaler and no defocus **at the scale of
+the grid**.
+
+What it does not prove: that nothing is soft. It **relocates the cause into the
+content**, which is where every candidate now sits — Phase 1's layers are a
+tree of thin strokes, water drawn as translucent ripple lines, and a glow that
+is a soft radial gradient by construction. All three would read as soft beside a
+hard-edged grid on the same panel in the same frame.
+
+Recorded now because it changes what Phase 3 should worry about: sharpness is a
+content-authoring property here, not a hardware one, and no projector change
+would have improved it. Had the attribution stood, the obvious next move would
+have been to re-focus or replace a projector that is doing its job.
+
+`MEASURED` — **the identity round trip is visually lossless on real hardware.**
+With corners reset to identity, toggling the warp ON and OFF produces **no
+change the operator can see** — at a full round trip through a render texture
+and a 1600-vertex mesh.
+
+This is the hardware confirmation of the golden assertion that `default`,
+`warp-disabled` and `warp-identity` all hash `ba2e7858`. It is worth having
+separately from the hash: a headless harness and the shipping renderer agreeing
+is a claim, and this is the check that would have caught them disagreeing.
+
+Taken with the finding above, the warp stage is cleared twice over — it does not
+resample, and it is not the blur, because there is no blur in the path.
+
+`MEASURED` — **Gate 2's scene-isolation condition, closed on a real
+projection.** The session switched `phase1-default` ⇄ `phase2-alt` repeatedly
+with a keystone in place. The log shows consecutive `[scene] applied` lines with
+**no `[warp]` line between them**, and the corners byte-identical either side.
+
+The stop condition written for this check did not fire, which is the point of
+having written one: nothing on the scene path touches calibration, and that was
+observed rather than argued.
+
+`MEASURED` — **the warp toggle, clicked.** A dozen `OFF ⇄ ON` transitions at
+both a keystone and identity, interleaved with scene switches and layer edits.
+No error, no dropped frame, M1 0.00% late across the whole session, worst
+interval 17.80 ms.
+
+`MEASURED` — **three of the four corner handles could not be caught, and the
+log is what found it.** TL never left `(0.1200, 0.0000)` and BR/BL never left
+their corners across two full drag attempts. Only TR ever moved by hand, and its
+path wanders out to `(0.74, 0.63)` and back — which is what fighting a control
+looks like in a log.
+
+Three causes, all in the same twenty lines:
+
+1. **The handles were clipped.** Corners are normalized `[0,1]` drawn onto an
+   SVG whose viewport is exactly that box, so a handle at 0 or 1 sits ON the
+   boundary — and an `<svg>` clips to its viewport. About a quarter of a 6 px
+   circle was hittable. **Identity puts all four corners on the boundary at
+   once**, so this was the state every new calibration starts in.
+2. **The corner teleported to the pointer**, with no grab offset. The log shows
+   it happening: TR's y jumps `0.0000 → 0.0209` on the very first move, a
+   ~5.6 px displacement from nothing but an off-centre grab.
+3. **A 6 px circle was the whole hit target**, on a control operated while
+   looking at a wall rather than at the screen.
+
+**The model underneath was never wrong.** 28 unit tests, clamping correct,
+degenerate quads refused correctly, the `[warp]` line accurate throughout.
+Nothing tested whether a person could reach a handle. That is Phase 1's lesson
+arriving one phase later, in its exact original form: *the suite proved the
+engine while the thing on top of it could not be operated.*
+
+The guard added is arithmetic and asserts the property that was violated —
+every handle **and its whole hit target** lies inside the viewport at every
+legal corner position, all four extremes included. A corner can now also be
+selected from a button row without being grabbed, which is what makes the arrow
+keys usable for the last few pixels rather than a nicety beside a drag nobody
+can start.
+
+`DECISION` — **the first keystone attempt is VOID, not failed.** It was made
+with one usable handle out of four, so it is not evidence about whether a
+keystone can square a projection. Re-run on the fixed control.
+
+`BLOCKER` — three checks remain, all requiring a person at the wall:
+- the keystone by eye, on a deliberately angled projection (Gate 2, first
+  condition)
+- the calibration round trip as one gesture: drag, quit, relaunch, compare
+- I-6 by eye — whether `add` reads as light rather than as paint
+
+`IDEAS` — parked, not built:
+- The sharpness finding suggests a content question Phase 3 will meet head on:
+  thin strokes and soft gradients are what read as blurry on a 500 ANSI
+  projector, and stroke width is a scene-authoring parameter nobody has thought
+  about. Not a Phase 2 concern, but the first bundled sprite assets will be.
