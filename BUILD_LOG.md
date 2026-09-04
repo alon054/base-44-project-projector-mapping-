@@ -2288,3 +2288,123 @@ here.
   focus for the measured window rather than observe it.
 - `calibration/warp.json` is gitignored, so there is no committed example of the
   format for Phase 7's migration test to load. It will need its own fixture.
+
+## 2026-09-04 — Phase 2 (session 1, part 6) — the A1 reconciliation
+
+- DID: worked the A1 ↔ §4 contradiction to a decision-ready proposal, and
+  found a probe defect while gathering the evidence for it.
+- MEASURED: eight k samples pulled from the run logs rather than from memory.
+- BLOCKER: **`SPEC.md` is not edited here.** CLAUDE.md's document contract says
+  propose and stop; the operator ratifies.
+- NEXT: the ruling. Then Phase 3.
+
+`SPEC-CHANGE-PROPOSED` — **"k and the thermal derate are recorded at every
+gate" contradicts §4's own operative sentence, and it is a four-way
+inconsistency, not the two-way one previously logged.**
+
+**The four texts, quoted.**
+
+1. **§1, A1** — "k is measured at minute 1 and minute 20 of a continuous run
+   and the delta recorded **at every gate**; Phase 9's soak becomes 20 minutes
+   and its gate is judged on minute-20 k."
+2. **§4, "Thermal derate (A1)"** — "**k is measured at minute 1 and again at
+   minute 20 of a continuous run, and the delta is the thermal derate, recorded
+   at every gate.**"
+3. **§4, "The render-multiplier probe, k (A8)"** — "**Both are recorded at
+   every gate**" (k_dev and k_target).
+4. **§4, closing sentence** — "**The Phase 3 and Phase 9 gates must record both
+   numbers, plus k_dev, k_target and the thermal derate.**"
+
+And a fourth party that says nothing at all: **§11's Gate 3 text does not
+mention k or the derate**, asking only for "**Both** §4 gate metrics recorded in
+`BUILD_LOG.md`, with the measured headroom". §11's Gate 9 text *does* name the
+derate explicitly. So §11 agrees with (4) at Gate 9, is silent at Gate 3, and
+nowhere asks for either at any other gate.
+
+**Why it has to be settled before Phase 3, not at it.** Under reading (1)/(2),
+**Gates 0, 1 and 2 were each crossed with a required number unrecorded** — none
+of them ran a 20-minute continuous run, and none recorded a minute-1 →
+minute-20 delta. That is three retroactive `GATE-FAILED` entries under
+CLAUDE.md rule 3. Under reading (4) they are clean and Phase 3 owes the first
+derate. The readings are not close together in consequence, which is why this
+cannot be left to be discovered later.
+
+**New evidence, and it is not favourable to the derate as specified.**
+
+Every k sample this project has taken on a real scene, pulled from the run logs:
+
+| run | k_ratio | k_dev | k_target |
+|---|---|---|---|
+| `p1-load` | 1.3269 | 49.68 | 37.44 |
+| `p1-soak` | 0.9262 | 42.35 | 45.72 |
+| `p2-warp-off-DISCARDED` | 1.2773 | 43.42 | 33.99 |
+| `p2-warp-off` | 0.9655 | 44.54 | 46.13 |
+| `p2-warp-off-2` | 1.0000 | 48.29 | 48.29 |
+| `p2-warp-on` | 0.9815 | 95.68 | 97.48 |
+| `p2-warp-on-2` | 0.9649 | 90.64 | 93.94 |
+| `p2-soak` | 1.0370 | 95.68 | 97.48 |
+
+Eight samples, all `disturbed=false`, **spanning 0.9262–1.3269** against a
+theoretical 2.25 fill-bound / 1.0 CPU-bound. **The thermal derate is defined as
+a delta in k.** A delta between two draws from a quantity with that spread is
+not a measurement of anything, and no plausible thermal effect at Phase 2's
+measured load — **0.37–0.46% of N** — would exceed it. There is, at this load,
+no sustained GPU work to throttle.
+
+**Three options.**
+
+- **(A) Narrow A1 to match §4's closing sentence — recommended.** k_dev,
+  k_target and the thermal derate are recorded at the gates that make a
+  performance claim at a real layer load: **Phase 3 and Phase 9**. Edit §1's A1
+  and §4's thermal-derate paragraph to say so, and add k and the derate to
+  §11's Gate 3 text, which currently omits both. A1's *intent* — "a fanless
+  machine passes every 60-second gate cold and fails in the room" — is fully
+  served, because a gate with nothing to throttle cannot fail in the room for
+  thermal reasons.
+- **(B) Take "every gate" literally.** Log `GATE-FAILED` against Gates 0, 1 and
+  2, and run a 20-minute continuous k comparison at all nine remaining gates.
+  Honest to the words. It buys ~3 hours of runs producing deltas smaller than
+  the probe's own noise, and it reopens three passed gates on a technicality
+  rather than on a defect.
+- **(C) Keep "every gate", define the record.** The derate is *recorded* at
+  every gate, where the record may legitimately read
+  `N/A — peak render cost 0.46% of N, no sustained GPU load to derate`.
+  Gates 0–2 are then annotated rather than failed. This preserves A1's words
+  exactly and makes the requirement honest, at the cost of a clause that says
+  when "N/A" is a valid record.
+
+**Recommendation: (A), with (C)'s annotation applied to Gates 0–2** so nothing
+is retroactively failed on a technicality. (A) is what §4's own operative
+sentence and §11's gate texts already describe; (1) and (2) read as the
+amendment's summary having outrun the body it was summarising.
+
+**Not decided here.** CLAUDE.md: `SPEC.md` is authoritative, read-only to the
+agent, and changed only by the operator. This entry is the proposal.
+
+`MEASURED` — **the k probe measures the wrong subject when the warp is on, and
+it was found while gathering the evidence above.**
+
+`k_dev` roughly **doubles** with the warp enabled — 42–50 across every warp-off
+run, 90–96 across every warp-on run — and it is not a speedup. The probe renders
+`app.stage`, and with the warp active the stage holds **the mesh**, not the
+compositor. It is timing a single textured quad rather than the scene, so the
+warp-on figures describe a different subject from the warp-off ones and the two
+sets must never be compared.
+
+This is not a Gate 2 problem: k is informational through Phase 8 (§4) and no
+gate condition rests on it. It is recorded because **A8's ruling is due at Phase
+3 and this changes the ruling's subject**: the probe's problem was thought to be
+noise, and it now also has a correctness bug that only appears once a
+post-composite stage exists. Any fix must render the composite, not the stage.
+
+Two smaller observations from the same table, neither concluded:
+- `p2-warp-off-2` reports k_dev and k_target **identical to 4 s.f.** (48.29 /
+  48.29, ratio exactly 1.0000). Possibly coincidence at this timer resolution,
+  possibly the probe returning one measurement twice.
+- `p2-warp-on` and `p2-soak` report **identical** k_dev and k_target to 2 d.p.
+  across two separate launches. Same caution.
+
+`BLOCKER` — **A8 and A15 remain due at Gate 3 and are not pre-empted here.**
+A8 now carries a second, separate problem (above) beyond the noise. A15's
+statistic measured **0.600% of N** in all four Phase 2 runs, against its own 2%
+trigger, and stays ratified as written.
