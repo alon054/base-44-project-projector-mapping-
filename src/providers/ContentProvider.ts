@@ -66,6 +66,28 @@ export interface LayerFrame {
    * is unchanged so the 19 blessed golden frames stay byte-identical.
    */
   phase: number;
+  /**
+   * Whether the clock is running.
+   *
+   * A provider that draws from `timeSeconds` alone never needs this — a paused
+   * clock simply stops changing and the layer freezes for free, which is what
+   * makes I-2's "freezes simultaneously" structural. It is here for the one
+   * kind of provider that owns a machine of its own that must ALSO be stopped:
+   * a `<video>` has a decoder that would keep running, and a Lottie player has
+   * an internal timeline. Those must be told, not merely starved.
+   */
+  playing: boolean;
+  /** The clock's rate, for providers driving a decoder that has its own. */
+  rate: number;
+  /**
+   * The clock's scrub sequence. Increments only when the operator moves time.
+   *
+   * A video needs to know that a scrub HAPPENED without seeking on it — D5
+   * realigns at the next loop boundary, and Gate 3 words it that way on
+   * purpose. Comparing `timeSeconds` against the last frame's cannot tell a
+   * scrub from ordinary playback at a high rate; this can.
+   */
+  scrubSeq: number;
 }
 
 export interface LayerView {

@@ -26,13 +26,15 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import 'pixi.js/unsafe-eval';
-import { Application, Rectangle } from 'pixi.js';
+import { Application, Assets, Rectangle } from 'pixi.js';
 import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
 import { addLayer, moveLayer } from '../core/sceneEdit';
-import { createDefaultScene } from '../core/defaultScene';
+import { createDefaultScene, createPhase3Scene } from '../core/defaultScene';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
+import { BundledProvider, BUNDLED_PROVIDER_ID } from '../providers/bundled/BundledProvider';
+import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manifest';
 import { Compositor } from '../render/compositor';
 import { WarpStage } from '../render/warp';
 import {
@@ -60,6 +62,20 @@ const GOLDEN_RESOLUTION = { width: 1280, height: 720 } as const;
  */
 const GOLDEN_PHASE = 0.25;
 const GOLDEN_TIME_SECONDS = 1;
+
+/**
+ * The one frame every golden case is drawn at. A frozen `LayerFrame` rather
+ * than a pair of loose numbers, so a field added to the contract later is a
+ * compile error here instead of a silently-defaulted golden.
+ */
+const GOLDEN_FRAME = {
+  timeSeconds: GOLDEN_TIME_SECONDS,
+  phase: GOLDEN_PHASE,
+  // Paused, which is I-12's deterministic subset stated rather than implied.
+  playing: false,
+  rate: 1,
+  scrubSeq: 0,
+} as const;
 
 const PROVIDER_ID = 'procedural';
 
@@ -94,6 +110,18 @@ interface GoldenCase {
    * what the `warp-identity` and `warp-disabled` cases are compared against.
    */
   warp?: ViewportCalibration;
+  /**
+   * Asset URLs to load before rendering.
+   *
+   * Phase 3's views populate themselves after `create` returns (I-3: `create`
+   * is synchronous so a scene switch never stalls on a load). A single-frame
+   * harness would therefore hash the I-13 placeholder every time and call it a
+   * sprite. Pre-loading warms `Assets`' cache so each view's own
+   * `Assets.load` resolves on the next microtask, which the runner then waits
+   * for. Without this every bundled golden would be a picture of a magenta box
+   * — and would be perfectly stable, which is the worst kind of wrong.
+   */
+  preload?: readonly string[];
 }
 
 /**
@@ -245,8 +273,181 @@ function cases(): GoldenCase[] {
     // projective bend visible to a person, and the `.golden-preview/` PNG is
     // where the re-bless is judged rather than taken on trust.
     { name: 'warp-keystone-grid', scene: testPatternScene(), warp: warpKeystone() },
+
+    // -----------------------------------------------------------------------
+    // Phase 3 — the bundled library (D6, I-10) and the new layer types.
+    //
+    // Video is present but NEVER decoded: `decodeVideo: false` in the runner.
+    // I-12's deterministic subset is "fixed seed, no video, clock paused", so a
+    // decoder here would make the hash a function of decode timing and the
+    // goldens would flap. What the video cases DO cover is the §5 preview path
+    // — poster plus badge — which is a real rendering and needed one.
+    //
+    // Every one of these is a picture of a specific claim, because a hash of a
+    // magenta placeholder is a perfectly stable hash of nothing. `preload` is
+    // what stops that: see `GoldenCase.preload`.
+    // -----------------------------------------------------------------------
+    {
+      // Gate 3: "a Kenney alpha sprite renders with correct alpha and correct
+      // blend mode". NORMAL blend, so the sprite's own alpha is the whole of
+      // what is being judged — a premultiply bug shows here as a grey box.
+      name: 'bundled-alpha-normal',
+      scene: bundledStills('normal'),
+      preload: stillUrls,
+    },
+    {
+      // The same sprites on `add` (I-6). This case and the one above differ in
+      // NOTHING but blend mode, so the difference between their mean
+      // luminances is the additive gain itself — the same shape of evidence
+      // Gate 1 used for the procedural glow.
+      name: 'bundled-alpha-add',
+      scene: bundledStills('add'),
+      preload: stillUrls,
+    },
+    {
+      // Both sheets at the pinned clock. `GOLDEN_FRAME.timeSeconds` is 1 s, so
+      // the 2.5 s sheet is at frame 10 of 25 and the 1.8 s sheet at frame 5 of
+      // 9 — two different frames from one clock, which is I-2 in a picture.
+      name: 'bundled-spritesheets',
+      scene: bundledSheets('none'),
+      preload: sheetUrls,
+    },
+    {
+      // D5's crossfade. Same scene, same clock, `seam: 'crossfade'` — so this
+      // hash MUST differ from the case above, and a crossfade that silently did
+      // nothing would be caught by them matching.
+      name: 'bundled-spritesheets-crossfade',
+      scene: bundledSheets('crossfade'),
+      preload: sheetUrls,
+    },
+    {
+      // The Lottie, driven to a frame by the clock rather than by its own
+      // timeline. lottie-web is loaded from the light canvas build (no `eval`,
+      // CSP), so this also proves that build actually renders.
+      name: 'bundled-lottie',
+      scene: bundledLottie(),
+    },
+    {
+      // Gate 3's stated layer load, as the editor preview sees it.
+      name: 'phase3-load-preview',
+      scene: createPhase3Scene(),
+      preload: allBundledUrls,
+    },
+
+    {
+      // I-13. A scene naming an asset this build does not have must come back
+      // as a flagged placeholder, not as a crash and not as a black rectangle.
+      name: 'bundled-missing-asset',
+      scene: bundledMissing(),
+    },
   ];
 }
+
+/** Kenney's alpha particles, laid out in a row. `blend` is the whole variable. */
+function bundledStills(blend: 'normal' | 'add'): Scene {
+  const ids = [
+    'kenney.particle.flame',
+    'kenney.particle.star',
+    'kenney.particle.spark',
+    'kenney.particle.light',
+  ];
+  return createScene({
+    id: `golden-bundled-still-${blend}`,
+    seed: 0x5eed,
+    // Deliberately NOT black: an alpha bug shows as an opaque box, and against
+    // black an opaque black box is invisible. A dark blue ground makes the
+    // failure visible in the PNG a person actually looks at.
+    background: 0x101828,
+    layers: ids.map((assetId, i) =>
+      createLayer({
+        id: `still${i}`,
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId },
+        transform: { x: 0.15 + i * 0.235, y: 0.5, width: 0.22, height: 0.39, rotation: 0 },
+        zOrder: i,
+        blendMode: blend,
+      }),
+    ),
+  });
+}
+
+function bundledSheets(seam: 'none' | 'crossfade'): Scene {
+  return createScene({
+    id: `golden-bundled-sheets-${seam}`,
+    seed: 0x5eed,
+    background: 0x101828,
+    layers: [
+      createLayer({
+        id: 'puff',
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: 'kenney.smoke.whitePuff', seam },
+        transform: { x: 0.28, y: 0.5, width: 0.44, height: 0.78, rotation: 0 },
+        zOrder: 0,
+      }),
+      createLayer({
+        id: 'burst',
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: 'kenney.smoke.explosion', seam },
+        transform: { x: 0.72, y: 0.5, width: 0.44, height: 0.78, rotation: 0 },
+        zOrder: 1,
+      }),
+    ],
+  });
+}
+
+function bundledLottie(): Scene {
+  return createScene({
+    id: 'golden-bundled-lottie',
+    seed: 0x5eed,
+    background: 0x101828,
+    layers: [
+      createLayer({
+        id: 'rings',
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: 'authored.lottie.clockRings' },
+        transform: { x: 0.5, y: 0.5, width: 0.62, height: 1, rotation: 0 },
+        zOrder: 0,
+      }),
+    ],
+  });
+}
+
+function bundledMissing(): Scene {
+  return createScene({
+    id: 'golden-bundled-missing',
+    seed: 0x5eed,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'gone',
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: 'no.such.asset' },
+        transform: { x: 0.5, y: 0.5, width: 0.7, height: 0.6, rotation: 0 },
+        zOrder: 0,
+      }),
+    ],
+  });
+}
+
+/** Pulled from the manifest rather than retyped, so a renamed asset is a build error. */
+const urlOf = (id: string): string => {
+  const a = BUNDLED_ASSETS.find((x) => x.id === id);
+  if (!a) throw new Error(`golden: no bundled asset "${id}"`);
+  return a.url;
+};
+const posterOf = (id: string): string => {
+  const a = BUNDLED_ASSETS.find((x) => x.id === id);
+  if (!a || a.kind !== 'video') throw new Error(`golden: no bundled video "${id}"`);
+  return a.posterUrl;
+};
+const stillUrls = [
+  urlOf('kenney.particle.flame'),
+  urlOf('kenney.particle.star'),
+  urlOf('kenney.particle.spark'),
+  urlOf('kenney.particle.light'),
+];
+const sheetUrls = [urlOf('kenney.smoke.whitePuff'), urlOf('kenney.smoke.explosion')];
+const allBundledUrls = [...sheetUrls, posterOf('test.video.seamless')];
 
 /** The stage present and switched off — the toggle, not the absence of code. */
 function warpOff(): ViewportCalibration {
@@ -515,6 +716,18 @@ async function run(): Promise<GoldenResult[]> {
 
     const providers = new ProviderRegistry();
     providers.register(new ProceduralProvider());
+    // D6's bundled provider. `decodeVideo: false` on purpose and twice over:
+    // I-12's deterministic subset is "fixed seed, NO VIDEO, clock paused", and
+    // a decoder in a golden would make the hash a function of decode timing.
+    // It also means the video cases here render the §5 preview path — poster
+    // plus badge — which is a thing worth having a golden of.
+    providers.register(
+      new BundledProvider({
+        library: createBundledLibrary(),
+        decodeVideo: false,
+        lottieResolution: 256,
+      }),
+    );
     const compositor = new Compositor({
       providers,
       width: size.width,
@@ -537,10 +750,17 @@ async function run(): Promise<GoldenResult[]> {
     if (!warp) app.stage.addChild(compositor.view);
     warp?.setCalibration(c.warp!);
 
+    if (c.preload && c.preload.length > 0) {
+      // A load that fails is not fatal here: the case then hashes its I-13
+      // placeholder, which is a real state and one the runner should be able
+      // to bless rather than crash on.
+      await Promise.allSettled(c.preload.map((u) => Assets.load(u)));
+    }
+
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.
       compositor.setScene(c.afterScene);
-      compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
+      compositor.update(GOLDEN_FRAME);
       warp?.prepare();
       app.renderer.render(app.stage);
     }
@@ -549,8 +769,16 @@ async function run(): Promise<GoldenResult[]> {
     // placeholder on the frame it throws, so a single-frame harness would hash
     // the frame before the swap and never see the placeholder it is meant to
     // be testing (I-13).
-    compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
-    compositor.update({ timeSeconds: GOLDEN_TIME_SECONDS, phase: GOLDEN_PHASE });
+    compositor.update(GOLDEN_FRAME);
+    compositor.update(GOLDEN_FRAME);
+    // Let each view's own `Assets.load(...).then(...)` run. The cache is warm
+    // from `preload` above, so this is a microtask drain rather than a wait —
+    // but it has to happen between `setScene` and the render or the frame is
+    // hashed before any texture has been attached.
+    if (c.preload && c.preload.length > 0) {
+      await new Promise((r) => setTimeout(r, 0));
+      compositor.update(GOLDEN_FRAME);
+    }
     warp?.prepare();
     app.renderer.render(app.stage);
 

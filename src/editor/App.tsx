@@ -31,7 +31,13 @@ import { useClock } from './useClock';
 import { TransportPanel } from './TransportPanel';
 import { WarpPanel } from './WarpPanel';
 import type { Clock } from '../core/clock';
-import { createAltScene, createDefaultScene } from '../core/defaultScene';
+import {
+  createAltScene,
+  createDefaultScene,
+  createPhase3Scene,
+  createResilienceVideoScene,
+  sceneById,
+} from '../core/defaultScene';
 import type { Scene } from '../core/scene';
 import {
   calibrationFor,
@@ -91,10 +97,45 @@ export function App(): React.JSX.Element {
     createCalibration(CALIBRATION_VIEWPORT),
   );
 
+  /**
+   * True once the config has been consulted, so the FIRST scene this editor
+   * sends is the one the run asked for.
+   *
+   * Without this the mount effect below fires immediately with the built-in
+   * default, the config arrives a moment later, and the output window records
+   *   [scene] applied "phase3-load"
+   *   [scene] applied "phase1-default"
+   *   [scene] applied "phase3-load"
+   * — which is what the run log showed on the first Phase 3 launch. Harmless to
+   * look at and not harmless to measure: a flap inside §4's warmup rebuilds
+   * every layer and re-decodes the video, and a shorter warmup would have put
+   * that inside the gate window with nothing in the summary to say so.
+   */
+  const configSeen = useRef(false);
+
   // The whole scene, on every edit. Small, operator-paced, and JSON only (I-7).
   useEffect(() => {
+    if (!configSeen.current) return;
     window.engine.setScene({ scene });
   }, [scene]);
+
+  /** Applied once. A later config push must not yank an edited scene back. */
+  const namedSceneApplied = useRef(false);
+  const applyNamedScene = useCallback((id: string) => {
+    const first = !configSeen.current;
+    configSeen.current = true;
+    if (id !== '' && !namedSceneApplied.current) {
+      const named = sceneById(id);
+      if (named) {
+        namedSceneApplied.current = true;
+        setScene(named);
+        return;
+      }
+    }
+    // No named scene, or one we do not know. The editor still owes the output
+    // its current scene — it just owes it once the config has been seen.
+    if (first) setScene((prev) => ({ ...prev }));
+  }, []);
 
   useEffect(() => window.engine.onSceneFailures(setFailures), []);
 
@@ -139,12 +180,22 @@ export function App(): React.JSX.Element {
       setUncapped(c.uncapped);
       setMeasureLabel(c.measureLabel);
       if (c.displayFrequency > 0) setNominalMs(1000 / c.displayFrequency);
+      // §4: an unattended run names the scene, and the EDITOR opens on it too.
+      // Otherwise the editor's mount would push Phase 1's default over the top
+      // of the run's scene a moment after it loaded, and the summary would
+      // describe a layer load nobody asked for.
+      applyNamedScene(c.sceneId);
     });
     const offMetrics = window.engine.onMetrics(setMetrics);
     const offConfig = window.engine.onOutputConfig((c) => {
       setUncapped(c.uncapped);
       setMeasureLabel(c.measureLabel);
       if (c.displayFrequency > 0) setNominalMs(1000 / c.displayFrequency);
+      // §4: an unattended run names the scene, and the EDITOR opens on it too.
+      // Otherwise the editor's mount would push Phase 1's default over the top
+      // of the run's scene a moment after it loaded, and the summary would
+      // describe a layer load nobody asked for.
+      applyNamedScene(c.sceneId);
       refreshDisplays();
     });
     const offWarn = window.engine.onWarning((w) => setWarning(w.level === 'info' ? '' : w.text));
@@ -421,6 +472,20 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
                 onClick={() => setScene(createAltScene())}
               >
                 Scene B
+              </button>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createPhase3Scene())}
+              >
+                Phase 3 load
+              </button>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createResilienceVideoScene())}
+              >
+                I-13 video
               </button>
               <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
             </div>

@@ -208,6 +208,21 @@ export interface OutputConfig {
    * a gate run and a soak run must not be confusable for one another.
    */
   soakMinutes: number;
+  /**
+   * Which named scene to open at, or '' for the build's default.
+   *
+   * Added in Phase 3, because §4's protocol says a run happens "at the phase's
+   * stated layer load" and the harness had no way to reach one: every
+   * unattended run opened on Phase 1's default scene, which was the correct
+   * load right up until it was not. A gate number measured on the wrong scene
+   * is worse than no number, and nothing in the summary would have said so.
+   *
+   * Reaches BOTH windows. The editor opens on it too rather than the output
+   * pinning it, so the two windows agree the ordinary way instead of the output
+   * learning to ignore scene messages during a measurement — a special case
+   * there would be a code path that only ever runs when a gate is being judged.
+   */
+  sceneId: string;
   /** Captured once at run start, reported in the summary. */
   conditions: RunConditions | null;
 }

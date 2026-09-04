@@ -1,0 +1,10 @@
+clock-rings.json
+
+Authored for this project (see BUILD_LOG.md, Phase 3). Not sourced from a
+catalog. Released CC0-1.0 so that it carries the same kind of license record as
+every other asset in the library — I-10 admits no exception for assets we made
+ourselves, because "we made it" is exactly the claim that stops being checkable
+once the person who made it has moved on.
+
+Creative Commons Zero v1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/

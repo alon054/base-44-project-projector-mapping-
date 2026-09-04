@@ -206,6 +206,14 @@ export class Clock {
     return this.realMs / 1000;
   }
 
+  /**
+   * The scrub sequence this clock is on. Reaches providers through `LayerFrame`
+   * so a video can tell a scrub from fast playback without seeking on it (D5).
+   */
+  get scrubSeq(): number {
+    return this.lastScrubSeq;
+  }
+
   /** A copy, never the live object — callers must not mutate the clock's state. */
   snapshot(): ClockState {
     return { ...this.state };
@@ -266,6 +274,10 @@ export class Clock {
     const next = sanitizeMs(ms);
     if (next === this.state.timeMs) return;
     this.state.timeMs = next;
+    // A local scrub bumps the sequence for the same reason a remote one does:
+    // a provider watching `LayerFrame.scrubSeq` must see every operator time
+    // move, whichever side of the IPC boundary it came from.
+    this.lastScrubSeq++;
     this.notify('scrub');
   }
 
@@ -290,6 +302,7 @@ export class Clock {
   reset(): void {
     if (this.state.timeMs === 0) return;
     this.state.timeMs = 0;
+    this.lastScrubSeq++;
     this.notify('reset');
   }
 

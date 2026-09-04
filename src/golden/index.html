@@ -6,7 +6,7 @@
          only a regression net if it is produced by the shipping render path,
          including the 'unsafe-eval'-free Pixi polyfills that CSP forces. -->
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' ws://localhost:5173 http://localhost:5173; object-src 'none'; base-uri 'none';" />
+          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' data: blob: ws://localhost:5173 http://localhost:5173; object-src 'none'; base-uri 'none';" />
     <title>Projection Engine — golden frame harness</title>
     <style>
       html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }

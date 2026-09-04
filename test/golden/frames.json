@@ -300,5 +300,115 @@
       208
     ],
     "meanLuminance": 0.019535
+  },
+  "bundled-alpha-normal": {
+    "width": 1280,
+    "height": 720,
+    "hash": "bb6dbeba",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.107573
+  },
+  "bundled-alpha-add": {
+    "width": 1280,
+    "height": 720,
+    "hash": "3c55640e",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.110057
+  },
+  "bundled-spritesheets": {
+    "width": 1280,
+    "height": 720,
+    "hash": "cf120f68",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.213519
+  },
+  "bundled-spritesheets-crossfade": {
+    "width": 1280,
+    "height": 720,
+    "hash": "0bc820cb",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.197008
+  },
+  "bundled-lottie": {
+    "width": 1280,
+    "height": 720,
+    "hash": "1598f55c",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.154591
+  },
+  "phase3-load-preview": {
+    "width": 1280,
+    "height": 720,
+    "hash": "af59b5a4",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      14,
+      34,
+      64
+    ],
+    "meanLuminance": 0.190246
+  },
+  "bundled-missing-asset": {
+    "width": 1280,
+    "height": 720,
+    "hash": "9510edbd",
+    "coverage": 0.014715,
+    "failures": [
+      {
+        "layerId": "gone",
+        "reason": "no bundled asset \"no.such.asset\""
+      }
+    ],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      191,
+      0,
+      191
+    ],
+    "meanLuminance": 0.003135
   }
 }

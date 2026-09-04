@@ -22,6 +22,8 @@ import {
 } from '../core/parameters';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
+import { BundledProvider } from '../providers/bundled/BundledProvider';
+import { createBundledLibrary } from '../providers/bundled/manifest';
 import type { Scene } from '../core/scene';
 
 /**
@@ -31,6 +33,13 @@ import type { Scene } from '../core/scene';
  */
 const providers = new ProviderRegistry();
 providers.register(new ProceduralProvider());
+// Rule 9: the bundled provider's content keys must be addressable too, or the
+// per-layer seam control would be an editable value living outside the registry
+// — the exact hole I-8 exists to prevent. Nothing here renders (the flags below
+// are inert for `contentParameters`), it only answers "what keys do you expose".
+providers.register(
+  new BundledProvider({ library: createBundledLibrary(), decodeVideo: false, lottieResolution: 1 }),
+);
 
 export function useSceneRegistry(
   scene: Scene,

@@ -22,7 +22,8 @@ import {
   type ViewportCalibration,
 } from '../render/calibration';
 import { createOutputs, primaryViewport } from '../render/outputs';
-import { canonicalizeScene, layersInDrawOrder, type Scene } from '../core/scene';
+import { canonicalizeScene, deepEqual, layersInDrawOrder, type Scene } from '../core/scene';
+import { sceneById } from '../core/defaultScene';
 import { judgeSoak, type GpuSample } from '../debug/gpu';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
@@ -42,6 +43,7 @@ let config: OutputConfig = {
   measureCues: [],
   provocations: [],
   soakMinutes: 0,
+  sceneId: '',
   conditions: null,
 };
 
@@ -61,6 +63,8 @@ const pendingSpeed: { v: { value: number; token: number; t0: number } | null } =
  * window does is silently ignore the show's time.
  */
 const pendingClock: { v: ReturnType<typeof canonicalizeClockTransport> | null } = { v: null };
+/** The scene currently on the wall, for the identical-apply check below. */
+let appliedScene: Scene | null = null;
 /** Same race as the speed above: a scene can arrive before Pixi has finished init. */
 const pendingScene: { v: Scene | null } = { v: null };
 /**
@@ -118,6 +122,18 @@ function applyScene(raw: unknown): void {
     pendingScene.v = scene;
     return;
   }
+  // An IDENTICAL scene is not applied twice (I-12: deep-equal state IS the
+  // same state). At launch the output applies the run's named scene from its
+  // config and the editor then sends the same scene a moment later; each
+  // `setScene` rebuilds the whole layer stack, which for a video layer means
+  // destroying and re-creating a decoder. The run log showed the second
+  // rebuild as a duplicate `[video] backdrop: poster` line.
+  //
+  // This is NOT an optimisation of the rebuild path — that path is measured
+  // (184 rebuilds, texture bytes flat at +0.00%) and deliberately left alone.
+  // It is declining to rebuild for a scene that did not change.
+  if (appliedScene && deepEqual(appliedScene, scene)) return;
+  appliedScene = scene;
   host.setScene(scene);
   reportFailures();
   // Operator-paced, not per-frame, so it costs nothing on the render thread.
@@ -145,6 +161,17 @@ function applyConfig(c: OutputConfig): void {
       `N=${c.displayFrequency > 0 ? (1000 / c.displayFrequency).toFixed(4) : 'unknown'}ms, ` +
       `scaleFactor=${c.scaleFactor}, uncapped=${c.uncapped}`,
   );
+  // §4: a run happens "at the phase's stated layer load". An unattended run
+  // names the scene; the editor opens on the same one, so the two windows agree
+  // without this window learning to ignore scene messages.
+  if (c.sceneId !== '') {
+    const named = sceneById(c.sceneId);
+    if (named) applyScene(named);
+    // I-13: an unknown id keeps the current scene and says so, rather than
+    // opening black. A measurement on a black screen is the kind of number
+    // that looks excellent and means nothing.
+    else console.warn(`[output] unknown PROJENGINE_SCENE "${c.sceneId}" — keeping current scene`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +330,20 @@ host = await createRenderHost({
   // not — D11 makes the preview the placement space, and placing objects on a
   // distorted canvas teaches the wrong mental model from the start.
   warp: true,
+  // §5 / A2: the OUTPUT window is the only thing that decodes video. The
+  // preview shows posters — see `VideoView.ts`.
+  decodeVideo: true,
+  // Full size here; the preview caps its own (§5, "Lottie runs in the preview,
+  // at reduced size, capped").
+  lottieResolution: 512,
+  // I-13 made readable. `[scene] applied` and `[warp]` between them found four
+  // Phase 2 defects that no unit test caught; a video's fallback chain is
+  // exactly the kind of thing that is invisible until it is printed, because
+  // "poster" and "playing" look similar for the first frame and identical in a
+  // screenshot of a still moment.
+  onVideoStage: (layerId, stage, detail) => {
+    console.log(`[video] ${layerId}: ${stage} — ${detail}`);
+  },
   onWarpFallback: (reason) => {
     // I-13: the warp is gone, the session is not. Say so where it can be seen.
     banner.textContent = `warp disabled: ${reason}`;

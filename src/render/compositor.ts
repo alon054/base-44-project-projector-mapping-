@@ -15,7 +15,7 @@
  *    and stays free of PixiJS so §8.1 can test it without a GPU; this is the
  *    only file that knows a placeholder is a magenta outline with a label.
  */
-import { Container, Graphics, Text } from 'pixi.js';
+import { Container, Graphics } from 'pixi.js';
 import { toPixelRect, type Layer } from '../core/layer';
 import {
   failedLayers,
@@ -28,6 +28,7 @@ import { layersInDrawOrder, type Scene } from '../core/scene';
 import { layerRng } from '../core/rng';
 import type { LayerFrame, LayerView, ProviderRegistry } from '../providers/ContentProvider';
 import { toPixiBlendMode } from './blend';
+import { createPlaceholderGraphic } from './placeholder';
 
 export interface CompositorOptions {
   providers: ProviderRegistry;
@@ -106,42 +107,19 @@ export class Compositor {
   }
 
   /**
-   * I-13's visible placeholder: a magenta outline and a label naming the layer
-   * and the reason. Visible is the point — a silently-black layer in a live
-   * session is indistinguishable from content that is meant to be black (D1).
+   * I-13's visible placeholder. The APPEARANCE moved to
+   * `render/placeholder.ts` in Phase 3, because a video whose decode fails
+   * asynchronously has to draw one too and cannot throw into the render loop to
+   * get it. There is still exactly one definition of what a placeholder looks
+   * like — see that file's header.
    */
   private createPlaceholder(info: PlaceholderInfo): LayerView {
-    const view = new Container();
-    const outline = new Graphics();
-    const label = new Text({
-      text: `${info.layerName} — ${info.providerId}\n${info.reason}`,
-      style: {
-        fontFamily: 'monospace',
-        fontSize: 14,
-        fill: 0xff00ff,
-        align: 'left',
-        wordWrap: true,
-        wordWrapWidth: 320,
-      },
-    });
-    view.addChild(outline, label);
-
-    const draw = (w: number, h: number): void => {
-      outline
-        .clear()
-        .rect(0, 0, w, h)
-        .stroke({ width: Math.max(2, Math.round(h * 0.008)), color: 0xff00ff, alpha: 0.9 });
-      outline.moveTo(0, 0).lineTo(w, h).moveTo(w, 0).lineTo(0, h);
-      outline.stroke({ width: Math.max(1, Math.round(h * 0.004)), color: 0xff00ff, alpha: 0.5 });
-      label.position.set(Math.min(8, w * 0.05), Math.min(8, h * 0.05));
-      label.visible = w > 80 && h > 40;
-    };
-
+    const g = createPlaceholderGraphic(info);
     return {
-      view,
+      view: g.view,
       update: () => {},
-      resize: draw,
-      destroy: () => view.destroy({ children: true }),
+      resize: g.draw,
+      destroy: g.destroy,
     };
   }
 

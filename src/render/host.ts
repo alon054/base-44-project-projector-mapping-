@@ -28,6 +28,8 @@ import type { Scene } from '../core/scene';
 import type { PlaceholderInfo } from '../core/resilience';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
+import { BundledProvider } from '../providers/bundled/BundledProvider';
+import { createBundledLibrary } from '../providers/bundled/manifest';
 import { Compositor } from './compositor';
 import { WarpStage } from './warp';
 import type { ViewportCalibration } from './calibration';
@@ -54,6 +56,21 @@ export interface RenderHostOptions {
   warp?: boolean;
   /** I-13: the warp stage failed and fell back to an unwarped draw. Once. */
   onWarpFallback?: (reason: string) => void;
+  /**
+   * §5 / A2: create real `<video>` elements. The OUTPUT window sets this; the
+   * editor preview must not.
+   *
+   * Defaults to FALSE, which is the safe default in the direction that matters:
+   * a host that forgot to ask for decoding shows posters, while a host that
+   * accidentally got it spends a second decoder out of a 16 GB pool shared
+   * between CPU and GPU. §5 calls that decision load-bearing and says not to
+   * relax it for preview fidelity.
+   */
+  decodeVideo?: boolean;
+  /** §5: Lottie runs in the preview at reduced size. Canvas edge in px. */
+  lottieResolution?: number;
+  /** Video stage changes, for the run log. Never per frame. */
+  onVideoStage?: (layerId: string, stage: string, detail: string) => void;
 }
 
 export interface RenderHost {
@@ -128,6 +145,19 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   const providers = new ProviderRegistry();
   providers.register(new ProceduralProvider());
+  // D6's second provider. The library is built here rather than shared across
+  // hosts because the preview and the output are separate processes anyway
+  // (I-7), and a module-global would only look shared.
+  providers.register(
+    new BundledProvider({
+      library: createBundledLibrary(),
+      decodeVideo: opts.decodeVideo ?? false,
+      lottieResolution: opts.lottieResolution ?? 512,
+      ...(opts.onVideoStage
+        ? { onVideoStage: (id: string, stage: string, detail: string) => opts.onVideoStage?.(id, stage, detail) }
+        : {}),
+    }),
+  );
 
   const compositor = new Compositor({
     providers,
@@ -217,7 +247,13 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     clock.advance(lastTick === null ? 0 : now - lastTick);
     lastTick = now;
 
-    compositor.update({ timeSeconds: clock.timeSeconds, phase: clock.globalPhase });
+    compositor.update({
+      timeSeconds: clock.timeSeconds,
+      phase: clock.globalPhase,
+      playing: clock.playing,
+      rate: clock.rate,
+      scrubSeq: clock.scrubSeq,
+    });
 
     // Both draws sit inside one timed region. The render-to-texture IS the
     // warp stage's cost, and Gate 2 asks for that cost as a number — measuring

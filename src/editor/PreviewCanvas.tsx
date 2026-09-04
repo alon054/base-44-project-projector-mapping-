@@ -53,6 +53,15 @@ export function PreviewCanvas({
       width: PREVIEW_SIZE.width,
       height: PREVIEW_SIZE.height,
       nominalMs: nominalMs || 16.67,
+      // §5 / A2, stated by omission elsewhere and explicitly here: the preview
+      // does NOT decode video. It shows the poster plus a badge. This is not a
+      // fidelity setting — a second decoder spends a 16 GB pool shared between
+      // CPU and GPU twice, for a preview nobody projects.
+      decodeVideo: false,
+      // §5: "Lottie *does* run in the preview, at reduced size, capped." The
+      // preview is 480x270, so a 512 px canvas would be rendering more Lottie
+      // pixels than it can show.
+      lottieResolution: 192,
     }).then((h) => {
       created = h;
       if (disposed) {

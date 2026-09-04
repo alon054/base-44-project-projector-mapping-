@@ -48,6 +48,12 @@ const MEASURE_LABEL = process.env['PROJENGINE_MEASURE'] ?? '';
  * §4's protocol window exactly as it was.
  */
 const MEASURE_SOAK_MINUTES = Math.max(0, Number(process.env['PROJENGINE_SOAK'] ?? '0') || 0);
+/**
+ * `PROJENGINE_SCENE=<id>` opens both windows on a named scene. Unset uses the
+ * build's default. §4 measures "at the phase's stated layer load", and before
+ * Phase 3 there was no way for an unattended run to reach one.
+ */
+const MEASURE_SCENE = process.env['PROJENGINE_SCENE'] ?? '';
 const MEASURE_CUES = (process.env['PROJENGINE_CUES'] ?? '')
   .split(',')
   .map((x) => Number(x.trim()))
@@ -193,6 +199,7 @@ function outputConfigFor(display: Electron.Display, role: 'output' | 'preview'):
     hudVisible: MEASURE_LABEL !== '' ? true : loadSettings().hudVisible,
     measureLabel: MEASURE_LABEL,
     soakMinutes: MEASURE_SOAK_MINUTES,
+    sceneId: MEASURE_SCENE,
     measureCues: role === 'output' ? MEASURE_CUES : [],
     provocations: role === 'output' ? MEASURE_PROVOKE : [],
     conditions: role === 'output' ? currentConditions : null,

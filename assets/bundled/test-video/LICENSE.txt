@@ -1,0 +1,17 @@
+loop-seamless.mp4, loop-nonseamless.mp4, corrupt.mp4 and their posters
+
+Generated with ffmpeg from synthetic input (see BUILD_LOG.md, Phase 3). No
+third-party footage. Released CC0-1.0.
+
+loop-nonseamless.mp4 is DELIBERATELY not seamless: its brightness ramps across
+the clip and snaps back at the loop point. It is the fixture for Gate 3's "a
+known non-seamless loop shows no visible pop with seam handling on". Do not
+"fix" it.
+
+corrupt.mp4 is DELIBERATELY unplayable: a valid 2 KB MP4 header prefix followed
+by random bytes, so it is recognised as a video and then fails to decode. It is
+the fixture for Gate 3's I-13 fallback condition. Do not replace it with a
+working file.
+
+Creative Commons Zero v1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
