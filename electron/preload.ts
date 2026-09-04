@@ -46,6 +46,10 @@ const api = {
     ipcRenderer.on(CH.sceneSet, h);
     return () => ipcRenderer.off(CH.sceneSet, h);
   },
+  /** §4: ask main to focus the output window as the measured window opens. */
+  focusOutput(): void {
+    ipcRenderer.send(CH.focusOutput);
+  },
   // I-2 / I-7: editor -> main -> output. Whole clock state, JSON only.
   setClock(c: ClockSet): void {
     ipcRenderer.send(CH.clockSet, assertJsonOnly(c));

@@ -221,6 +221,8 @@ const runEvents: RunEvent[] = [];
  * visible badge is gated, so nothing about attribution changes.
  */
 let focusIsLost = false;
+/** Whether the output window had focus the instant §4's window opened. */
+let focusHeldAtWindowOpen = false;
 let syncFocusBadge: () => void = () => {};
 const focusBadge = document.createElement('div');
 focusBadge.style.cssText = [
@@ -639,6 +641,13 @@ function startMeasurementRun(
   // by design, and a gate window must not carry the hitch its own instrument
   // caused. The RUN stays continuous, which is what A1 asks for.
   // ---------------------------------------------------------------------------
+  // Focus is asked for HERE, at the start of the settle, not at window open.
+  // Asking at window open and reading the answer in the same tick reads the
+  // state before the request has taken effect; asking 20+ seconds early means
+  // the answer at window open is settled fact. It is asked for again at window
+  // open, so a lapse in between is corrected rather than merely noticed.
+  window.engine.focusOutput();
+
   host?.metrics.reset();
   window.setTimeout(() => {
     if (host) {
@@ -662,6 +671,29 @@ function startMeasurementRun(
 
   function scheduleWindow(): void {
   startSoakTimers?.();
+
+  // -------------------------------------------------------------------------
+  // ASSERT focus for the measured window rather than observing it.
+  //
+  // Carried out of Gate 2. `disturbed` was computed only from `focus LOST`
+  // events, so a run that STARTED without focus and gained it partway through
+  // recorded `focus gained` (not disturbing) and reported `disturbed=false` —
+  // a run measured half in the background, presented as clean. Two runs were
+  // lost to that before it was understood.
+  //
+  // Focus is taken here and its state at window-open is recorded. The verdict
+  // below is "was focus held for the whole window", which is the question, and
+  // it is false for the gained case as well as the lost one.
+  // -------------------------------------------------------------------------
+  // Main raises the window; a renderer's own `window.focus()` does not.
+  window.engine.focusOutput();
+  // `document.hasFocus()` rather than the `focusIsLost` flag: the flag is
+  // maintained by events, and at this instant the request above may not have
+  // produced one yet. This is the live answer.
+  focusHeldAtWindowOpen = document.hasFocus();
+  if (!focusHeldAtWindowOpen) {
+    console.warn('[run] WINDOW opened WITHOUT focus — this run cannot be a gate run');
+  }
 
   for (const cue of cues) {
     // Countdown on the wall so the operator acts on a signal, not a stopwatch.
@@ -700,9 +732,20 @@ function startMeasurementRun(
         `ratio=${k.ratio.toFixed(4)} subject=${k.subject} repeats=${k.repeats}`,
     );
     const disturbing = runEvents.filter((e) => e.disturbing && e.t >= 0);
+    // Held for the WHOLE window: focus at open, and no focus change of any
+    // direction inside it. A `focus gained` event during the window means the
+    // window did not have focus before it, which is the case that slipped
+    // through when only `focus LOST` counted.
+    const focusChangedInWindow = runEvents.some(
+      (e) => e.t >= 0 && (e.what === 'focus LOST' || e.what === 'focus gained'),
+    );
+    const focusHeld = focusHeldAtWindowOpen && !focusChangedInWindow;
     const summary = {
       label,
-      disturbed: disturbing.length > 0,
+      disturbed: disturbing.length > 0 || !focusHeld,
+      /** Reported separately so a disturbance can be told from a focus lapse. */
+      focusHeld,
+      focusAtWindowOpen: focusHeldAtWindowOpen,
       nominalMs: r.nominalMs,
       valid: r.valid,
       samples: r.samples,

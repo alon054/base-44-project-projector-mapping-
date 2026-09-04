@@ -493,6 +493,17 @@ function wireIpc(): void {
   // I-2. Held and replayed like the scene: an output window that reopens
   // mid-show (a display re-select, I-13) must come back at the show's time and
   // in the show's run state, not at t=0 playing.
+  // §4: the measured window must run with the output window focused, and
+  // asserting that is main's job — a renderer cannot raise its own window.
+  ipcMain.on(CH.focusOutput, () => {
+    if (!outputWin || outputWin.isDestroyed()) return;
+    // `app.focus` brings the APPLICATION forward on macOS; `win.focus` then
+    // picks the right window within it. Both, because either alone leaves the
+    // other window holding focus in the case this exists to fix.
+    app.focus({ steal: true });
+    outputWin.focus();
+  });
+
   ipcMain.on(CH.clockSet, (_e: IpcMainEvent, payload: ClockSet) => {
     lastClock = assertJsonOnly(payload);
     send(outputWin, CH.clockSet, lastClock);

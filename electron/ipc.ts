@@ -88,6 +88,17 @@ export const CH = {
   /** output -> main: an unattended measurement run has finished; quit. */
   measureDone: 'measure:done',
   /**
+   * output -> main: §4's measurement window is opening; give me focus.
+   *
+   * The renderer cannot do this itself. `window.focus()` from inside a
+   * renderer does not raise an Electron BrowserWindow, and main's existing
+   * focus call happens at `did-finish-load` — which, since the measurement run
+   * gained a settling period and a cold probe, is now half a minute before the
+   * window that actually needs focus. A gate run recorded `focus gained` at
+   * t=53s INSIDE its own window because the editor had held it until then.
+   */
+  focusOutput: 'measure:focus',
+  /**
    * output -> main (invoke): perform one unattended provocation. Attribution
    * runs only — a gate run never sends this. The renderer owns the schedule
    * because it owns the post-warmup clock every other timestamp is on.
