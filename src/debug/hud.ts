@@ -382,7 +382,7 @@ export class FrameMetrics {
       }
     }
 
-    const { p95, p99 } = this.renderPercentiles();
+    const { p95, p99, mean } = this.renderStats();
     const share = (v: number): number => (validity.valid ? v / this.nominalMs : 0);
 
     return {
@@ -400,6 +400,8 @@ export class FrameMetrics {
       renderP99OfNominal: share(p99),
       renderP95Ms: p95,
       renderP95OfNominal: share(p95),
+      renderMeanMs: mean,
+      renderMeanOfNominal: share(mean),
       fps: elapsed > 0 ? (n / elapsed) * 1000 : 0,
       samples: n,
       warmedUp: this.warmedUp,
@@ -420,15 +422,24 @@ export class FrameMetrics {
    * One in-place sort over a preallocated scratch, two percentiles.
    * Runs 4x/s, not per frame, and allocates only the subarray view.
    */
-  private renderPercentiles(): { p95: number; p99: number } {
+  private renderStats(): { p95: number; p99: number; mean: number } {
     const n = this.count;
-    if (n === 0) return { p95: 0, p99: 0 };
+    if (n === 0) return { p95: 0, p99: 0, mean: 0 };
+    let sum = 0;
     for (let i = 0; i < n; i++) {
-      this.scratch[i] = this.renders[(this.head + i) % this.capacity]!;
+      const v = this.renders[(this.head + i) % this.capacity]!;
+      this.scratch[i] = v;
+      sum += v;
     }
     const view = this.scratch.subarray(0, n);
     view.sort();
-    return { p95: nearestRankTyped(view, 0.95), p99: nearestRankTyped(view, 0.99) };
+    // The mean is summed on the copy pass that already exists, so this adds no
+    // traversal — it stays a 4x/s cost, never a per-frame one (A14).
+    return {
+      p95: nearestRankTyped(view, 0.95),
+      p99: nearestRankTyped(view, 0.99),
+      mean: sum / n,
+    };
   }
 }
 
@@ -507,6 +518,7 @@ export function formatReport(r: MetricsReport, uncapped: boolean): string {
     `M1 presentation ${m1}  late ${pct(r.lateFraction)} (<=5%)  worst run ${r.worstLateRun} (<=2)`,
     `M2 headroom     ${m2}  render p99 ${r.renderP99Ms.toFixed(2)} ms = ${pct(r.renderP99OfNominal)} of N (<=60%)`,
     `                       p95 ${r.renderP95Ms.toFixed(2)} ms = ${pct(r.renderP95OfNominal)} of N (informational)`,
+    `                      mean ${r.renderMeanMs.toFixed(4)} ms = ${pct(r.renderMeanOfNominal)} of N (informational; resolves below the 0.1 ms timer quantum)`,
     `samples ${r.samples}  worst interval ${r.worstIntervalMs.toFixed(1)} ms  ${r.warmedUp ? 'warm' : 'WARMUP'}`,
   ];
 

@@ -523,3 +523,39 @@ describe('FrameMetrics — attribution support for unattended provocations', () 
     expect(r.clause3).toBe(0);
   });
 });
+
+/**
+ * The informational render mean.
+ *
+ * A10 stands: gate metric 2 reads p99, and nothing here changes that. This
+ * exists because `performance.now()` is coarsened to 100 us in Electron, so
+ * every render duration is a multiple of 0.1 ms and both percentiles sat
+ * pinned at exactly two quanta across three Phase 2 runs — warp off and warp
+ * on alike, all reporting the identical 0.200 ms. A percentile of quantized
+ * samples cannot resolve a change smaller than one quantum, which left Gate
+ * 2's "frame-time cost of the warp stage" unanswerable with the statistics
+ * that existed.
+ */
+describe('render mean — informational, resolves below the timer quantum', () => {
+  it('separates two loads that p99 and p95 report as identical', () => {
+    const quantum = 0.1;
+    // Two windows of quantized samples. p99 and p95 are both 0.2 in each; the
+    // second has twice as many one-quantum frames, which only a mean can see.
+    const build = (heavyEveryN: number): FrameMetrics => {
+      const m = new FrameMetrics(16.6667);
+      for (let i = 0; i < 1000; i++) {
+        m.noteRenderDuration(i % heavyEveryN === 0 ? quantum * 2 : 0);
+        m.notePresentation(i * 16.6667);
+      }
+      return m;
+    };
+    const light = build(50).report();
+    const heavy = build(25).report();
+    expect(heavy.renderP99Ms).toBe(light.renderP99Ms);
+    expect(heavy.renderMeanMs).toBeGreaterThan(light.renderMeanMs * 1.5);
+  });
+
+  it('is zero on an empty window rather than NaN (A9)', () => {
+    expect(new FrameMetrics(16.6667).report().renderMeanMs).toBe(0);
+  });
+});

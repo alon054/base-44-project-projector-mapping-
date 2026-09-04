@@ -562,6 +562,12 @@ function startMeasurementRun(
       renderP99Ms: r.renderP99Ms,
       renderP99OfNominal: r.renderP99OfNominal,
       renderP95Ms: r.renderP95Ms,
+      // Informational, never a gate (A10 stands: M2 reads p99). Both
+      // percentiles sit pinned at exactly two 0.1 ms timer quanta on a light
+      // scene, so they cannot resolve a sub-quantum change — which is what
+      // Gate 2's "frame-time cost of the warp stage" asks for.
+      renderMeanMs: r.renderMeanMs,
+      renderMeanOfNominal: r.renderMeanOfNominal,
       instrument: r.instrument,
       scale: r.scale,
       k,

@@ -382,6 +382,23 @@ export interface MetricsReport {
   /** A10: p95 is retained but informational — it is blind to M1's permitted tail. */
   renderP95Ms: number;
   renderP95OfNominal: number;
+  /**
+   * INFORMATIONAL, never a gate. A10 stands: gate metric 2 reads p99.
+   *
+   * `performance.now()` is coarsened to 100 us in Electron, so every render
+   * duration is a multiple of 0.1 ms and both percentiles sit pinned at exactly
+   * two quanta on any light scene — measured across three separate Phase 2
+   * runs, warp off and warp on, all reporting the identical 0.200 ms. A
+   * percentile of quantized samples cannot resolve a change smaller than one
+   * quantum, which made "what does the warp stage cost?" unanswerable with the
+   * statistics that existed.
+   *
+   * A mean over a full 3601-sample window averages the quantization out and
+   * resolves to roughly a thousandth of a quantum. It is added for that
+   * question and reported beside p99, never instead of it.
+   */
+  renderMeanMs: number;
+  renderMeanOfNominal: number;
   /** Observed presentation rate, fps. */
   fps: number;
   /** Samples in the current window, after warmup. */

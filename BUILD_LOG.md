@@ -1842,3 +1842,139 @@ gate" is still a `SPEC-CHANGE-PROPOSED` and still due before Phase 3.
   preview *behind* that wireframe, at low opacity, would make the shape easier
   to reason about without warping the placement space. Phase 5's call, not
   this one's.
+
+## 2026-09-04 — Phase 2 (session 1, part 2)
+
+- DID: the Gate 2 measurements on a free machine. Four clean §4 runs, a
+  6-minute soak, and one instrument addition that the measurement forced.
+- MEASURED: full set below. All eight rolling checks are now green.
+- BLOCKER: Gate 2 is **not crossed**. Three conditions are the operator's and
+  cannot be closed from here.
+- NEXT: the wall. See the list at the end.
+
+`MEASURED` — **the warp stage costs +10.65 µs = 0.064% of N, and M2 cannot see
+it at all.**
+
+Four runs at DEV_RESOLUTION 1280×720, all `disturbed=false`, all `1:1 to
+panel`, one `[run] START` each, no events, no renderer errors.
+
+| run | samples | fps | M1 late | worst interval | M2 p99 | render mean |
+|---|---|---|---|---|---|---|
+| `p2-warp-off` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | **62.23 µs** |
+| `p2-warp-off-2` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | **68.20 µs** |
+| `p2-warp-on` | 3601 | 60.000 | 0.0000% | 17.70 ms | 0.200 ms = 1.20% of N | **74.48 µs** |
+| `p2-warp-on-2` | 3600 | 59.999 | 0.0000% | 18.80 ms | 0.200 ms = 1.20% of N | **77.25 µs** |
+
+- paired deltas: **12.25 µs** and **9.05 µs**
+- delta of run means: **10.65 µs = 0.064% of N**
+- within-condition spread: 5.97 µs (off), 2.77 µs (on)
+- **the two groups do not overlap**: max off 68.20 < min on 74.48, a gap of
+  6.28 µs
+
+Stated at the precision the data supports: the warp stage costs **about 10 µs**,
+the effect is larger than the run-to-run noise and cleanly separated, and with
+n=2 per condition it is not resolved to two significant figures.
+
+`MEASURED` — **M2 is pinned at its own resolution floor, and that is a finding
+about the instrument, not about the warp.**
+
+`renderP99Ms` is **0.200 ms in all four runs** — identical to Phase 1's, and
+identical between warp off and warp on. So is p95. Every render statistic in
+every run is an exact multiple of 0.1 ms, because `performance.now()` is
+coarsened to 100 µs in Electron. A percentile of quantized samples cannot
+resolve a change smaller than one quantum, and the warp costs about **an eighth
+of one quantum**.
+
+That left Gate 2's "frame-time cost of the warp stage measured and recorded"
+literally unanswerable with the statistics that existed — the honest reading of
+the first pair was "identical, therefore below instrument resolution", which is
+an upper bound, not a measurement.
+
+So a **render mean over the full window** was added. Averaging 3601 quantized
+samples resolves to roughly a thousandth of a quantum, and it is summed on the
+copy pass `renderPercentiles` already made, so it stays a 4 Hz cost and never a
+per-frame one (A14).
+
+**A10 is untouched and M2 still gates on p99.** The mean is informational and
+sits beside p95, which is already informational for the same kind of reason.
+Its unit test is the point rather than a formality: two windows whose p99 and
+p95 are *identical* (0.200 ms both) but whose means differ 2.1× (0.00351 vs
+0.00752 ms). A statistic that could not do that would not have earned a place.
+
+This matters past Phase 2. M2 reading 1.20% of N against a 60% limit has been
+recorded at Gate 0, Gate 1 and now Gate 2, and it is **not a measurement of
+headroom — it is a floor reading**. The real render cost at Phase 2's load is
+62–77 µs, which is 0.37–0.46% of N. Phase 3 brings video, sprite sheets and
+Lottie, and M2 will start reporting real numbers then; until it does, the
+apparent constancy of 1.20% across three gates says nothing.
+
+`MEASURED` — **§8.2's soak, with a subject at last.** `p2-soak`, 6 minutes,
+**warp ON**, `disturbed=false`, 1:1 to panel, **184 scene rebuilds**.
+
+| t (s) | textures | texture bytes | buffers | geometries |
+|---|---|---|---|---|
+| 0.1 | 3 | 3,686,408 | 47 | 23 |
+| 50.0 | 3 | 3,686,408 | 191 | 95 |
+| 110.0 | 3 | 3,686,408 | 281 | 140 |
+| 359.8 | 3 | 3,686,408 | 281 | 140 |
+
+**§8.2's condition as written passes outright: texture count 3 → 3 and texture
+bytes +0.00% across the whole window.**
+
+The number that matters is 3,686,408. **1280 × 720 × 4 = 3,686,400**, so the
+composite render texture is the overwhelming majority of it — this check finally
+has the subject Gate 1's annotation admitted it lacked, and what it is watching
+is the warp's own allocation. It does not churn across a single one of 184 full
+layer-stack rebuilds, which is the design working: the texture is allocated on
+first enable and kept, never freed and reallocated on a toggle.
+
+Buffers and geometries warm up 47→281 and 23→140 by t=110 s, then are **exactly
+flat for 249.8 s across 128 further rebuilds** — the same shape Phase 1 found,
+settling 9 buffers and 4 geometries higher, which is the warp mesh. `judgeSoak`
+still returns `flat=false` for the full window because of that ramp, and the
+steady-state figures are reported **beside** it, never instead of it.
+
+The `pixelWidth` crash is gone: no `output:error` line in this run, where both
+p1-soak and the discarded p2 run had one.
+
+`MEASURED` — **A8 and A15 gained data points; neither ruling is discharged.**
+
+- **k probe**: 0.9655, 0.9815 (this pair), against 1.2773 in the discarded run
+  and Phase 1's 1.3269 / 1.4158. Six samples now span **0.97–1.42** on real
+  scenes, against Gate 0's 0.379–5.000 on a trivial one. The probe source is
+  still unchanged, so this remains evidence for the Phase 3 ruling and not a
+  fix. Worth noting the two warp-ON probes are not comparable to the warp-OFF
+  ones: with the warp active the probe re-renders the *mesh*, not the
+  compositor, so it is timing a different subject.
+- **A15**: instrument per-frame max **0.100 ms = 0.600% of N** in all four
+  runs, identical to Phase 1, comfortably under the 2% trigger. A15 stays
+  ratified as written and due at Gate 3.
+
+`DECISION` — **Gate 2 is NOT crossed.** Nothing was weakened. Two boxes are
+`[x]` on evidence, three are open and all three need a person at a wall:
+
+- **the keystone has never been judged by eye.** The engine has run ON with a
+  real keystone five times; nobody has looked at the surface and said it is
+  square. That is Gate 2's first condition and no test substitutes for it.
+- **the toggle has never been clicked.** The warp was enabled from the
+  calibration file each time, not from the checkbox.
+- **the calibration round trip has never been done as one gesture.** Each half
+  is proven separately — the editor's drags wrote `calibration/warp.json`, and
+  five launches read a keystone back off disk and applied it before the first
+  frame — but the file that was read back was hand-written for the measurement
+  runs. Drag, relaunch, confirm the corners came back is a 30-second check.
+- **Scene A / Scene B has never been clicked** with a calibration in place.
+
+`calibration/warp.json` is deliberately left holding the enabled keystone, so
+the next launch comes up warped and the wall check needs no setup.
+
+`BLOCKER` — **the A1 ↔ §4 reconciliation is still a `SPEC-CHANGE-PROPOSED` and
+is now overdue-adjacent**: it is due before Phase 3, and Phase 3 is next.
+
+`IDEAS` — parked, not built:
+- M2's floor reading. Now that a render mean exists, the honest presentation of
+  §4 might be "p99 for the gate, mean for the trend". Phase 9's grade and
+  performance pass is where that belongs, not here.
+- The soak drives rebuilds every 2 s, which makes its render mean (80.45 µs)
+  incomparable to the clean pair. If the soak is ever wanted as a frame-time
+  source too, it needs a quiet variant.
