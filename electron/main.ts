@@ -54,6 +54,8 @@ const MEASURE_SOAK_MINUTES = Math.max(0, Number(process.env['PROJENGINE_SOAK'] ?
  * Phase 3 there was no way for an unattended run to reach one.
  */
 const MEASURE_SCENE = process.env['PROJENGINE_SCENE'] ?? '';
+/** `PROJENGINE_TRANSPORT=1` exercises pause/scrub/rate during the settle. */
+const MEASURE_TRANSPORT = process.env['PROJENGINE_TRANSPORT'] === '1';
 const MEASURE_CUES = (process.env['PROJENGINE_CUES'] ?? '')
   .split(',')
   .map((x) => Number(x.trim()))
@@ -200,6 +202,7 @@ function outputConfigFor(display: Electron.Display, role: 'output' | 'preview'):
     measureLabel: MEASURE_LABEL,
     soakMinutes: MEASURE_SOAK_MINUTES,
     sceneId: MEASURE_SCENE,
+    transportExercise: MEASURE_TRANSPORT && role === 'output',
     measureCues: role === 'output' ? MEASURE_CUES : [],
     provocations: role === 'output' ? MEASURE_PROVOKE : [],
     conditions: role === 'output' ? currentConditions : null,

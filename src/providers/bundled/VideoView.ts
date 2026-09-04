@@ -33,7 +33,13 @@ import type { LayerFrame, LayerView } from '../ContentProvider';
 import { createPlaceholderGraphic } from '../../render/placeholder';
 import { phaseAt } from '../../core/clock';
 import { createVideoSyncState, noteScrub, stepVideoSync } from './videoSync';
-import { resolveVideoStage, type VideoStage, type VideoStageInput } from './videoStage';
+import {
+  decoderAction,
+  decoderShouldRun,
+  resolveVideoStage,
+  type VideoStage,
+  type VideoStageInput,
+} from './videoStage';
 
 // The chain itself lives in `videoStage.ts`, pure, and is tested as a table —
 // see that file for why the ORDER the two loads settle in must not matter.
@@ -212,14 +218,30 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
       // The clock decides whether the decoder runs at all. This is what makes
       // Gate 3's "video pauses too, at frame granularity" true: `pause()` holds
       // the frame the decoder is on, it does not blank or drift.
-      if (frame.playing) {
-        if (el.paused) void el.play().catch(() => {});
-        // Rate 0 is a held frame, and asking a decoder for playbackRate 0 is
-        // an error in some engines. Pause it instead — same result on the wall.
-        if (frame.rate <= 0) el.pause();
-        else if (el.playbackRate !== frame.rate) el.playbackRate = clampRate(frame.rate);
-      } else if (!el.paused) {
+      // ONE decision, applied once. This used to be two independent `if`s and
+      // they fought: at rate 0 the first resumed a paused element and the
+      // second paused a running one, sixty times a second. See
+      // `decoderAction` for how that was found.
+      //
+      // Logged on the TRANSITION, never per frame. `[scene]`, `[warp]` and
+      // `[clock]` between them found most of this project's defects, and "did
+      // the decoder actually obey the clock" is exactly the kind of question
+      // that is unanswerable from a still photograph of a wall.
+      const decode = decoderAction(frame.playing, frame.rate, el.paused);
+      if (decode === 'run') {
+        opts.onStage?.(stage, 'decoder resumed');
+        void el.play().catch(() => {});
+      } else if (decode === 'hold') {
+        // Gate 3: "video pauses too, at frame granularity". The time is
+        // reported because that is the claim — the decoder holds the frame it
+        // is on; it does not drift, blank, or keep running.
+        const why = frame.playing ? 'rate 0' : 'clock paused';
+        opts.onStage?.(stage, `decoder HELD at ${el.currentTime.toFixed(3)}s (${why})`);
         el.pause();
+      }
+      if (decoderShouldRun(frame.playing, frame.rate)) {
+        const wanted = clampRate(frame.rate);
+        if (el.playbackRate !== wanted) el.playbackRate = wanted;
       }
 
       // D5: realign only at a loop boundary. A scrub arms the resync and the

@@ -69,3 +69,43 @@ export function isSettled(stage: VideoStage, s: VideoStageInput): boolean {
   if (stage === 'poster') return !s.decoding || s.decodeFailed;
   return false;
 }
+
+/**
+ * Whether the decoder should be running, given the clock.
+ *
+ * Pure, and separate from the view, because the first version of this decision
+ * was two independent `if`s inside the per-frame update and they FOUGHT each
+ * other. At rate 0 the first branch saw a paused element and resumed it, the
+ * second saw a running element at rate 0 and paused it, and the decoder was
+ * started and stopped sixty times a second — the run log filled with
+ * alternating `decoder resumed` / `decoder held` lines, hundreds of them.
+ *
+ * It was found the first time the clock was ever paused in a real process, by
+ * the unattended transport exercise, on its first run. Nothing in the unit
+ * suite could have caught it: each branch was individually correct, and the
+ * bug lived only in their interaction across a frame boundary. Gate 3 asks
+ * that "video pauses too, at frame granularity", and a decoder thrashing at 60
+ * Hz might well have looked like a frozen frame to a person watching a wall.
+ *
+ * One function, one answer, applied once.
+ */
+export function decoderShouldRun(playing: boolean, rate: number): boolean {
+  // Rate 0 is a held frame that has NOT left the playing state (see
+  // `core/clock.ts`), and a media element cannot be asked for playbackRate 0 —
+  // some engines throw. Pausing is the same result on the wall.
+  return playing && Number.isFinite(rate) && rate > 0;
+}
+
+/** What to do to the element this frame. `unchanged` is the common case. */
+export type DecoderAction = 'run' | 'hold' | 'unchanged';
+
+export function decoderAction(
+  playing: boolean,
+  rate: number,
+  currentlyPaused: boolean,
+): DecoderAction {
+  const shouldRun = decoderShouldRun(playing, rate);
+  if (shouldRun && currentlyPaused) return 'run';
+  if (!shouldRun && !currentlyPaused) return 'hold';
+  return 'unchanged';
+}

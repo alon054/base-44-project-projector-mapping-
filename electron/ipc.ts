@@ -234,6 +234,17 @@ export interface OutputConfig {
    * there would be a code path that only ever runs when a gate is being judged.
    */
   sceneId: string;
+  /**
+   * Run the unattended transport exercise during the settle period
+   * (`PROJENGINE_TRANSPORT=1`). Pause, scrub, resume, rate 0, rate 1, scrub.
+   *
+   * Added in Phase 3 because the clock had never been paused in any run the
+   * project had taken — so `VideoView`'s pause branch had never executed
+   * outside a unit test. It runs well before §4's window and perturbs no gate
+   * number; what it produces is `[clock]` and `[video]` lines that say whether
+   * the decoder actually obeyed.
+   */
+  transportExercise: boolean;
   /** Captured once at run start, reported in the summary. */
   conditions: RunConditions | null;
 }

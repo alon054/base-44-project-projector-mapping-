@@ -45,6 +45,7 @@ let config: OutputConfig = {
   provocations: [],
   soakMinutes: 0,
   sceneId: '',
+  transportExercise: false,
   conditions: null,
 };
 
@@ -641,6 +642,50 @@ function startMeasurementRun(
   // by design, and a gate window must not carry the hitch its own instrument
   // caused. The RUN stays continuous, which is what A1 asks for.
   // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // THE TRANSPORT EXERCISE. `PROJENGINE_TRANSPORT=1`.
+  //
+  // Runs inside the settle period, before the cold probe and long before §4's
+  // window, so it perturbs no gate number. It exists because re-reading a stale
+  // checklist note turned up something worse than the note: **the clock had
+  // never been paused in any run this project has ever taken.** Every log in
+  // `measurements/` held exactly one `[clock]` line — `PLAYING`, at startup.
+  //
+  // So `VideoView`'s `el.pause()` branch had never executed in a live process.
+  // The unit suite covers the clock thoroughly and the goldens render with
+  // `playing: false`, but the goldens also run with `decodeVideo: false`, so
+  // between them nothing had ever checked that a decoder obeys the clock. That
+  // is Phase 1's "a scene that could not demonstrate the invariant" and Phase
+  // 2's "a control that could not be operated", arriving a third time.
+  //
+  // This does NOT replace the wall observation — a person still has to see the
+  // freeze. What it does is make the code path run, and leave `[clock]` and
+  // `[video]` lines saying what happened, so a failure is findable from a log
+  // rather than only from someone's memory of a projection.
+  // -------------------------------------------------------------------------
+  if (config.transportExercise && host) {
+    const h = host;
+    const step = (atMs: number, what: string, act: () => void): void => {
+      window.setTimeout(() => {
+        console.log(`[transport] ${what}`);
+        act();
+      }, atMs);
+    };
+    step(1500, 'PAUSE — every clock-driven layer must freeze, decoder included', () =>
+      h.clock.pause(),
+    );
+    step(4000, 'SCRUB to 7.300s while paused — loops must land where the arithmetic says', () =>
+      h.clock.scrubToSeconds(7.3),
+    );
+    step(6000, 'RESUME', () => h.clock.play());
+    step(8000, 'RATE 0 — a held frame without leaving the playing state', () => h.clock.setRate(0));
+    step(10_000, 'RATE 1 — back to normal', () => h.clock.setRate(1));
+    step(12_000, 'SCRUB to 0 while playing — video must re-sync at its NEXT boundary', () =>
+      h.clock.scrubToSeconds(0),
+    );
+    step(15_000, 'transport exercise complete; settling before the cold probe', () => {});
+  }
+
   // Focus is asked for HERE, at the start of the settle, not at window open.
   // Asking at window open and reading the answer in the same tick reads the
   // state before the request has taken effect; asking 20+ seconds early means

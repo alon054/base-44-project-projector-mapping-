@@ -124,3 +124,81 @@ describe('every combination resolves to a legal stage', () => {
     }
   });
 });
+
+/**
+ * The decoder-versus-clock decision, and the bug that made it one function.
+ *
+ * The first version was two independent `if`s in the per-frame update. At
+ * rate 0 the first saw a paused element and resumed it; the second saw a
+ * running element at rate 0 and paused it. Sixty times a second. The run log
+ * filled with alternating `decoder resumed` / `decoder held` lines.
+ *
+ * It was found the first time the clock was ever paused in a real process —
+ * by the unattended transport exercise, on its first run. **Nothing in the
+ * unit suite could have caught the original**: each branch was correct on its
+ * own, and the defect lived only in their interaction across a frame boundary.
+ * That is why the decision is now one function with one answer, and why the
+ * test below is about IDEMPOTENCE rather than about either branch.
+ */
+describe('the decoder obeys the clock, and stops obeying it repeatedly', () => {
+  it('runs when the clock is playing at a real rate', async () => {
+    const { decoderAction, decoderShouldRun } = await import('../providers/bundled/videoStage');
+    expect(decoderShouldRun(true, 1)).toBe(true);
+    expect(decoderAction(true, 1, true)).toBe('run');
+    // Already running: nothing to do. This is the common case, 60 times a
+    // second, and it must not touch the element.
+    expect(decoderAction(true, 1, false)).toBe('unchanged');
+  });
+
+  it('holds when the clock is paused', async () => {
+    const { decoderAction, decoderShouldRun } = await import('../providers/bundled/videoStage');
+    expect(decoderShouldRun(false, 1)).toBe(false);
+    expect(decoderAction(false, 1, false)).toBe('hold');
+    expect(decoderAction(false, 1, true)).toBe('unchanged');
+  });
+
+  it('holds at rate 0 WITHOUT leaving the playing state', async () => {
+    const { decoderAction, decoderShouldRun } = await import('../providers/bundled/videoStage');
+    // `core/clock.ts` treats rate 0 as a held frame that is still "playing",
+    // and a media element cannot be asked for playbackRate 0 — some engines
+    // throw. Pausing is the same result on the wall.
+    expect(decoderShouldRun(true, 0)).toBe(false);
+    expect(decoderAction(true, 0, false)).toBe('hold');
+  });
+
+  it('IS IDEMPOTENT — this is the actual regression test', async () => {
+    const { decoderAction } = await import('../providers/bundled/videoStage');
+    // Simulate the per-frame loop for every clock state and let the element's
+    // paused flag follow the action. After the first frame nothing may change
+    // again. The original code oscillated forever at rate 0.
+    for (const [playing, rate] of [
+      [true, 1],
+      [true, 0],
+      [false, 1],
+      [false, 0],
+      [true, 2.5],
+    ] as [boolean, number][]) {
+      for (const startPaused of [true, false]) {
+        let paused = startPaused;
+        const actions: string[] = [];
+        for (let frame = 0; frame < 120; frame++) {
+          const a = decoderAction(playing, rate, paused);
+          actions.push(a);
+          if (a === 'run') paused = false;
+          if (a === 'hold') paused = true;
+        }
+        // At most ONE state change across 120 frames, and it must be the first.
+        const changes = actions.filter((a) => a !== 'unchanged');
+        expect(changes.length, `thrashed at playing=${playing} rate=${rate}`).toBeLessThanOrEqual(1);
+        expect(actions.slice(1).every((a) => a === 'unchanged')).toBe(true);
+      }
+    }
+  });
+
+  it('treats a nonsense rate as "do not run" rather than crashing', async () => {
+    const { decoderShouldRun } = await import('../providers/bundled/videoStage');
+    expect(decoderShouldRun(true, Number.NaN)).toBe(false);
+    expect(decoderShouldRun(true, -1)).toBe(false);
+    expect(decoderShouldRun(true, Number.POSITIVE_INFINITY)).toBe(false);
+  });
+});
