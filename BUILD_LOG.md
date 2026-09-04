@@ -1662,3 +1662,183 @@ before Phase 3 and is still a `SPEC-CHANGE-PROPOSED`, not a checklist fix.
   after two clicks.
 - `readGpuResources` reaches into two Pixi internals. It reports INVALID rather
   than zero if they move, but a version bump should expect to touch it.
+
+## 2026-09-04 — Phase 2 (session 1)
+
+- DID: Phase 2's whole buildable surface in six commits — calibration model,
+  warp stage, persistence, editor panel, and two defects a run log exposed.
+  Rolling checks reset for the phase.
+- MEASURED: the tessellation table, the identity-resample result, and one
+  discarded §4 run. All below.
+- BLOCKER: Gate 2 needs two §4 runs and a wall check, and the first run
+  attempt was discarded. Three deliverable boxes are `[~]`, not `[x]`.
+- NEXT: (1) the two §4 runs on a quiet machine, warp off and warp on.
+  (2) the wall check — the only thing that closes Gate 2's first condition.
+  (3) the blur discriminator, which is now time-critical: see below.
+
+`DECISION` — **warp corners are NOT in the I-8 parameter registry.** The
+operator's ruling, and the reasoning is worth keeping. I-8's subject is forces,
+per-entity parameters and grade settings — the things an operator modulates
+during a show. Calibration is a description of a physical surface, and I-5
+isolates it from scene logic in both directions. Registering the corners would
+make them MIDI-mappable in Phase 11, where one knock of a knob destroys a
+calibration that took someone on a ladder to make, with no undo on a wall.
+
+The absence is now **a grep, not an intention**: a test scans `src/` outside
+the tests for any `warp.*` key literal. Verified in both directions — planting
+`'warp.enabled'` in `render/outputs.ts` fails the test by name and path.
+Reversing the decision is fine, but it costs editing that test and saying why
+here, which is the right amount of friction.
+
+`DECISION` — **the warp stage runs in the output window only; the editor
+preview stays unwarped.** D11 says placement happens in scene (pre-warp) space
+and that Phase 5 must present the preview *as* the placement space — "a
+scene-space grid overlay, not a photo of the wall". A warped preview would put
+the operator's objects on a distorted canvas and teach exactly the mental model
+D11 exists to prevent. The warp editor is therefore a wireframe of the
+*correction*, not a picture of the result; the result is judged where Gate 2
+says to judge it, on the surface.
+
+`DECISION` — **off means absent, not identity.** With the warp disabled the
+composite is a direct stage child and no render texture is in the path at all.
+Gate 2's "disabling warp changes nothing in the scene" is therefore structural
+rather than a claim about floating point.
+
+The evidence is stronger than the claim needed: **all 15 Phase 1 goldens are
+byte-identical across the whole phase** — 60 insertions and 0 deletions in
+`frames.json`. This contradicts the going-in expectation that rendering through
+a RenderTexture would change every golden hash, and the bypass is why. There
+was no re-bless of existing frames to judge; the four new cases were blessed
+after looking at the previews.
+
+`MEASURED` — **a 2×2 quad cannot do this job, and no hash would ever say so.**
+
+Two triangles interpolate linearly, so a bare quad is off by **91.58 px** from
+the exact projective map on the very keystone Gate 2 uses.
+
+| verticesX | Gate 2's keystone | harsher off-axis quad |
+|---|---|---|
+| 2 | **91.58 px** | **166.08 px** |
+| 10 (PixiJS default) | 1.63 px | 4.48 px |
+| 20 | 0.37 px | 1.07 px |
+| **40 (chosen)** | **0.09 px** | **0.26 px** |
+
+PixiJS 8.20 ships `PerspectiveMesh`, which pushes vertex *positions* through
+the true homography on a subdivided plane, so every vertex is exact and the
+only residual is affine interpolation inside a cell. 40 rather than 20 because
+the cost is close to zero and paid in the wrong place to matter: the geometry
+is rebuilt in `setCorners`, which runs on a corner drag, not per frame.
+
+The table is recomputed by a unit test against an **independently solved**
+homography. Grading Pixi's output with Pixi's own maths would check nothing.
+The 2×2 row is asserted too — it is the negative control, and without one the
+choice of 40 would be taste.
+
+`MEASURED` — **the identity round trip does not resample.** The claim worth
+distrusting was not "warp off is unchanged" but its opposite number: warp **on**
+at identity corners is a full round trip through a render texture and a 40×40
+mesh, and a half-pixel misalignment there would put a blur on the wall.
+
+It is **pixel-identical**: `default`, `warp-disabled` and `warp-identity` all
+hash `ba2e7858`; `warp-keystone` differs (`fc055613`). All three relations are
+asserted in `scripts/golden.mjs`, not merely stored as goldens, so a careless
+re-bless cannot quietly record a warp stage that resamples every frame or one
+that does nothing at all.
+
+**This matters beyond the hash.** The blur on the wall is still attributed to
+the projector and that attribution is still unconfirmed. Had the warp stage
+resampled, the existing attribution would have absorbed the new blur silently
+and the discriminator would have become uninterpretable. It did not, so the
+attribution is undamaged — but the discriminator is now **time-critical**: a
+`testPattern` reading taken *after* a warp stage is in the path is a reading of
+two suspects at once.
+
+`MEASURED` — **two defects, neither found by a test, both sitting in a run log.**
+
+1. **The GPU census threw on a destroyed texture, and had since Phase 1.**
+   `managedTextures` can hold a null slot — PixiJS nulls the entry when a
+   texture source is destroyed rather than compacting the array — and the
+   census read `t.pixelWidth` straight off it. It appears as an uncaught
+   "Cannot read properties of null (reading 'pixelWidth')" **in the p1-soak log
+   as well as the p2 run**. It was on record at Gate 1, in plain sight, and
+   nothing was watching for it. Phase 1 had no textures so it only ever fired
+   at teardown; from Phase 2 there is a composite render texture, which puts it
+   on the path of the §8.2 soak check itself — the check whose whole job is to
+   watch textures appear and disappear.
+
+2. **A corner drag emitted ~300 `[warp]` lines and buried the rest of the log**
+   — including, in that same run, a projector hot-plug and a display-mode
+   change. Phase 1's lesson is that these lines are what make a bug findable
+   from a wall. A line nobody can find is not instrumentation. Corner moves now
+   coalesce at ~4 Hz with a **trailing** emit, so a drag cannot end on a stale
+   position; toggling and degrading are never coalesced.
+
+`MEASURED` — **the first §4 attempt is DISCARDED, and it is the dangerous kind.**
+Kept as `measurements/p2-warp-off-DISCARDED-interaction.log`.
+
+It reports `disturbed=false`, `valid=true`, 3600 samples, 59.98 fps, **M1 and
+M2 both passing** — M2 render p99 0.200 ms = 1.20% of N, identical to Phase 1's
+baseline. That is precisely the run that is easiest to talk yourself into
+keeping. The log says otherwise:
+
+- the **projector was removed and re-added mid-session** (`display-removed` at
+  09:02:07, `display-added` at 09:02:18). The output window reopened twice and
+  `[run] START` appears three times; one of those windows reported
+  `NOT 1:1 — a scaler is in the path` on the built-in Retina display.
+- `[trace] activate windows=2` lands **inside** the measured window, and the
+  single late interval of the whole run (**33.40 ms**, worstLateRun 1) sits
+  immediately after it. Phase 1 measured 0.0000% late, worst interval 17.70 ms.
+- the operator was **dragging warp corners during the window**, and the drag is
+  in the log.
+
+`disturbed=false` caught none of it, which is a finding rather than an excuse:
+**the flag watches for focus being LOST, and this run was disturbed by focus
+being GAINED.** Phase 1 already noted that the harness should hold focus rather
+than merely notice losing it. This is the same gap approached from the other
+side, and it is now two runs old.
+
+Two things the run did establish, neither of them a gate number:
+
+- **the calibration write path works end to end.** The operator's drags
+  produced `calibration/warp.json` through editor → main → disk. The read-back
+  on relaunch is implemented but has not been exercised.
+- **A8's k probe produced 1.2773** on this scene, against Phase 1's 1.3269 and
+  1.4158 and Gate 0's 0.379–5.000 on a trivial scene. Three samples now sit in
+  1.28–1.42. Still informational, still unchanged source, still a Phase 3
+  ruling — but the spread is narrowing on real fill work, exactly as
+  `GATE0-RUNS.md` §4.4 predicted.
+- **A15**: instrument per-frame max 0.100 ms = **0.60% of N**, the same figure
+  as Phase 1 and well under the 2% trigger. A second data point toward Gate 3.
+
+`DECISION` — **Gate 2 is NOT crossed, and three deliverable boxes are `[~]`.**
+Nothing was weakened to make anything pass:
+
+- the **warp toggle has never been switched on in a live session.** Every
+  `[warp]` line on record reads `OFF`.
+- the **corners have been dragged but nothing has been squared**, because they
+  were dragged with the warp off.
+- **calibration has never been read back on a relaunch**, which is also Gate 2's
+  third condition.
+- the wall check is the operator's and no test substitutes for it.
+
+`BLOCKER` — **the two §4 runs need a machine nobody is using.** Both
+disturbances in the discarded run were external: a projector hot-plug and live
+editor interaction. Re-running while the machine is in use produces another
+discarded log, not a number.
+
+`BLOCKER` — **the three carried rulings are untouched, deliberately.** A8's k
+probe and A15's statistic are due at Phase 3 / Gate 3 and gained a data point
+each here, above. The **A1 ↔ §4 reconciliation** over "k recorded at every
+gate" is still a `SPEC-CHANGE-PROPOSED` and still due before Phase 3.
+
+`IDEAS` — parked, not built:
+- The `disturbed` flag should assert focus for the measured window rather than
+  observe it. Two runs have now been lost to focus events in opposite
+  directions, and the second one did not even set the flag.
+- `calibration/warp.json` is gitignored, which is right — it describes one
+  surface in one room. But there is now no committed example of the format, so
+  Phase 7's migration test will have to construct its own Phase 2 fixture.
+- The warp editor shows the correction as a wireframe. Overlaying the live
+  preview *behind* that wireframe, at low opacity, would make the shape easier
+  to reason about without warping the placement space. Phase 5's call, not
+  this one's.
