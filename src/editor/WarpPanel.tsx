@@ -8,10 +8,33 @@
  * the *shape of the correction*, in normalized space. The corrected image is
  * judged where Gate 2 says to judge it: on the surface.
  *
- * The handles are dragged with a pointer and nudged with the arrow keys,
- * because squaring an image by eye ends in single-pixel decisions and a mouse
- * cannot make those. Fine nudge is 0.001 of the output — about one pixel at
- * 1280x720, which is the unit the operator is actually working in by then.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THREE THINGS HERE ARE FIXES FOR A CONTROL THAT COULD NOT BE USED, and they
+ * are called out because the first wall session found all three at once.
+ *
+ * The session log shows TL never leaving (0.1200, 0.0000) and BR/BL never
+ * leaving their corners across two full drag attempts. Only TR ever moved by
+ * hand. The model underneath was fine — 28 unit tests, clamping and quad
+ * refusal all correct — and the control on top of it was close to unusable.
+ * That is Phase 1's lesson arriving again, one phase later.
+ *
+ *  1. **The handles were clipped.** Corners map to normalized [0,1], so at
+ *     identity a handle sits exactly ON the SVG boundary and an `<svg>` clips
+ *     to its viewport. Three quarters of every handle was outside the element,
+ *     leaving a ~6 px quadrant to hit — in the state every new calibration
+ *     starts in. `PAD` insets the unit square so a handle is fully drawn and
+ *     fully hittable at any legal corner position.
+ *  2. **The corner teleported to the pointer.** The drag read the pointer's
+ *     absolute position, so grabbing the visible sliver of a clipped handle
+ *     instantly displaced the corner by however far off-centre the grab was.
+ *     The log shows it: TR's y jumps 0.0000 → 0.0209 on the first move, which
+ *     is exactly the offset of a grab on the lower half of a clipped handle.
+ *     The grab offset is now held and applied.
+ *  3. **A 6 px circle was the whole hit target.** There is now an invisible
+ *     28 px one behind it, and a corner can be picked from a row of buttons
+ *     without being grabbed at all — which is what makes the arrow keys usable
+ *     for the single-pixel end of the job, rather than a nicety beside a drag.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -21,14 +44,30 @@ import {
   resetCorners,
   withCorner,
   withEnabled,
+  type CalibrationCorners,
   type CornerIndex,
   type ViewportCalibration,
 } from '../render/calibration';
 
-const W = 480;
-const H = 270;
+export const W = 480;
+export const H = 270;
+/**
+ * Inset of the unit square inside the SVG, in px. Must exceed the handle radius
+ * plus its stroke, or a corner at 0 or 1 is clipped by the viewport again.
+ */
+export const PAD = 20;
+const SPAN_X = W - PAD * 2;
+const SPAN_Y = H - PAD * 2;
+
 /** ~1 px at 1280x720. Shift multiplies by 10. */
 const NUDGE = 0.001;
+
+/** Visible handle. The hit target is deliberately much larger — see HIT_R. */
+export const HANDLE_R = 6;
+export const HIT_R = 14;
+
+export const toSvgX = (x: number): number => PAD + x * SPAN_X;
+export const toSvgY = (y: number): number => PAD + y * SPAN_Y;
 
 interface Props {
   calibration: ViewportCalibration;
@@ -37,21 +76,34 @@ interface Props {
   output: { width: number; height: number };
 }
 
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
 export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.Element {
   const svg = useRef<SVGSVGElement | null>(null);
   const [selected, setSelected] = useState<CornerIndex>(0);
   const [dragging, setDragging] = useState<CornerIndex | null>(null);
-  /** Set when a drag is refused, so a rejected move says why instead of sticking. */
+  /**
+   * Normalized offset from the pointer to the corner at the moment of the grab.
+   * Without it the corner snaps to wherever the pointer happened to land, which
+   * is a jump of several output pixels on every single grab.
+   */
+  const grabOffset = useRef({ dx: 0, dy: 0 });
+  /** Set when a move is refused, so a rejected drag says why instead of sticking. */
   const [refused, setRefused] = useState<string>('');
 
   const move = useCallback(
-    (index: CornerIndex, x: number, y: number) => {
+    (index: CornerIndex, rawX: number, rawY: number) => {
+      const x = clamp01(rawX);
+      const y = clamp01(rawY);
       const next = withCorner(calibration, index, { x, y });
       if (next === calibration) {
-        const fault = quadFault(
-          calibration.corners.map((p, i) => (i === index ? { x, y } : p)) as never,
-        );
-        setRefused(fault ?? 'refused');
+        // Report the fault of the CLAMPED position, which is the one that was
+        // actually refused. Reporting the raw one would say "out-of-range" for
+        // a drag whose real problem is that it would inverted the quad.
+        const attempted = calibration.corners.map((p, i) =>
+          i === index ? { x, y } : p,
+        ) as unknown as CalibrationCorners;
+        setRefused(quadFault(attempted) ?? 'refused');
         return;
       }
       setRefused('');
@@ -60,13 +112,26 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
     [calibration, onChange],
   );
 
+  /** Pointer position in normalized [0,1] warp space. */
+  const pointerNorm = useCallback((clientX: number, clientY: number) => {
+    const el = svg.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    // The SVG may be laid out at a different CSS size than its viewport, so the
+    // pointer is converted through the rect and then through the same PAD inset
+    // the handles are drawn with. Reading raw client pixels here is what made
+    // the drag disagree with the drawing.
+    const sx = ((clientX - r.left) / r.width) * W;
+    const sy = ((clientY - r.top) / r.height) * H;
+    return { x: (sx - PAD) / SPAN_X, y: (sy - PAD) / SPAN_Y };
+  }, []);
+
   useEffect(() => {
     if (dragging === null) return;
     const onMove = (e: PointerEvent): void => {
-      const el = svg.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      move(dragging, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+      const p = pointerNorm(e.clientX, e.clientY);
+      if (!p) return;
+      move(dragging, p.x + grabOffset.current.dx, p.y + grabOffset.current.dy);
     };
     const onUp = (): void => setDragging(null);
     window.addEventListener('pointermove', onMove);
@@ -75,7 +140,22 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [dragging, move]);
+  }, [dragging, move, pointerNorm]);
+
+  const beginDrag = (index: CornerIndex, e: React.PointerEvent): void => {
+    e.preventDefault();
+    const p = pointerNorm(e.clientX, e.clientY);
+    const corner = calibration.corners[index]!;
+    grabOffset.current = p ? { dx: corner.x - p.x, dy: corner.y - p.y } : { dx: 0, dy: 0 };
+    setSelected(index);
+    setDragging(index);
+    svg.current?.focus();
+  };
+
+  const nudge = (dx: number, dy: number): void => {
+    const p = calibration.corners[selected]!;
+    move(selected, p.x + dx, p.y + dy);
+  };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     const step = NUDGE * (e.shiftKey ? 10 : 1);
@@ -88,11 +168,10 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
     const delta = d[e.key];
     if (!delta) return;
     e.preventDefault();
-    const p = calibration.corners[selected]!;
-    move(selected, p.x + delta[0], p.y + delta[1]);
+    nudge(delta[0], delta[1]);
   };
 
-  const pts = calibration.corners.map((p) => `${p.x * W},${p.y * H}`).join(' ');
+  const pts = calibration.corners.map((p) => `${toSvgX(p.x)},${toSvgY(p.y)}`).join(' ');
   const identity = isIdentityCorners(calibration.corners);
 
   return (
@@ -119,6 +198,35 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
         </span>
       </div>
 
+      {/*
+        Selecting a corner without grabbing it. This is not a convenience: the
+        arrow keys are how the last few pixels of a keystone get set, and before
+        this the only way to choose which corner they moved was to successfully
+        grab a handle first.
+      */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#8b939b' }}>Corner</span>
+        {CORNER_LABELS.map((label, i) => (
+          <button
+            key={label}
+            type="button"
+            aria-pressed={selected === i}
+            onClick={() => {
+              setSelected(i as CornerIndex);
+              svg.current?.focus();
+            }}
+            style={{
+              ...smallButton,
+              borderColor: selected === i ? '#60d0ff' : '#2b2f34',
+              color: selected === i ? '#60d0ff' : 'inherit',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        <span style={{ fontSize: 12, color: '#8b939b' }}>then ← ↑ ↓ → (shift ×10)</span>
+      </div>
+
       <svg
         ref={svg}
         width={W}
@@ -136,10 +244,10 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
       >
         {/* The uncorrected output rect, for reference. */}
         <rect
-          x={0.5}
-          y={0.5}
-          width={W - 1}
-          height={H - 1}
+          x={toSvgX(0)}
+          y={toSvgY(0)}
+          width={SPAN_X}
+          height={SPAN_Y}
           fill="none"
           stroke="#2b2f34"
           strokeDasharray="4 4"
@@ -148,26 +256,24 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
         {calibration.corners.map((p, i) => {
           const index = i as CornerIndex;
           const active = selected === index;
+          const cx = toSvgX(p.x);
+          const cy = toSvgY(p.y);
           return (
-            <g key={CORNER_LABELS[i]}>
+            <g key={CORNER_LABELS[i]} onPointerDown={(e) => beginDrag(index, e)}>
+              {/* Invisible, and the reason the handle can be caught at all. */}
+              <circle cx={cx} cy={cy} r={HIT_R} fill="transparent" style={{ cursor: 'grab' }} />
               <circle
-                cx={p.x * W}
-                cy={p.y * H}
-                r={active ? 8 : 6}
+                cx={cx}
+                cy={cy}
+                r={active ? HANDLE_R + 2 : HANDLE_R}
                 fill={active ? '#60d0ff' : '#15181b'}
                 stroke="#60d0ff"
                 strokeWidth={1.5}
                 style={{ cursor: 'grab' }}
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  setSelected(index);
-                  setDragging(index);
-                  svg.current?.focus();
-                }}
               />
               <text
-                x={p.x * W + (p.x > 0.5 ? -14 : 14)}
-                y={p.y * H + (p.y > 0.5 ? -12 : 18)}
+                x={cx + (p.x > 0.5 ? -15 : 15)}
+                y={cy + (p.y > 0.5 ? -13 : 19)}
                 fill="#8b939b"
                 style={{ font: '10px ui-monospace, Menlo, monospace' }}
                 textAnchor="middle"
@@ -180,17 +286,15 @@ export function WarpPanel({ calibration, onChange, output }: Props): React.JSX.E
       </svg>
 
       <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
-        Drag a corner, or select one and nudge with the arrow keys (shift = ×10).
-        {refused ? (
-          <strong style={{ color: '#ffb040' }}> · refused: {refused}</strong>
-        ) : null}
+        Drag a corner, or pick one above and nudge with the arrow keys.
+        {refused ? <strong style={{ color: '#ffb040' }}> · refused: {refused}</strong> : null}
       </p>
 
       <pre style={readout}>
         {calibration.corners
           .map(
             (p, i) =>
-              `${CORNER_LABELS[i]}  ${p.x.toFixed(4)}, ${p.y.toFixed(4)}` +
+              `${CORNER_LABELS[i]}${i === selected ? ' ‹' : '  '} ${p.x.toFixed(4)}, ${p.y.toFixed(4)}` +
               `   (${Math.round(p.x * output.width)}, ${Math.round(p.y * output.height)} px)`,
           )
           .join('\n')}
