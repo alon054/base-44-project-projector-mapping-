@@ -6,6 +6,7 @@ import {
   DEV_RESOLUTION,
   PARAM_TEST_PATTERN_SPEED,
   TARGET_RESOLUTION,
+  type KReport,
   type OutputConfig,
   type ProvocationSpec,
   type ProvocationVerdict,
@@ -460,6 +461,21 @@ const PROVOKE_TRACE_FRAMES = 24;
 /** Time allowed after the provoked state is released for frames to resume. */
 const PROVOKE_SETTLE_MS = 1200;
 
+/**
+ * How long a measurement run settles before the COLD probe (A1/A8, Phase 3).
+ *
+ * 20 seconds, which is twice §4's discarded warmup and not a coincidence: the
+ * probe has to see the scene the §4 window will see, and Phase 3's scene takes
+ * real time to become itself — a video decoder starting, two sprite sheets
+ * decoding, a Lottie player arriving on its own chunk. Probing before that
+ * measured a lighter composite and reported it as a 50% thermal derate.
+ *
+ * It is deliberately NOT `WARMUP_MS`: that constant is §4's, it belongs to the
+ * measurement window, and reusing it here would make a later change to one
+ * silently change the other.
+ */
+const SETTLE_MS = 20_000;
+
 const provocationVerdicts: ProvocationVerdict[] = [];
 
 function delay(ms: number): Promise<void> {
@@ -543,12 +559,19 @@ function startMeasurementRun(
   // §8.2's soak. `PROJENGINE_SOAK=<minutes>` extends the measurement window;
   // 0 means the ordinary §4 protocol window, untouched, so a gate run and a
   // soak run cannot be confused for one another.
+  // A1's thermal derate. Filled in by the cold probe below, before the §4
+  // window opens; read by the summary at the end of the run.
+  let coldK: KReport | null = null;
+  let coldProbeAt = 0;
+
   const soakMs = config.soakMinutes > 0 ? config.soakMinutes * 60_000 : 0;
   const windowMs = soakMs > 0 ? soakMs : WINDOW_MS;
   const totalMs = WARMUP_MS + windowMs;
 
   const gpuSamples: GpuSample[] = [];
   let rebuilds = 0;
+  /** Set when soaking; called once the §4 window actually opens. */
+  let startSoakTimers: (() => void) | null = null;
   if (soakMs > 0) {
     console.log(
       `[soak] ${config.soakMinutes} minute(s), sampling GPU resources every 30s ` +
@@ -559,34 +582,86 @@ function startMeasurementRun(
     // and re-creates every layer on each scene edit, and the operator now
     // triggers that with a drag. A soak that only watched a static scene
     // animate would miss the one path this phase actually introduced.
-    const rebuild = window.setInterval(() => {
-      host?.reapplyScene();
-      rebuilds++;
-    }, 2000);
-    const sample = window.setInterval(() => {
-      if (!host) return;
-      gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
-    }, 30_000);
-    window.setTimeout(() => {
-      // One sample the instant the window opens, so drift is measured from the
-      // first POST-WARMUP state and not from a renderer that is still warming.
-      if (host) {
+    // Started when the WINDOW opens, not at t=0 — otherwise the settling
+    // period and the cold probe would each eat rebuilds that the soak's own
+    // count then claims happened inside the measured window.
+    let rebuild = 0;
+    let sample = 0;
+    startSoakTimers = (): void => {
+      rebuild = window.setInterval(() => {
+        host?.reapplyScene();
+        rebuilds++;
+      }, 2000);
+      sample = window.setInterval(() => {
+        if (!host) return;
         gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
-      }
-    }, WARMUP_MS + 50);
-    window.setTimeout(() => {
-      window.clearInterval(rebuild);
-      window.clearInterval(sample);
-      if (host) {
-        gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
-      }
-    }, totalMs - 200);
+      }, 30_000);
+      window.setTimeout(() => {
+        // One sample the instant the window opens, so drift is measured from
+        // the first POST-WARMUP state and not from a renderer still warming.
+        if (host) {
+          gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
+        }
+      }, WARMUP_MS + 50);
+      window.setTimeout(() => {
+        window.clearInterval(rebuild);
+        window.clearInterval(sample);
+        if (host) {
+          gpuSamples.push({ atSeconds: host.metrics.elapsedSeconds, gpu: host.gpuResources() });
+        }
+      }, totalMs - 200);
+    };
   }
   console.log(
-    `[run] START label=${label} warmupMs=${WARMUP_MS} windowMs=${WINDOW_MS} ` +
-      `cues=[${cues.join(',')}] — measurement ends in ${(totalMs / 1000).toFixed(0)}s`,
+    `[run] START label=${label} warmupMs=${WARMUP_MS} windowMs=${windowMs} ` +
+      `cues=[${cues.join(',')}] — settling, then cold probe, then the window`,
   );
+
+  // ---------------------------------------------------------------------------
+  // A1's thermal derate: k at ~minute 1 and again ~20 minutes later, in ONE
+  // CONTINUOUS RUN. Shape: settle -> COLD PROBE -> §4 window -> WARM PROBE.
+  //
+  // **The cold probe runs AFTER a settling period, not at t=0.** The first
+  // version probed immediately and reported k_dev roughly TWICE the warm
+  // figure on three consecutive runs — 107.6/73.8, 68.9/56.8, 143.9/70.4. No
+  // thermal effect halves a fanless M4's throughput in 71 seconds at a
+  // measured render cost of 0.06 ms/frame. What it was actually measuring is
+  // that at t=0 the scene is not there yet: the video is still on its poster,
+  // the sprite sheets and the Lottie player are still loading, and the probe
+  // was timing a lighter composite than the one the warm probe would see. A
+  // "derate" of 50% was the scene finishing loading.
+  //
+  // That is exactly the hazard §4's warmup exists for, and the fix is to put
+  // the probe on the far side of it.
+  //
+  // The window then restarts after the probe, which §4 already sanctions —
+  // `host.probe()` calls `metrics.reset()` because the probe saturates the GPU
+  // by design, and a gate window must not carry the hitch its own instrument
+  // caused. The RUN stays continuous, which is what A1 asks for.
+  // ---------------------------------------------------------------------------
   host?.metrics.reset();
+  window.setTimeout(() => {
+    if (host) {
+      coldProbeAt = Date.now();
+      coldK = host.probe('dev-first');
+      console.log(
+        `[run] PROBE cold (post-settle) ` +
+          `k_dev=${coldK.dev.toFixed(2)} (${coldK.devMin.toFixed(2)}-${coldK.devMax.toFixed(2)}, ` +
+          `spread ${(coldK.devSpread * 100).toFixed(1)}%) ` +
+          `k_target=${coldK.target.toFixed(2)} (${coldK.targetMin.toFixed(2)}-${coldK.targetMax.toFixed(2)}) ` +
+          `ratio=${coldK.ratio.toFixed(4)} subject=${coldK.subject} ` +
+          `repeats=${coldK.repeats} discarded=${coldK.discarded}`,
+      );
+    }
+    // The window opens here, with its own §4 warmup ahead of it, so the
+    // probe's hitch is discarded rather than measured.
+    host?.metrics.reset();
+    console.log(`[run] WINDOW open — ends in ${(totalMs / 1000).toFixed(0)}s`);
+    scheduleWindow();
+  }, SETTLE_MS);
+
+  function scheduleWindow(): void {
+  startSoakTimers?.();
 
   for (const cue of cues) {
     // Countdown on the wall so the operator acts on a signal, not a stopwatch.
@@ -613,7 +688,17 @@ function startMeasurementRun(
   window.setTimeout(() => {
     if (!host) return;
     const r = host.metrics.report();
-    const k = host.probe(); // resets the window; the report above is already taken
+    // The warm probe. Order ALTERNATED against the cold one, so the derate is
+    // not a comparison between a dev-first number and a dev-first number that
+    // happened to share the same first-mover advantage.
+    const k = host.probe('target-first');
+    console.log(
+      `[run] PROBE warm +${((Date.now() - coldProbeAt) / 1000).toFixed(0)}s ` +
+        `k_dev=${k.dev.toFixed(2)} (${k.devMin.toFixed(2)}-${k.devMax.toFixed(2)}, ` +
+        `spread ${(k.devSpread * 100).toFixed(1)}%) ` +
+        `k_target=${k.target.toFixed(2)} (${k.targetMin.toFixed(2)}-${k.targetMax.toFixed(2)}) ` +
+        `ratio=${k.ratio.toFixed(4)} subject=${k.subject} repeats=${k.repeats}`,
+    );
     const disturbing = runEvents.filter((e) => e.disturbing && e.t >= 0);
     const summary = {
       label,
@@ -640,6 +725,34 @@ function startMeasurementRun(
       instrument: r.instrument,
       scale: r.scale,
       k,
+      /**
+       * A1's thermal derate. Null when only one probe ran (a run shorter than
+       * the window the derate is defined over).
+       *
+       * `meaningful` is the part that stops this being a number that looks
+       * like a measurement. The derate is a DELTA between two draws from a
+       * distribution whose own width the probe now reports, so a delta smaller
+       * than that width is noise wearing a decimal point. §4's own reasoning
+       * for narrowing A1 to Phases 3 and 9 was exactly this.
+       */
+      derate: coldK
+        ? {
+            coldK,
+            warmK: k,
+            // Real seconds BETWEEN the two probes, which is what A1's
+            // "minute 1 to minute 20" actually measures. Reported rather than
+            // assumed, so a run that was cut short cannot be read as 20 minutes.
+            secondsBetweenProbes: (Date.now() - coldProbeAt) / 1000,
+            devDelta: k.dev - coldK.dev,
+            devDeltaFraction: coldK.dev > 0 ? (k.dev - coldK.dev) / coldK.dev : 0,
+            targetDelta: k.target - coldK.target,
+            targetDeltaFraction: coldK.target > 0 ? (k.target - coldK.target) / coldK.target : 0,
+            probeSpread: Math.max(coldK.devSpread, k.devSpread),
+            meaningful:
+              coldK.dev > 0 &&
+              Math.abs((k.dev - coldK.dev) / coldK.dev) > Math.max(coldK.devSpread, k.devSpread),
+          }
+        : null,
       soak: soakMs > 0 ? judgeSoak(gpuSamples, rebuilds) : null,
       events: runEvents,
       // The conditions the run actually ran in, so no later reader has to
@@ -651,6 +764,7 @@ function startMeasurementRun(
     console.log(`[run] END label=${label} disturbed=${summary.disturbed}`);
     window.engine.measureDone();
   }, totalMs + 500);
+  }
 }
 
 // I-11: the HUD stays available. `h` toggles it; it starts hidden so it is never

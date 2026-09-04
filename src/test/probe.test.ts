@@ -88,3 +88,80 @@ describe('the fill-rate coefficient is what A8 is actually for', () => {
     expect(r).toBeLessThan(2.25);
   });
 });
+
+/**
+ * A8's Phase 3 ruling: fix the subject, then attack the spread.
+ *
+ * The probe carried two defects into Gate 3. It rendered `app.stage`, so with
+ * the warp enabled it timed the mesh rather than the composite — k_dev 42-50
+ * warp-off against 90-96 warp-on, which is not a speedup. And eight real-scene
+ * samples spanned 0.9262-1.3269 against a theoretical 2.25 fill-bound / 1.0
+ * CPU-bound, which makes a single sample a draw from a distribution rather than
+ * a measurement. A1's thermal derate is a DELTA between two such draws, so the
+ * second defect is the one that decides whether the derate can mean anything.
+ *
+ * The GPU half cannot be unit-tested (§8.1: no GPU). What is tested here is the
+ * statistics the fix rests on, and the reporting that lets a reader tell a real
+ * derate from the instrument's own noise.
+ */
+describe('A8 — median and spread (Phase 3)', () => {
+  it('takes a real sample as the median for an odd count', async () => {
+    const { median, PROBE_REPEATS } = await import('../debug/probe');
+    // Odd on purpose: the median of an odd list is a number the instrument
+    // actually produced, not the average of two it did not.
+    expect(PROBE_REPEATS % 2).toBe(1);
+    expect(median([5, 1, 3])).toBe(3);
+    expect(median([1.3269, 0.9262, 1.0, 0.9655, 0.9815])).toBe(0.9815);
+  });
+
+  it('averages the middle pair for an even count, and handles the empty case', async () => {
+    const { median } = await import('../debug/probe');
+    expect(median([1, 2, 3, 4])).toBe(2.5);
+    expect(median([])).toBe(0);
+    expect(median([7])).toBe(7);
+  });
+
+  it('reports dispersion as a fraction of the median', async () => {
+    const { spreadOf } = await import('../debug/probe');
+    // The eight historical samples, as a single set: 0.9262 to 1.3269 about a
+    // median of ~0.9908 is a spread of ~0.40. A derate smaller than that is
+    // not a measurement of anything, and this is the number that says so.
+    const historical = [1.3269, 0.9262, 1.2773, 0.9655, 1.0, 0.9815, 0.9649, 1.037];
+    const spread = spreadOf(historical);
+    expect(spread).toBeGreaterThan(0.3);
+    expect(spread).toBeLessThan(0.5);
+  });
+
+  it('a single sample has no spread, and says so rather than implying precision', async () => {
+    const { spreadOf } = await import('../debug/probe');
+    expect(spreadOf([1.234])).toBe(0);
+    expect(spreadOf([])).toBe(0);
+  });
+
+  it('spread is 0 for identical repeats', async () => {
+    const { spreadOf } = await import('../debug/probe');
+    expect(spreadOf([2, 2, 2, 2, 2])).toBe(0);
+  });
+
+  it('a zero or negative median cannot produce an infinite spread', async () => {
+    const { spreadOf } = await import('../debug/probe');
+    // A9: an instrument that emits a plausible wrong number is worse than one
+    // that fails loudly. `Infinity%` dispersion is neither.
+    expect(spreadOf([0, 0, 0])).toBe(0);
+    expect(Number.isFinite(spreadOf([0, 1, 2]))).toBe(true);
+  });
+
+  it('the host probes the COMPOSITE, and a grep proves it', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../render/host.ts', import.meta.url).pathname,
+      'utf8',
+    );
+    // The whole of A8's correctness defect was one argument. A grep, because
+    // the failure is silent: `app.stage` produces confident numbers that
+    // describe the warp mesh, and nothing anywhere says so.
+    expect(src).toMatch(/runRenderMultiplierProbe\(\s*app\.renderer,\s*compositor\.view/);
+    expect(src).not.toMatch(/runRenderMultiplierProbe\(\s*app\.renderer,\s*app\.stage/);
+    expect(src).toMatch(/subject: 'composite'/);
+  });
+});

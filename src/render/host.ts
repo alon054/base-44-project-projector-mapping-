@@ -325,11 +325,23 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     },
     scaleReport: readScale,
     probe(order = 'dev-first' as 'dev-first' | 'target-first') {
-      const k = runRenderMultiplierProbe(app.renderer, app.stage, {
+      // THE COMPOSITE, not `app.stage` (A8, ruled at Phase 3).
+      //
+      // Through Phases 0-2 this passed the stage. Once the warp stage existed
+      // the stage held the MESH — a single textured quad — so k_dev read 42-50
+      // warp-off against 90-96 warp-on. Twice as fast is not what a warp does;
+      // the probe had simply changed subject, and the two sets of numbers were
+      // never comparable to each other.
+      //
+      // `compositor.view` is the scene, before the warp stage and independent
+      // of whether one exists, so k now means the same thing in both
+      // configurations and across every phase from here on.
+      const k = runRenderMultiplierProbe(app.renderer, compositor.view, {
         nominalMs: metrics.nominal,
         dev: DEV_RESOLUTION,
         target: TARGET_RESOLUTION,
         order,
+        subject: 'composite',
       });
       metrics.setK(k);
       // The probe deliberately saturates the GPU. Anything measured across it

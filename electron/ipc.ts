@@ -361,6 +361,51 @@ export interface KReport {
   targetMs: number;
   /** Renders per resolution in the probe burst. */
   iterations: number;
+  /**
+   * How many repeats the medians above were taken from (A8, Phase 3).
+   *
+   * Eight single-repeat samples across Phases 1 and 2 spanned 0.9262-1.3269
+   * against a theoretical 2.25 fill-bound / 1.0 CPU-bound. A point estimate
+   * from that distribution is not a measurement, and the thermal derate A1
+   * asks for is a DELTA between two such points — so the probe now reports a
+   * median and the spread it came from, and a reader can see whether a derate
+   * is bigger than the instrument's own noise before believing it.
+   */
+  repeats: number;
+  /**
+   * Bursts (of `repeats * 2`) that measured nothing and were discarded (A9).
+   *
+   * A burst whose `iterations` renders time no slower than its single render
+   * has produced no signal, and averaging the resulting 0 into a median gives a
+   * confident wrong k. Counted rather than silently dropped: a probe that threw
+   * most of its samples away is reporting on very little, and the reader
+   * deserves to know before quoting the number.
+   */
+  discarded: number;
+  /** Min and max k_dev across the repeats. */
+  devMin: number;
+  devMax: number;
+  /** Min and max k_target across the repeats. */
+  targetMin: number;
+  targetMax: number;
+  /**
+   * `(devMax - devMin) / devMedian` — the probe's own dispersion, as a
+   * fraction. Any derate smaller than this is noise, and saying so is the
+   * point of reporting it beside the value rather than in a comment.
+   */
+  devSpread: number;
+  targetSpread: number;
+  /**
+   * What was rendered. `composite` is the compositor's own container;
+   * `stage` is the whole Pixi stage.
+   *
+   * Recorded because the probe measured `app.stage` through Phases 0-2, and
+   * with the warp enabled the stage holds the MESH rather than the scene — so
+   * k_dev read 42-50 warp-off against 90-96 warp-on, which is not a speedup,
+   * it is a different subject. Any k compared against another k must agree on
+   * this field.
+   */
+  subject: 'composite' | 'stage';
 }
 
 /**
