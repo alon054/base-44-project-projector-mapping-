@@ -621,6 +621,38 @@
     ],
     "meanLuminance": 0.273617
   },
+  "phase4-reference-wind-none": {
+    "width": 1280,
+    "height": 720,
+    "hash": "7874f3b5",
+    "coverage": 0.219795,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      128,
+      128,
+      128
+    ],
+    "meanLuminance": 0.115935,
+    "regionHash": "1a00d8e5"
+  },
+  "phase4-reference-wind-max": {
+    "width": 1280,
+    "height": 720,
+    "hash": "0204c000",
+    "coverage": 0.219796,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      128,
+      128,
+      128
+    ],
+    "meanLuminance": 0.115936,
+    "regionHash": "1a00d8e5"
+  },
   "phase4-wind-max-no-rain@640x360": {
     "width": 640,
     "height": 360,

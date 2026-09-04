@@ -88,6 +88,10 @@ app.whenReady().then(async () => {
       expectLayoutMismatch: r.expectLayoutMismatch,
       centrePixel: r.centrePixel,
       meanLuminance: r.meanLuminance,
+      // Phase 4. Only present on cases that declare a region, so it is written
+      // into the committed goldens too — a region hash that changed between
+      // runs is as much a regression as a frame hash that did.
+      ...(r.regionHash ? { regionHash: r.regionHash } : {}),
     };
     writeFileSync(
       join(PREVIEW_DIR, `${r.name.replace(/[^\w.@-]/g, '_')}.png`),
@@ -243,6 +247,50 @@ app.whenReady().then(async () => {
     }
   } else {
     problems.push('I-5: the Gate 2 warp cases are missing from the harness');
+  }
+
+  // I-4 — the reference patch, in pixels. Built because the operator reported a
+  // whole-wall colour shift on every edit, and neither the eye nor a
+  // whole-frame hash can say whether the engine caused it: the rest of the
+  // frame is SUPPOSED to differ between these two cases.
+  //
+  // Two cases, one difference (wind 0 vs wind 1). The frames must differ; the
+  // grey patch must not. If both hold, a patch that still appears to shift on
+  // a wall is shifting downstream of this renderer.
+  const rNone = observed['phase4-reference-wind-none'];
+  const rMax = observed['phase4-reference-wind-max'];
+  if (rNone && rMax) {
+    // `!rNone.regionHash` and not `=== null`: an ABSENT field is `undefined`,
+    // and `undefined === undefined` would have made two missing hashes read as
+    // a pass. It did, on this assertion's first run — a green line printed over
+    // a measurement that never happened, which is the exact instrument failure
+    // Phase 3 spent a session removing from six other places.
+    if (!rNone.regionHash || !rMax.regionHash) {
+      problems.push(
+        'I-4: the reference-patch cases produced no region hash. The assertion did not run — ' +
+          'this is not a pass.',
+      );
+    } else if (rNone.hash === rMax.hash) {
+      // The negative control. A dead scene would pass the region test trivially.
+      problems.push(
+        `I-4: the reference-patch frames are IDENTICAL at wind 0 and wind 1 (${rNone.hash}). ` +
+          'The witness is not moving, so the region assertion proves nothing.',
+      );
+    } else if (rNone.regionHash !== rMax.regionHash) {
+      problems.push(
+        `I-4: the reference patch CHANGED between wind 0 and wind 1 — ` +
+          `${rNone.regionHash} vs ${rMax.regionHash}. It is subscribed to no force and sits at ` +
+          'depth 0, so this is a real modulation leak in the compositor. Do not close Gate 4.',
+      );
+    } else {
+      process.stdout.write(
+        `I-4: the reference patch is pixel-identical at wind 0 and wind 1 ` +
+          `(${rNone.regionHash}) while the frames differ (${rNone.hash} vs ${rMax.hash}) — ` +
+          'the engine cannot be what shifts it on the wall\n',
+      );
+    }
+  } else {
+    problems.push('I-4: the reference-patch cases are missing from the harness');
   }
 
   if (errors.length > 0) problems.push(`renderer logged errors:\n    ${errors.join('\n    ')}`);

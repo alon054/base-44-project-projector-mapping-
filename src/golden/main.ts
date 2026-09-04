@@ -30,7 +30,19 @@ import { Application, Assets, Rectangle } from 'pixi.js';
 import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
 import { addLayer, moveLayer } from '../core/sceneEdit';
-import { createDefaultScene, createPhase3Scene, createPhase4Scene } from '../core/defaultScene';
+import {
+  createDefaultScene,
+  createPhase3Scene,
+  createPhase4Scene,
+  createPhase4ReferenceScene,
+} from '../core/defaultScene';
+
+/**
+ * The reference patch's own box, from `createPhase4ReferenceScene`. Kept beside
+ * the cases that use it so the two cannot drift apart silently — a region that
+ * no longer covers the patch would pass this assertion by hashing black.
+ */
+const REFERENCE_PATCH_REGION = { x: 0.5, y: 0.5, width: 0.34, height: 0.44 };
 import { ProviderRegistry, type LayerFrame } from '../providers/ContentProvider';
 import { EMPTY_FORCE_FIELD, evaluateForces, type ForceField } from '../core/forces';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
@@ -118,6 +130,21 @@ interface GoldenCase {
   scene: Scene;
   /** Phase 4. Defaults to `EMPTY_FORCE_FIELD` — see `GOLDEN_FRAME`. */
   forces?: ForceField;
+  /**
+   * Hash only this normalized rectangle of the frame, in addition to the whole
+   * one, and report it as `regionHash`.
+   *
+   * Built for one question the whole-frame hash structurally cannot answer.
+   * The operator reported that changing any control shifts the colours across
+   * the whole wall; the reference patch (`phase4-reference`) is a layer that is
+   * subscribed to no force and provably cannot be modulated, so if its PIXELS
+   * are identical between two frames that differ in a force value, the engine
+   * is not what moved it. A whole-frame hash cannot say that, because the rest
+   * of the frame is *supposed* to differ — the witnesses moving is the point.
+   *
+   * Normalized (I-1), so the region means the same thing at any resolution.
+   */
+  region?: { x: number; y: number; width: number; height: number };
   /** Rendered at this size instead of GOLDEN_RESOLUTION, for the I-1 cases. */
   size?: { width: number; height: number };
   /**
@@ -531,6 +558,34 @@ function cases(): GoldenCase[] {
       scene: phase4WithoutRain(),
       forces: forceField({ wind: { strength: 1, direction: 0, gustiness: 0.5 } }),
     },
+    // -----------------------------------------------------------------------
+    // THE REFERENCE PATCH, IN PIXELS (the operator's colour-shift report).
+    //
+    // These two cases differ in EXACTLY ONE THING: wind at 0 versus wind at
+    // full. Their whole-frame hashes MUST differ — the witness bar moves, and a
+    // match would mean the scene was dead. Their `regionHash` over the grey
+    // patch MUST be IDENTICAL, because the patch states susceptibility 0 for
+    // every force and sits at depth 0.
+    //
+    // That pair is the engine's half of the question, settled in pixels rather
+    // than in modulation arithmetic. If the hashes match and the patch still
+    // appears to shift on the wall, the cause is downstream of this renderer —
+    // the projector, or simultaneous contrast against a neighbour that really
+    // is changing. Neither is something this code can fix, and both are things
+    // it would otherwise be blamed for.
+    // -----------------------------------------------------------------------
+    {
+      name: 'phase4-reference-wind-none',
+      scene: createPhase4ReferenceScene(),
+      forces: forceField({ wind: { strength: 0 }, timeOfDay: { hour: 12 } }),
+      region: REFERENCE_PATCH_REGION,
+    },
+    {
+      name: 'phase4-reference-wind-max',
+      scene: createPhase4ReferenceScene(),
+      forces: forceField({ wind: { strength: 1, gustiness: 1 }, timeOfDay: { hour: 12 } }),
+      region: REFERENCE_PATCH_REGION,
+    },
     {
       name: 'phase4-wind-max-no-rain@640x360',
       scene: phase4WithoutRain(),
@@ -836,8 +891,47 @@ export interface GoldenResult {
    * a number rather than an impression.
    */
   meanLuminance: number;
+  /**
+   * FNV-1a over just `GoldenCase.region`, when one is declared. Null otherwise.
+   * Two cases that differ only in a force value must produce the SAME
+   * `regionHash` over a layer that force cannot reach — see `GoldenCase.region`.
+   */
+  regionHash: string | null;
   /** PNG data URL, written to disk by the runner for eyeballing. */
   png: string;
+}
+
+/**
+ * FNV-1a over one normalized rectangle of the frame (I-1: the rect is a
+ * fraction, so it names the same area at any resolution).
+ *
+ * Deliberately inset by one pixel on each edge. A layer's own boundary is
+ * antialiased against whatever is behind it, and behind the reference patch is
+ * a scene that IS meant to change — so hashing the outermost pixel row would
+ * make this assertion fail for the one reason it is not asking about.
+ */
+function hashRegion(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  region: { x: number; y: number; width: number; height: number },
+): string {
+  const x0 = Math.min(width - 1, Math.max(0, Math.round((region.x - region.width / 2) * width) + 1));
+  const y0 = Math.min(height - 1, Math.max(0, Math.round((region.y - region.height / 2) * height) + 1));
+  const x1 = Math.min(width, Math.max(x0 + 1, Math.round((region.x + region.width / 2) * width) - 1));
+  const y1 = Math.min(height, Math.max(y0 + 1, Math.round((region.y + region.height / 2) * height) - 1));
+  const out = new Uint8Array((x1 - x0) * (y1 - y0) * 4);
+  let n = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4;
+      out[n++] = pixels[i] as number;
+      out[n++] = pixels[i + 1] as number;
+      out[n++] = pixels[i + 2] as number;
+      out[n++] = pixels[i + 3] as number;
+    }
+  }
+  return fnv1a(out);
 }
 
 /**
@@ -1038,6 +1132,9 @@ async function run(): Promise<GoldenResult[]> {
       expectLayoutMismatch: c.expectLayoutMismatch === true,
       centrePixel: centreRgb(pixels.pixels, size.width, size.height),
       meanLuminance: Number(meanLuminance(pixels.pixels).toFixed(6)),
+      regionHash: c.region
+        ? hashRegion(pixels.pixels, size.width, size.height, c.region)
+        : null,
     });
 
     compositor.destroy();

@@ -3432,3 +3432,87 @@ whether 0.1662 ms is a regression, thermal drift, or ordinary variance.
 Phase 9 owns the performance pass and the soak that would settle it; it is
 parked there rather than guessed at here. Nothing was weakened to accommodate
 it — M2 passes on its own terms.
+
+## 2026-09-05 — Phase 4 (session 1, part 2) — the wall, and the patch in pixels
+
+### `MEASURED` — the operator's wall session, 2026-09-05
+
+Warp on, `phase4-forces`, after disabling the projector's adaptive brightness.
+Three of Gate 4's four visual conditions, each answered against a stated pass
+condition rather than in general:
+
+| condition | observed | verdict |
+|---|---|---|
+| wind, scaled by susceptibility | "grey still, amber leans about half as far as cyan" | PASS |
+| `timeOfDay`, no per-layer seams | "whole scene together, no seams" | PASS |
+| parallax, near vs far | "trees slid across each other, backdrop still, no black band" | PASS |
+
+**The grey bar not moving is the load-bearing half of the wind observation.**
+Three bars identical in size, position and depth, differing only in
+`susceptibility.wind`; if susceptibility were not reaching the compositor all
+three would move together and the scene would look busy and pass nothing.
+
+**The absence of a black band confirms on a wall the defect a golden preview
+caught before it shipped.** I-1 caps layer width at 1, so a full-frame layer has
+no bleed to parallax into; `DEPTH_GAIN_FAR` is 0 and the backdrop is nailed
+down. A picture found it and a wall confirmed the fix.
+
+**And the projector's adaptive brightness was a real cause, not a hypothesis.**
+Turning it off stopped the whole-wall colour shifts the operator reported. It
+was disabled BEFORE the `timeOfDay` sweep was judged, which was a precondition
+and not a detail — a panel re-grading underneath the sweep can make a smooth
+ramp look like it steps. This is why it wants a §10 row rather than a memory.
+
+### `MEASURED` — the reference patch, and why it needed pixels
+
+The operator's answers contained a genuine contradiction, and it was not
+resolved by choosing the convenient one:
+
+> patch: **"the grey patch changed too"** — while dragging wind
+> projector: **"the whole scene together, no seams — and the projector fix
+> worked"**
+
+Those cannot both be true of a layer that is subscribed to no force, sits at
+`depth 0`, and is unit-tested as the identity under every force at full travel
+across 81 clock times with parallax swept to the corner. Three readings survive
+and the eye cannot separate them: the patch test happened before the projector
+menu fix; a real modulation leak in the compositor; or **simultaneous contrast**
+— a mid-grey patch beside a bar that is genuinely moving and changing brightness
+will *appear* to shift, which is an optical effect and not a figure of speech.
+
+So the engine's half was settled in **pixels**. `IDEAS` in the previous entry
+parked a per-region golden assertion as "worth it if the same question recurs".
+It recurred within the session.
+
+`GoldenCase.region` hashes one normalized rectangle of the frame alongside the
+whole one. Two new cases — `phase4-reference-wind-none` and
+`phase4-reference-wind-max` — differ in exactly one value:
+
+- their **frame** hashes MUST differ (`7874f3b5` vs `0204c000`); a match would
+  mean the witness was not moving and the assertion proved nothing, so that is
+  its own `problems.push`
+- their **region** hashes over the grey patch MUST be identical: **`1a00d8e5`**
+
+**Verified by negative control.** Giving the patch `wind: 1` and `depth 0.5`
+makes the assertion fail (`1a00d8e5` vs `a16c4f65`) with the message it should.
+An assertion that cannot fail is worth nothing, and this project has shipped one
+before.
+
+**Conclusion: the compositor cannot be what shifts the patch.** What the
+operator saw was the projector — consistent with the fix having worked — or
+contrast against a moving neighbour. No engine change is warranted, and none was
+made to accommodate the report.
+
+### `NOTE` — the region assertion printed a false PASS on its first run
+
+`regionHash` was absent from the runner's projection of the results, so both
+sides read `undefined`, and the guard tested `=== null`. `undefined ===
+undefined` is true, so the harness printed **"the reference patch is
+pixel-identical (undefined)"** — a green line over a measurement that never
+happened.
+
+Caught within a minute because the hash printed as `undefined` in the message,
+which is the only reason it was visible at all. This is the sixth instrument
+defect of the same family in this project and the argument for putting the
+VALUE in the log line rather than only the verdict. The guard is now falsy-based
+and says explicitly that a missing hash "is not a pass".
