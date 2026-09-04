@@ -15,6 +15,8 @@ import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresenta
 import { createRenderHost } from '../render/host';
 import { canonicalizeClockTransport } from '../core/clock';
 import { attachClockLog } from '../debug/clockLog';
+import { attachForceLog } from '../debug/forceLog';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import {
   canonicalizeCalibration,
   calibrationFor,
@@ -69,6 +71,8 @@ const pendingSpeed: { v: { value: number; token: number; t0: number } | null } =
 const pendingClock: { v: ReturnType<typeof canonicalizeClockTransport> | null } = { v: null };
 /** The scene currently on the wall, for the identical-apply check below. */
 let appliedScene: Scene | null = null;
+/** I-4's `[force]` line. Null until the host exists — see `attachForceLog`. */
+let forceLog: ReturnType<typeof attachForceLog> | null = null;
 /** For the §10 caps check: which kind each layer's asset is. */
 const bundledLibrary = createBundledLibrary();
 /** Same race as the speed above: a scene can arrive before Pixi has finished init. */
@@ -172,6 +176,9 @@ function applyScene(raw: unknown): void {
         .map((l) => `${l.id}(z${l.zOrder}${l.visible ? '' : ',hidden'})`)
         .join(' -> '),
   );
+  // I-4. Emitted after `[scene]`, so a run log reads "this scene, then these
+  // forces on it" in the order an operator would ask the two questions.
+  forceLog?.note(scene);
 }
 
 function applyConfig(c: OutputConfig): void {
@@ -402,6 +409,12 @@ if (pendingSpeed.v) {
 // `[scene] applied` and `[warp]` between them found four Phase 2 defects that
 // no unit test caught; this is the third line of that kind.
 attachClockLog(host.clock);
+// I-4 made readable, and built before it was needed rather than at the gate —
+// see `debug/forceLog.ts` on why Phase 4's named failure mode is a force whose
+// effect nobody can see. Force values live in scene state, so this is fed from
+// `applyScene` like `[scene]` itself and never touches the render path (A14).
+forceLog = attachForceLog(FORCE_DEFINITIONS);
+if (appliedScene) forceLog.note(appliedScene);
 if (pendingClock.v) {
   host.setClock(pendingClock.v);
   pendingClock.v = null;

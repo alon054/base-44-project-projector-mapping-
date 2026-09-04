@@ -25,6 +25,7 @@
 import type { Container } from 'pixi.js';
 import type { JsonObject, Layer } from '../core/layer';
 import type { Rng } from '../core/rng';
+import type { ForceField } from '../core/forces';
 
 export interface ProviderContext {
   /** The layer being filled. Read-only to the provider. */
@@ -88,6 +89,27 @@ export interface LayerFrame {
    * scrub from ordinary playback at a high rate; this can.
    */
   scrubSeq: number;
+  /**
+   * I-4 — this frame's evaluation of every force. **Phase 4's fifth field.**
+   *
+   * It is here, on the frame contract, rather than in a side channel handed to
+   * providers separately, for the same reason `timeSeconds` is: a provider that
+   * had its own route to the forces could sample them at a different moment
+   * from the one it is drawing, and the whole point of a force bus is that the
+   * scene responds *together* (D4).
+   *
+   * Most providers never touch it. The compositor applies the axis vocabulary
+   * — position, rotation, scale, alpha, tint — to every layer generically, so a
+   * layer sways in the wind without its provider knowing wind exists. This
+   * field is for the minority that need a force's **raw parameter** to decide
+   * what to draw: rain's drop count and fall speed follow
+   * `forces.param('rain', 'intensity')`, because a force cannot create
+   * geometry and drops are geometry.
+   *
+   * `EMPTY_FORCE_FIELD` is the identity, and is what the golden harness draws
+   * through so the blessed frames are unchanged by the bus existing (§8.1).
+   */
+  forces: ForceField;
 }
 
 export interface LayerView {

@@ -29,6 +29,8 @@ import {
 import { readGpuResources, type GpuResourceReport } from '../debug/gpu';
 import { createDefaultScene } from '../core/defaultScene';
 import { Clock, type ClockTransport } from '../core/clock';
+import { evaluateForces, type ForceField } from '../core/forces';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import type { Scene } from '../core/scene';
 import type { PlaceholderInfo } from '../core/resilience';
 import { ProviderRegistry } from '../providers/ContentProvider';
@@ -128,6 +130,8 @@ export interface RenderHost {
   gpuResources(): GpuResourceReport;
   /** Re-applies the current scene, exercising the teardown/rebuild path. */
   reapplyScene(): void;
+  /** I-4. The field the last rendered frame was modulated by. Never per frame. */
+  forceField(): ForceField;
   destroy(): void;
 }
 
@@ -200,6 +204,21 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   let currentScene: Scene = createDefaultScene();
   compositor.setScene(currentScene);
+
+  /**
+   * The most recent frame's force field (I-4). Held so the HUD and the run log
+   * can report what the scene is actually being modulated by, rather than
+   * re-deriving it from scene state at a different instant and reporting a
+   * number that was never applied to anything — the Phase 3 lesson, which was
+   * an instrument that lied in six different ways.
+   */
+  let forceField: ForceField = evaluateForces({
+    definitions: FORCE_DEFINITIONS,
+    values: currentScene.forces,
+    timeSeconds: 0,
+    seed: currentScene.seed,
+    parallax: currentScene.parallax,
+  });
 
   // A14. Chosen by MEASUREMENT — cost per call and resolution — before any
   // frame is timed with it, and logged either way.
@@ -274,12 +293,25 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     clock.advance(lastTick === null ? 0 : now - lastTick);
     lastTick = now;
 
+    // I-4 / I-2. ONE evaluation per frame, from the ONE clock, shared by every
+    // layer. Two evaluations would be two force fields, and a scene whose
+    // layers were modulated from different samples of the same gust is exactly
+    // the "moves everything together" property D4 exists to provide.
+    forceField = evaluateForces({
+      definitions: FORCE_DEFINITIONS,
+      values: currentScene.forces,
+      timeSeconds: clock.timeSeconds,
+      seed: currentScene.seed,
+      parallax: currentScene.parallax,
+    });
+
     compositor.update({
       timeSeconds: clock.timeSeconds,
       phase: clock.globalPhase,
       playing: clock.playing,
       rate: clock.rate,
       scrubSeq: clock.scrubSeq,
+      forces: forceField,
     });
 
     // Both draws sit inside one timed region. The render-to-texture IS the
@@ -318,6 +350,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       currentScene = scene;
       compositor.setScene(scene);
     },
+    forceField: () => forceField,
     setCalibration(cal) {
       warp?.setCalibration(cal);
     },

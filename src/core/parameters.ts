@@ -15,8 +15,9 @@
  * exactly one. The registry is an *index* onto state, not a second store.
  */
 import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
-import { BLEND_MODES, isBlendMode, type JsonValue, type Layer } from './layer';
+import { BLEND_MODES, isBlendMode, type JsonValue, type Layer, type Susceptibility } from './layer';
 import { CLOCK_MAX_MS, CLOCK_RATE_MAX, CLOCK_RATE_MIN } from './clock';
+import { clampSusceptibility, type ForceDefinition, type ParallaxState } from './forces';
 import type { ContentParamSpec } from '../providers/ContentProvider';
 
 export type ParameterValue = number | boolean | string;
@@ -431,4 +432,107 @@ export function defineClockParameters(clock: {
       set: (v: number) => clock.scrubToSeconds(v),
     },
   ];
+}
+
+/**
+ * The `force.<id>.<param>` keys (I-8, I-14, CLAUDE.md rule 9).
+ *
+ * Derived from the force DEFINITIONS, not written out by hand. That is the
+ * whole of Gate 4's "every force is enumerable from the parameter registry by
+ * hierarchical key", and it is also what makes the fifth force free: a
+ * definition added to `FORCE_DEFINITIONS` appears in the registry, in the
+ * editor panel and in the `[force]` log without anyone registering anything.
+ *
+ * Bound to `scene.forces` through accessors, exactly like every other key here
+ * — the scene stays the single source of truth (I-12) and the registry stays an
+ * index onto it, never a second copy.
+ */
+export function defineForceParameters(
+  definitions: readonly ForceDefinition[],
+  read: () => Record<string, Record<string, number>>,
+  write: (forceId: string, key: string, value: number) => void,
+): ParameterDef[] {
+  const defs: ParameterDef[] = [];
+  for (const force of definitions) {
+    for (const param of force.params) {
+      defs.push({
+        key: `force.${force.id}.${param.key}`,
+        label: `${force.label} — ${param.label}`,
+        kind: 'number',
+        default: param.default,
+        min: param.min,
+        max: param.max,
+        step: param.step,
+        get: () => {
+          const v = read()[force.id]?.[param.key];
+          return typeof v === 'number' && Number.isFinite(v) ? v : param.default;
+        },
+        set: (v: number) => write(force.id, param.key, v),
+      });
+    }
+  }
+  return defs;
+}
+
+/**
+ * The `entity.<id>.susceptibility.<forceId>` keys (I-4, I-8).
+ *
+ * Four segments rather than three, and deliberately so: `entity.tree.wind`
+ * would collide with a provider that ever exposed a content key called `wind`,
+ * and I-8 exists precisely so that names cannot collide across the instrument.
+ *
+ * The registry's `default` is the FORCE's `defaultSusceptibility`, so reading a
+ * key on a layer that has not stated one reports what the layer will actually
+ * do rather than 0. A registry that answered 0 for a layer visibly moving in
+ * the wind would be an instrument that lies, which is the Phase 3 lesson.
+ */
+export function defineSusceptibilityParameters(
+  layerId: string,
+  definitions: readonly ForceDefinition[],
+  read: () => Layer,
+  write: (susceptibility: Susceptibility) => void,
+): ParameterDef[] {
+  return definitions.map((force) => ({
+    key: `entity.${layerId}.susceptibility.${force.id}`,
+    label: `Susceptibility — ${force.label}`,
+    kind: 'number' as const,
+    default: force.defaultSusceptibility,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: () => {
+      const v = read().susceptibility[force.id];
+      return typeof v === 'number' && Number.isFinite(v) ? v : force.defaultSusceptibility;
+    },
+    set: (v: number) => {
+      write({ ...read().susceptibility, [force.id]: clampSusceptibility(v) });
+    },
+  }));
+}
+
+/**
+ * The `parallax.*` keys (D3, I-8).
+ *
+ * Parallax is NOT a force and is not registered under `force.*`. A force is a
+ * global modifier that entities subscribe to with a susceptibility (I-4);
+ * parallax is the viewpoint, and what scales it per entity is `depth`, which
+ * every layer already has. Filing it under `force.` would make Gate 4's "every
+ * force is enumerable from the registry" answer with something that is not one.
+ */
+export function defineParallaxParameters(
+  read: () => ParallaxState,
+  write: (parallax: ParallaxState) => void,
+): ParameterDef[] {
+  const axis = (key: 'x' | 'y', label: string): NumberParameterDef => ({
+    key: `parallax.${key}`,
+    label,
+    kind: 'number',
+    default: 0.5,
+    min: 0,
+    max: 1,
+    step: 0.005,
+    get: () => read()[key],
+    set: (v: number) => write({ ...read(), [key]: v }),
+  });
+  return [axis('x', 'Parallax X'), axis('y', 'Parallax Y')];
 }

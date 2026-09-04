@@ -30,8 +30,10 @@ import { Application, Assets, Rectangle } from 'pixi.js';
 import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
 import { addLayer, moveLayer } from '../core/sceneEdit';
-import { createDefaultScene, createPhase3Scene } from '../core/defaultScene';
+import { createDefaultScene, createPhase3Scene, createPhase4Scene } from '../core/defaultScene';
 import { ProviderRegistry, type LayerFrame } from '../providers/ContentProvider';
+import { EMPTY_FORCE_FIELD, evaluateForces, type ForceField } from '../core/forces';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider, BUNDLED_PROVIDER_ID } from '../providers/bundled/BundledProvider';
 import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manifest';
@@ -76,13 +78,46 @@ const GOLDEN_FRAME = {
   playing: false,
   rate: 1,
   scrubSeq: 0,
+  // I-4's identity. Every axis at its identity value, so the force bus reaches
+  // the compositor here exactly as it does live and contributes nothing — which
+  // is what makes "the 19 Phase 1-2 frames are byte-identical" a statement
+  // about the bus rather than about the harness having been kept away from it.
+  //
+  // Phase 4's own golden cases pass a POPULATED field instead, per case, so the
+  // deterministic subset (fixed seed, no video, clock paused) still covers what
+  // forces do. See `forceField(...)` below.
+  forces: EMPTY_FORCE_FIELD,
 } as const;
 
 const PROVIDER_ID = 'procedural';
 
+/**
+ * A populated force field at the golden instant, for the Phase 4 cases.
+ *
+ * I-12's deterministic subset is "fixed seed, no video, clock paused", and a
+ * force field satisfies it exactly: `evaluateForces` is pure in
+ * `(definitions, values, timeSeconds, seed, parallax)`, and every varying
+ * quantity inside it comes from seeded value noise. A force is therefore one of
+ * the few animated things in this engine that a hash CAN legitimately cover.
+ */
+function forceField(
+  values: Record<string, Record<string, number>>,
+  parallax?: { x: number; y: number },
+): ForceField {
+  return evaluateForces({
+    definitions: FORCE_DEFINITIONS,
+    values,
+    timeSeconds: GOLDEN_TIME_SECONDS,
+    seed: 0x5eed,
+    ...(parallax ? { parallax } : {}),
+  });
+}
+
 interface GoldenCase {
   name: string;
   scene: Scene;
+  /** Phase 4. Defaults to `EMPTY_FORCE_FIELD` — see `GOLDEN_FRAME`. */
+  forces?: ForceField;
   /** Rendered at this size instead of GOLDEN_RESOLUTION, for the I-1 cases. */
   size?: { width: number; height: number };
   /**
@@ -381,7 +416,138 @@ function cases(): GoldenCase[] {
       scene: bundledLottie(),
       timeSeconds: 7.3,
     },
+
+    // -----------------------------------------------------------------------
+    // PHASE 4 — forces and parallax (I-4, I-14, D3).
+    //
+    // A force field is a legitimate subject for a hash, which is not obvious
+    // and is worth stating. I-12 restricts pixel comparison to "an explicitly
+    // deterministic subset: fixed seed, no video, clock paused" — and
+    // `evaluateForces` is a pure function of (definitions, values, time, seed,
+    // parallax) whose only varying quantity is seeded value noise. Every case
+    // below pins all five. Nothing here decodes, and the clock is the frozen
+    // `GOLDEN_TIME_SECONDS`.
+    //
+    // The cases are arranged in PAIRS that differ in exactly one force value,
+    // so a hash difference attributes to that value and a hash MATCH between a
+    // pair is itself a failure — a force that silently did nothing would show
+    // up as two identical frames rather than as a crash.
+    // -----------------------------------------------------------------------
+    {
+      // The scene as the operator first sees it: its own stored force values.
+      name: 'phase4-forces',
+      scene: createPhase4Scene(),
+      forces: forceField(createPhase4Scene().forces),
+    },
+    {
+      // Wind at zero. The baseline the next case is judged against — every
+      // layer sits exactly on its stored transform.
+      name: 'phase4-wind-none',
+      scene: createPhase4Scene(),
+      forces: forceField({ wind: { strength: 0, direction: 0, gustiness: 0.5 } }),
+    },
+    {
+      // Wind at maximum. Gate 4's first condition, frozen: the three bars are
+      // identical in every respect but `susceptibility.wind` (0, 0.5, 1), so
+      // this frame shows three different displacements from one force value.
+      // MUST differ from `phase4-wind-none`.
+      name: 'phase4-wind-max',
+      scene: createPhase4Scene(),
+      forces: forceField({ wind: { strength: 1, direction: 0, gustiness: 0.5 } }),
+    },
+    {
+      // Wind blowing the other way. Direction is a real parameter, not a sign.
+      name: 'phase4-wind-reversed',
+      scene: createPhase4Scene(),
+      forces: forceField({ wind: { strength: 1, direction: 0.5, gustiness: 0.5 } }),
+    },
+    {
+      // Midnight. Gate 4's second condition at one end of its travel: the whole
+      // scene, every layer, dark and blue — and uniformly so, because
+      // `timeOfDay` defaults to a susceptibility of 1 and no layer opts out.
+      name: 'phase4-midnight',
+      scene: createPhase4Scene(),
+      forces: forceField({ timeOfDay: { hour: 0 } }),
+    },
+    {
+      // Noon. Exactly neutral: this frame must be the one the tint axes cannot
+      // brighten past, and every layer at its authored colour.
+      name: 'phase4-noon',
+      scene: createPhase4Scene(),
+      forces: forceField({ timeOfDay: { hour: 12 } }),
+    },
+    {
+      // Golden hour, the interesting middle of the ramp.
+      name: 'phase4-golden-hour',
+      scene: createPhase4Scene(),
+      forces: forceField({ timeOfDay: { hour: 18.5 } }),
+    },
+    {
+      // Rain at full. Two things at once, and they are separable by eye: the
+      // DROPS (content, reading `force.rain.intensity` off the frame) and the
+      // WETNESS TINT (the force's own axes) on everything beneath them.
+      name: 'phase4-rain',
+      scene: createPhase4Scene(),
+      forces: forceField({ rain: { intensity: 1, wetness: 1 } }),
+    },
+    {
+      // Rain slanted by wind. The drops lean while the SHEET stays put — the
+      // rain layer states `susceptibility.wind = 0` precisely so a full-frame
+      // layer is never translated into showing its own edges.
+      name: 'phase4-rain-windblown',
+      scene: createPhase4Scene(),
+      forces: forceField({
+        rain: { intensity: 1, wetness: 0.6 },
+        wind: { strength: 1, direction: 0, gustiness: 0 },
+      }),
+    },
+    {
+      // D3, one end. Gate 4's third condition: at parallax 0 the near tree has
+      // moved 0.98x of the sweep and the sky 0.15x of it, so the trees slide
+      // across the background rather than with it.
+      name: 'phase4-parallax-left',
+      scene: createPhase4Scene(),
+      forces: forceField({}, { x: 0, y: 0.5 }),
+    },
+    {
+      // D3, the other end. MUST differ from `phase4-parallax-left`, and the
+      // difference between the two is the whole of "depth converts decoration
+      // into space".
+      name: 'phase4-parallax-right',
+      scene: createPhase4Scene(),
+      forces: forceField({}, { x: 1, y: 0.5 }),
+    },
+    {
+      // I-1 under modulation. A force offset is normalized like everything
+      // else, so a modulated scene must land in the same RELATIVE place at a
+      // different resolution — the same claim `stack@640x360` makes for a
+      // stored transform, now made for a computed one.
+      //
+      // Rain is hidden for this case alone: its stroke width is floored at
+      // 2 px (deliberately — thin strokes are what read as soft on the wall),
+      // and a floor is by definition not proportional to resolution. Comparing
+      // it across two resolutions would be testing the floor, not I-1.
+      name: 'phase4-wind-max-no-rain',
+      scene: phase4WithoutRain(),
+      forces: forceField({ wind: { strength: 1, direction: 0, gustiness: 0.5 } }),
+    },
+    {
+      name: 'phase4-wind-max-no-rain@640x360',
+      scene: phase4WithoutRain(),
+      forces: forceField({ wind: { strength: 1, direction: 0, gustiness: 0.5 } }),
+      size: { width: 640, height: 360 },
+      compareTo: 'phase4-wind-max-no-rain',
+    },
   ];
+}
+
+/** See `phase4-wind-max-no-rain` for why the rain layer is hidden. */
+function phase4WithoutRain(): Scene {
+  const scene = createPhase4Scene();
+  return {
+    ...scene,
+    layers: scene.layers.map((l) => (l.id === 'rain' ? { ...l, visible: false } : l)),
+  };
 }
 
 /** Kenney's alpha particles, laid out in a row. `blend` is the whole variable. */
@@ -807,8 +973,11 @@ async function run(): Promise<GoldenResult[]> {
     // Typed as the contract, not as `typeof GOLDEN_FRAME`: that constant is
     // `as const`, so its `timeSeconds` is the literal 1 and a scrubbed case
     // could not be built from it.
-    const caseFrame: LayerFrame =
-      c.timeSeconds === undefined ? GOLDEN_FRAME : { ...GOLDEN_FRAME, timeSeconds: c.timeSeconds };
+    const caseFrame: LayerFrame = {
+      ...GOLDEN_FRAME,
+      ...(c.timeSeconds === undefined ? {} : { timeSeconds: c.timeSeconds }),
+      ...(c.forces === undefined ? {} : { forces: c.forces }),
+    };
 
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.

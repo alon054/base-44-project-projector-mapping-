@@ -440,5 +440,204 @@
       40
     ],
     "meanLuminance": 0.158693
+  },
+  "phase4-forces": {
+    "width": 1280,
+    "height": 720,
+    "hash": "67501968",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      63,
+      83
+    ],
+    "meanLuminance": 0.258836
+  },
+  "phase4-wind-none": {
+    "width": 1280,
+    "height": 720,
+    "hash": "827b0663",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273613
+  },
+  "phase4-wind-max": {
+    "width": 1280,
+    "height": 720,
+    "hash": "92d4ee3b",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273617
+  },
+  "phase4-wind-reversed": {
+    "width": 1280,
+    "height": 720,
+    "hash": "f650c717",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273618
+  },
+  "phase4-midnight": {
+    "width": 1280,
+    "height": 720,
+    "hash": "3ec646a3",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      11,
+      22,
+      57
+    ],
+    "meanLuminance": 0.094493
+  },
+  "phase4-noon": {
+    "width": 1280,
+    "height": 720,
+    "hash": "827b0663",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273613
+  },
+  "phase4-golden-hour": {
+    "width": 1280,
+    "height": 720,
+    "hash": "292dfc08",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      52,
+      50
+    ],
+    "meanLuminance": 0.214233
+  },
+  "phase4-rain": {
+    "width": 1280,
+    "height": 720,
+    "hash": "f22adc60",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      35,
+      56,
+      91
+    ],
+    "meanLuminance": 0.247697
+  },
+  "phase4-rain-windblown": {
+    "width": 1280,
+    "height": 720,
+    "hash": "fb10b119",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      39,
+      60,
+      93
+    ],
+    "meanLuminance": 0.267347
+  },
+  "phase4-parallax-left": {
+    "width": 1280,
+    "height": 720,
+    "hash": "85c77153",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273584
+  },
+  "phase4-parallax-right": {
+    "width": 1280,
+    "height": 720,
+    "hash": "851494e4",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273527
+  },
+  "phase4-wind-max-no-rain": {
+    "width": 1280,
+    "height": 720,
+    "hash": "92d4ee3b",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.273617
+  },
+  "phase4-wind-max-no-rain@640x360": {
+    "width": 640,
+    "height": 360,
+    "hash": "7bdbd692",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": {
+      "against": "phase4-wind-max-no-rain",
+      "maxCell": 0.008728,
+      "meanCell": 0.001228
+    },
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      45,
+      67,
+      96
+    ],
+    "meanLuminance": 0.274615
   }
 }

@@ -10,15 +10,19 @@
  * enters the app goes through one of them.
  */
 import {
+  canonicalizeSusceptibility,
   createLayer,
   clamp01,
   isBlendMode,
+  isKeySegment,
   normalizeTransform,
   type BlendMode,
   type JsonObject,
   type JsonValue,
   type Layer,
 } from './layer';
+import { DEFAULT_PARALLAX, defaultForceValues, type ParallaxState } from './forces';
+import { FORCE_DEFINITIONS } from './forceDefs';
 
 /**
  * Bumped whenever a stored scene's shape changes incompatibly. A file from a
@@ -41,6 +45,26 @@ export interface Scene {
    */
   background: number;
   layers: Layer[];
+  /**
+   * I-4 / I-12. Force parameter values, `{ wind: { strength: 0.4 } }`. Phase 4.
+   *
+   * **Dense on purpose**, unlike a layer's susceptibility map: `createScene`
+   * fills every shipped force's every parameter from its definition's default,
+   * so the stored JSON *states* the forces rather than deferring to whatever
+   * the code's defaults happen to be next year. A scene is the unit of truth
+   * (I-12) and a scene that reproduces only against the build that wrote it is
+   * not one.
+   *
+   * Values for force ids this build does not know are **kept**, not dropped, so
+   * opening a scene on a build without its fifth force and saving it again does
+   * not silently destroy the operator's settings (I-13's principle).
+   */
+  forces: Record<string, Record<string, number>>;
+  /**
+   * D3. The scene's viewpoint, in [0, 1] with 0.5 centred (I-1). Sweeping it
+   * slides near layers across far ones — see `depthGain` in `forces.ts`.
+   */
+  parallax: ParallaxState;
 }
 
 export interface SceneInit {
@@ -49,6 +73,8 @@ export interface SceneInit {
   seed?: number;
   background?: number;
   layers?: Layer[];
+  forces?: Record<string, Record<string, number>>;
+  parallax?: Partial<ParallaxState>;
 }
 
 export function createScene(init: SceneInit): Scene {
@@ -59,7 +85,29 @@ export function createScene(init: SceneInit): Scene {
     seed: Number.isFinite(init.seed) ? (init.seed as number) >>> 0 : 1,
     background: Number.isFinite(init.background) ? (init.background as number) >>> 0 : 0x000000,
     layers: init.layers ?? [],
+    forces: mergeForceValues(defaultForceValues(FORCE_DEFINITIONS), init.forces),
+    parallax: {
+      x: clamp01(init.parallax?.x ?? DEFAULT_PARALLAX.x),
+      y: clamp01(init.parallax?.y ?? DEFAULT_PARALLAX.y),
+    },
   };
+}
+
+/**
+ * Overlay stated values onto the shipped defaults. Unknown force ids and
+ * unknown parameter keys survive — see `Scene.forces`.
+ */
+function mergeForceValues(
+  base: Record<string, Record<string, number>>,
+  stated: Record<string, Record<string, number>> | undefined,
+): Record<string, Record<string, number>> {
+  if (!stated) return base;
+  for (const [forceId, params] of Object.entries(stated)) {
+    const dest = base[forceId] ?? {};
+    for (const [key, v] of Object.entries(params)) dest[key] = v;
+    base[forceId] = dest;
+  }
+  return base;
 }
 
 /**
@@ -143,7 +191,62 @@ export function canonicalizeScene(raw: unknown): Scene {
     seed: typeof o['seed'] === 'number' ? o['seed'] : 1,
     background: typeof o['background'] === 'number' ? o['background'] : 0x000000,
     layers,
+    forces: canonicalizeForceValues(o['forces']),
+    parallax: canonicalizeParallax(o['parallax']),
   });
+}
+
+/**
+ * Force values from untrusted data. A malformed *entry* is refused rather than
+ * coerced: a force parameter that arrived as a string is a bug in whoever wrote
+ * the file, and silently reading it as its default would put the operator in
+ * front of a wall wondering why the wind control does nothing.
+ *
+ * Force ids and parameter keys are checked against `isKeySegment` because they
+ * become `force.<id>.<key>` in the registry (I-8). A key that cannot be
+ * addressed must not reach stored state.
+ */
+function canonicalizeForceValues(raw: unknown): Record<string, Record<string, number>> {
+  if (raw === undefined) return {};
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new SceneFormatError('scene.forces must be an object');
+  }
+  const out: Record<string, Record<string, number>> = {};
+  for (const [forceId, params] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isKeySegment(forceId)) {
+      throw new SceneFormatError(
+        `scene.forces."${forceId}" is not a usable force id (I-8: one key segment)`,
+      );
+    }
+    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
+      throw new SceneFormatError(`scene.forces.${forceId} must be an object`);
+    }
+    const dest: Record<string, number> = {};
+    for (const [key, v] of Object.entries(params as Record<string, unknown>)) {
+      if (!isKeySegment(key)) {
+        throw new SceneFormatError(
+          `scene.forces.${forceId}."${key}" is not a usable parameter key (I-8)`,
+        );
+      }
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new SceneFormatError(
+          `scene.forces.${forceId}.${key} must be a finite number, got ${String(v)}`,
+        );
+      }
+      dest[key] = v;
+    }
+    out[forceId] = dest;
+  }
+  return out;
+}
+
+function canonicalizeParallax(raw: unknown): ParallaxState {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ...DEFAULT_PARALLAX };
+  const o = raw as Record<string, unknown>;
+  return {
+    x: clamp01(typeof o['x'] === 'number' ? o['x'] : DEFAULT_PARALLAX.x),
+    y: clamp01(typeof o['y'] === 'number' ? o['y'] : DEFAULT_PARALLAX.y),
+  };
 }
 
 function canonicalizeLayer(raw: unknown, index: number): Layer {
@@ -174,6 +277,7 @@ function canonicalizeLayer(raw: unknown, index: number): Layer {
     depth: clamp01(typeof o['depth'] === 'number' ? o['depth'] : 0.5),
     visible: typeof o['visible'] === 'boolean' ? o['visible'] : true,
     ...(typeof o['seed'] === 'number' ? { seed: o['seed'] } : {}),
+    susceptibility: canonicalizeSusceptibility(o['susceptibility']),
   });
 }
 

@@ -17,9 +17,13 @@ import type { Layer } from '../core/layer';
 import {
   ParameterRegistry,
   defineContentParameters,
+  defineForceParameters,
   defineLayerParameters,
+  defineParallaxParameters,
+  defineSusceptibilityParameters,
   defineTestPatternSpeed,
 } from '../core/parameters';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
@@ -55,6 +59,40 @@ export function useSceneRegistry(
     return r;
   }, []);
 
+  /**
+   * I-8 / I-14 / Gate 4: "every force is enumerable from the parameter registry
+   * by hierarchical key".
+   *
+   * Registered ONCE, from `FORCE_DEFINITIONS`, outside the per-layer effect —
+   * force parameters are global (I-4) and do not come and go with layers. A
+   * fifth force appears here by existing; nothing in this file names a force.
+   */
+  useEffect(() => {
+    // Idempotent: React runs effects twice in StrictMode and the registry
+    // throws `ParameterCollisionError` on a duplicate key by design (I-8).
+    if (registry.keys('force').length > 0) return;
+    registry.registerAll(
+      defineForceParameters(
+        FORCE_DEFINITIONS,
+        () => sceneRef.current.forces,
+        (forceId, key, value) => {
+          setScene((prev) => ({
+            ...prev,
+            forces: { ...prev.forces, [forceId]: { ...prev.forces[forceId], [key]: value } },
+          }));
+        },
+      ),
+    );
+    // D3. Not a force — see `defineParallaxParameters` — but it is the other
+    // thing that moves entities, and it is addressable for the same reason.
+    registry.registerAll(
+      defineParallaxParameters(
+        () => sceneRef.current.parallax,
+        (parallax) => setScene((prev) => ({ ...prev, parallax })),
+      ),
+    );
+  }, [registry, setScene]);
+
   // Keyed on the layer ids, not the scene: re-registering on every opacity
   // change would churn the registry sixty times a drag for no change in its
   // key set.
@@ -83,6 +121,15 @@ export function useSceneRegistry(
       const specs = providers.get(layer.providerId)?.contentParameters?.(layer.content) ?? [];
       registry.registerAll(
         defineContentParameters(id, specs, readLayer, (content) => patchLayer({ content })),
+      );
+
+      // I-4's entity half. Four segments (`entity.<id>.susceptibility.<forceId>`)
+      // so a force id can never collide with a provider's content key — see
+      // `defineSusceptibilityParameters`.
+      registry.registerAll(
+        defineSusceptibilityParameters(id, FORCE_DEFINITIONS, readLayer, (susceptibility) =>
+          patchLayer({ susceptibility }),
+        ),
       );
     }
     // A deleted layer must give its keys back, or re-adding a layer with the

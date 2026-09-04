@@ -72,6 +72,14 @@ export interface Layer {
    * from the JSON alone. Combined with the scene seed by `layerRng`.
    */
   seed: number;
+  /**
+   * I-4. Per-force susceptibility, sparse — see `Susceptibility`. Phase 4.
+   *
+   * This is the entity half of "forces are broadcast; entities subscribe with a
+   * per-force susceptibility". It is scene state and nothing else: the force
+   * bus reads it, never writes it.
+   */
+  susceptibility: Susceptibility;
 }
 
 export const DEFAULT_TRANSFORM: NormalizedTransform = {
@@ -92,6 +100,42 @@ export function wrapTurn(v: number): number {
   if (!Number.isFinite(v)) return 0;
   const t = v % 1;
   return t < 0 ? t + 1 : t;
+}
+
+/**
+ * A key segment: what may appear between the dots of a hierarchical parameter
+ * key (I-8). Lives here because it constrains *stored state* — a force id in a
+ * layer's susceptibility map becomes `entity.<id>.susceptibility.<forceId>`, so
+ * a scene carrying a force id with a dot in it would produce a key that cannot
+ * be addressed. Rejected where it is stored rather than where it is registered.
+ */
+const KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+export function isKeySegment(v: unknown): v is string {
+  return typeof v === 'string' && KEY_SEGMENT.test(v);
+}
+
+/**
+ * I-4. How strongly this layer responds to each force, by force id, in [0, 1].
+ *
+ * A **sparse** map on purpose: an absent force id means "whatever this force's
+ * definition says entities do by default", not zero. That is what lets
+ * `timeOfDay` reach every layer in a scene authored before it existed — the
+ * alternative, filling every layer with every force id at creation, would make
+ * adding a fifth force a migration of every stored scene, which is precisely
+ * the rewrite I-14 exists to avoid.
+ */
+export type Susceptibility = Record<string, number>;
+
+export function canonicalizeSusceptibility(raw: unknown): Susceptibility {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const out: Susceptibility = {};
+  for (const [forceId, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isKeySegment(forceId)) continue;
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    out[forceId] = clamp01(v);
+  }
+  return out;
 }
 
 /**
@@ -161,6 +205,7 @@ export interface LayerInit {
   depth?: number;
   visible?: boolean;
   seed?: number;
+  susceptibility?: Susceptibility;
 }
 
 export function createLayer(init: LayerInit): Layer {
@@ -178,5 +223,6 @@ export function createLayer(init: LayerInit): Layer {
     // Deterministic from the id, so a layer created without an explicit seed is
     // still reproducible across sessions (I-12). A caller may override it.
     seed: Number.isFinite(init.seed) ? (init.seed as number) >>> 0 : hashString(init.id),
+    susceptibility: canonicalizeSusceptibility(init.susceptibility),
   };
 }

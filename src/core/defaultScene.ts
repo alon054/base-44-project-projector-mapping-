@@ -368,6 +368,223 @@ export function createPhase3LoadScene(n: number): Scene {
 }
 
 /**
+ * **Phase 4's scene — the one Gate 4 is judged on.**
+ *
+ * Built to be *watched*, not computed. Phase 1's defect was a scene that could
+ * not demonstrate the invariant it sat under; Phase 2's was a control that
+ * could not be operated; Phase 3's was an instrument that lied. Phase 4's
+ * analogous risk, named in advance, is a force bus that is provably correct and
+ * whose effect nobody can see. So this scene is arranged as two side-by-side
+ * controlled experiments, each isolating exactly one variable, with everything
+ * else held equal:
+ *
+ * **Left half — susceptibility, at one depth.** Three identical bars at
+ * `depth 0.5`, same size, same y, evenly spaced, differing only in
+ * `susceptibility.wind`: 0.0, 0.5, 1.0. They are colour-coded so the operator
+ * can name them from across a room (grey / amber / cyan), and because they are
+ * identical in every other respect, one wind slider producing three different
+ * amounts of movement *is* Gate 4's first condition, seen rather than argued.
+ * The grey bar not moving at all is the control, and it is deliberately the
+ * leftmost so that "one of them stays still" is the first thing you notice.
+ *
+ * **Right half — depth, at one susceptibility.** Three trees, all at
+ * `susceptibility.wind = 0.7`, at `depth` 0.08, 0.5 and 0.95. Same force, same
+ * subscription, different plane. They sway by visibly different amounts and
+ * they slide across each other when the parallax control is swept — Gate 4's
+ * third condition, and D3's whole claim that depth is what converts decoration
+ * into space. `depthGain` IS the depth, so the far tree responds at 0.15x and
+ * the near one at 0.95x — a 6.3x spread, chosen to be unmistakable rather than
+ * subtle.
+ *
+ * **Every full-frame layer here is at `depth 0`, and that is not decoration.**
+ * I-1 caps a layer's `width` at 1, so a layer spanning the frame has no bleed;
+ * any parallax at all slides a black band in from one edge. A golden preview
+ * caught it — see `DEPTH_GAIN_FAR` in `forces.ts`. The sky, the hills, the
+ * water and the rain sheet are therefore pinned, and everything with a visible
+ * edge inside the frame is free to move.
+ *
+ * **The sky and the ground** exist so `timeOfDay` has something large to act on
+ * — Gate 4's second condition is about the WHOLE scene's light, and a scene of
+ * thin objects on black has no light to sweep. Both sit at low depth so they
+ * barely parallax, which is what makes the trees appear to move against them.
+ *
+ * **The lantern** is an `add` layer (I-6): it is how you tell whether
+ * `timeOfDay` is dimming *light sources* the same way it dims surfaces. On a
+ * projector it should read as light in the scene rather than paint on it (D1).
+ *
+ * **The rain** is a full-frame sheet with `susceptibility.wind = 0`, and that
+ * zero is load-bearing: translating a full-frame layer would drag its edges
+ * into view. The sheet stays put and the DROPS inside it lean, because
+ * `RainView` reads the wind force's raw parameters — a force maps onto axes and
+ * cannot create geometry, so a slanted drop is content responding to a force.
+ *
+ * Force values start at a **demonstrable** point rather than at zero: wind at
+ * 0.45 so the scene is already alive when the operator first sees it, rain at 0
+ * so turning it on is an event, and `timeOfDay` at 15.5 — late afternoon, on
+ * the warm shoulder of the day ramp where a sweep in either direction changes
+ * the light immediately. A gate scene that opens looking like nothing is
+ * happening is a gate scene that has to be explained before it can be judged.
+ */
+export function createPhase4Scene(): Scene {
+  /** Held equal across the three susceptibility bars — only `wind` differs. */
+  const bar = (id: string, x: number, tint: number, wind: number): Layer =>
+    createLayer({
+      id,
+      name: `Wind susceptibility ${wind.toFixed(2)}`,
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'rect', tint },
+      transform: { x, y: 0.6, width: 0.05, height: 0.34, rotation: 0 },
+      zOrder: 0,
+      depth: 0.5,
+      susceptibility: { wind },
+    });
+
+  /** Held equal across the three trees — only `depth` differs. */
+  const tree = (id: string, x: number, depth: number): Layer =>
+    createLayer({
+      id,
+      name: `Tree at depth ${depth.toFixed(2)}`,
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'tree', tint: 0x7a5636 },
+      transform: { x, y: 0.58, width: 0.22, height: 0.5, rotation: 0 },
+      zOrder: 0,
+      depth,
+      susceptibility: { wind: 0.7 },
+    });
+
+  const layers: Layer[] = [
+    createLayer({
+      id: 'sky',
+      name: 'Sky',
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'rect', tint: 0x5a86c0 },
+      transform: { x: 0.5, y: 0.32, width: 1, height: 0.66, rotation: 0 },
+      zOrder: 0,
+      opacity: 0.5,
+      // depth 0 — the far plane does not parallax. A full-frame layer MUST be
+      // authored here: I-1 caps `width` at 1, so it has no bleed, and any
+      // parallax at all exposes a black band down one edge. See `depthGain`.
+      depth: 0,
+      // A sky does not sway. Stated rather than left to the default, because
+      // this is the layer whose stillness makes the others' movement legible.
+      susceptibility: { wind: 0 },
+    }),
+    createLayer({
+      id: 'hills',
+      name: 'Hills',
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'rect', tint: 0x2e4a3a },
+      transform: { x: 0.5, y: 0.72, width: 1, height: 0.22, rotation: 0 },
+      zOrder: 1,
+      opacity: 0.9,
+      // Full width, so depth 0 for the same reason as the sky.
+      depth: 0,
+      susceptibility: { wind: 0 },
+    }),
+    createLayer({
+      id: 'water',
+      name: 'Water',
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'water', bands: 16 },
+      transform: { x: 0.5, y: 0.89, width: 1, height: 0.26, rotation: 0 },
+      zOrder: 2,
+      depth: 0,
+      // Full width. Its ripples are its own provider's animation and need no
+      // help from the force bus, so it is pinned on both counts.
+      susceptibility: { wind: 0 },
+    }),
+
+    // Left half: susceptibility at one depth. Grey is the control.
+    { ...bar('sus-000', 0.1, 0x6a7076, 0), zOrder: 3 },
+    { ...bar('sus-050', 0.22, 0xd2952f, 0.5), zOrder: 4 },
+    { ...bar('sus-100', 0.34, 0x35c8c8, 1), zOrder: 5 },
+
+    // Right half: depth at one susceptibility. Far first, so the near tree
+    // occludes the far one and the parallax slide is a real occlusion change.
+    { ...tree('depth-far', 0.58, 0.15), zOrder: 6 },
+    { ...tree('depth-mid', 0.71, 0.5), zOrder: 7 },
+    { ...tree('depth-near', 0.84, 0.95), zOrder: 8 },
+
+    createLayer({
+      id: 'lantern',
+      name: 'Lantern (add)',
+      providerId: PROCEDURAL_PROVIDER_ID,
+      content: { kind: 'glow', rings: 22, tint: 0xffb040 },
+      transform: { x: 0.5, y: 0.34, width: 0.3, height: 0.3, rotation: 0 },
+      zOrder: 9,
+      opacity: 0.9,
+      // I-6: a lantern IS a light source, so `add` on a dark background.
+      blendMode: 'add',
+      depth: 0.65,
+      susceptibility: { wind: 0.3 },
+    }),
+
+    createLayer({
+      id: 'rain',
+      name: 'Rain',
+      providerId: PROCEDURAL_PROVIDER_ID,
+      // A8: `drops` is scene state. Nothing derives a count from pixel area.
+      content: { kind: 'rain', drops: 260, tint: 0xbfe0ff, length: 0.06, fallRate: 1.1 },
+      transform: { x: 0.5, y: 0.5, width: 1, height: 1, rotation: 0 },
+      zOrder: 10,
+      // I-6: rain catches light rather than painting over what is behind it.
+      blendMode: 'add',
+      // Full-frame, so depth 0 — a sheet of rain that parallaxed would slide a
+      // rain-free band across the frame. Rain is conceptually in FRONT of
+      // everything, and this is the one place where the authoring rule and the
+      // fiction disagree; the rule wins, because the artefact is visible and
+      // the fiction is not.
+      depth: 0,
+      // Load-bearing zero — see this function's header.
+      susceptibility: { wind: 0 },
+    }),
+  ];
+
+  return createScene({
+    id: 'phase4-forces',
+    name: 'Phase 4 — forces & parallax',
+    seed: 0x4f0,
+    background: 0x000000,
+    layers,
+    forces: {
+      wind: { strength: 0.45, direction: 0, gustiness: 0.5 },
+      rain: { intensity: 0, wetness: 0.6 },
+      timeOfDay: { hour: 15.5 },
+      temperature: { warmth: 0.5 },
+    },
+  });
+}
+
+/**
+ * The I-14 fixture: the SAME scene, with every entity subscribed to a force
+ * this build may or may not ship.
+ *
+ * Gate 4 asks that a fifth force be added in under 30 minutes, as data,
+ * touching no bus code. The half of that which is easy to fake is the timing;
+ * the half that matters is that the scene needed no edit either. This scene is
+ * `phase4-forces` with one extra key per layer, and it is written now — before
+ * any fifth force exists — so that at the gate the ONLY change is an entry in
+ * `FORCE_DEFINITIONS`. If the fifth force is not registered, every one of these
+ * susceptibilities addresses nothing, the bus ignores them, and the scene
+ * renders identically to `phase4-forces`. That is the correct behaviour and it
+ * is itself worth watching.
+ */
+export function createPhase4FifthForceScene(): Scene {
+  const base = createPhase4Scene();
+  return createScene({
+    ...base,
+    id: 'phase4-fifth',
+    name: 'Phase 4 — fifth force fixture (I-14)',
+    layers: base.layers.map((l) => ({
+      ...l,
+      // Varied on purpose: a fifth force that reached everything equally could
+      // not be told apart from a global grade change.
+      susceptibility: { ...l.susceptibility, fog: 0.25 + 0.75 * l.depth },
+    })),
+  });
+}
+
+/**
  * The named scenes this build can open at, by id.
  *
  * A real scene bank is Phase 6 (D12); this is the minimum that lets `§4`'s
@@ -389,6 +606,10 @@ export const NAMED_SCENES: Readonly<Record<string, () => Scene>> = {
   'phase3-x4': () => createPhase3LoadScene(4),
   'phase3-x5': () => createPhase3LoadScene(5),
   'phase3-x6': () => createPhase3LoadScene(6),
+  // Phase 4. `phase4-forces` is what Gate 4 is judged on and what §4's Phase 4
+  // measurement window is taken at; `phase4-fifth` is the I-14 fixture.
+  'phase4-forces': createPhase4Scene,
+  'phase4-fifth': createPhase4FifthForceScene,
 };
 
 /** Undefined for an unknown id — the caller keeps its current scene (I-13). */

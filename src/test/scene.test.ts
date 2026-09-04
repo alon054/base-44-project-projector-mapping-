@@ -29,6 +29,8 @@ import {
   serializeScene,
   type Scene,
 } from '../core/scene';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
+import { createPhase4Scene } from '../core/defaultScene';
 
 const RESOLUTIONS = [
   DEV_RESOLUTION,
@@ -255,5 +257,134 @@ describe('I-12 seeds live in scene state', () => {
     const back = deserializeScene(serializeScene(s));
     expect(back.seed).toBe(777);
     expect(back.layers[0]!.seed).toBe(4242);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase 4 — forces, susceptibility and parallax in scene state               */
+/* -------------------------------------------------------------------------- */
+
+describe('I-4 / I-12 — force state round-trips deep-equal', () => {
+  const phase4 = (): Scene =>
+    createScene({
+      id: 'p4',
+      seed: 0x4f0,
+      forces: { wind: { strength: 0.45, direction: 0.125, gustiness: 0.5 } },
+      parallax: { x: 0.7, y: 0.35 },
+      layers: [
+        createLayer({
+          id: 'a',
+          providerId: 'procedural',
+          depth: 0.9,
+          susceptibility: { wind: 1, timeOfDay: 0.25 },
+        }),
+        createLayer({ id: 'b', providerId: 'procedural', depth: 0.1 }),
+      ],
+    });
+
+  it('survives serialize -> deserialize exactly', () => {
+    const scene = phase4();
+    expect(deepEqual(deserializeScene(serializeScene(scene)), scene)).toBe(true);
+  });
+
+  it('round-trips twice to the same bytes', () => {
+    const once = serializeScene(phase4());
+    expect(serializeScene(deserializeScene(once))).toBe(once);
+  });
+
+  it('an absent susceptibility map is {} and NOT filled with every force', () => {
+    // Sparse on purpose (see `Susceptibility`): filling it would make adding a
+    // fifth force a migration of every stored scene, which is the rewrite I-14
+    // exists to prevent.
+    expect(phase4().layers[1]!.susceptibility).toEqual({});
+  });
+
+  it('an absent forces block is filled from the shipped definitions', () => {
+    // Dense on purpose, the other way round: the stored JSON should STATE the
+    // forces rather than defer to whatever the code's defaults are next year.
+    const scene = createScene({ id: 'bare' });
+    for (const def of FORCE_DEFINITIONS) {
+      for (const p of def.params) expect(scene.forces[def.id]?.[p.key]).toBe(p.default);
+    }
+  });
+
+  it('keeps force values for ids this build does not know', () => {
+    // Opening a scene on a build without its fifth force and saving it again
+    // must not silently destroy the operator's settings (I-13's principle).
+    const raw = JSON.parse(serializeScene(createScene({ id: 'x' })));
+    raw.forces.fog = { density: 0.8 };
+    const back = canonicalizeScene(raw);
+    expect(back.forces['fog']).toEqual({ density: 0.8 });
+    expect(deepEqual(deserializeScene(serializeScene(back)), back)).toBe(true);
+  });
+
+  it('clamps susceptibility into [0, 1] and drops nonsense', () => {
+    const l = createLayer({
+      id: 'l',
+      providerId: 'procedural',
+      susceptibility: { wind: 5, rain: -2, bad: Number.NaN } as Record<string, number>,
+    });
+    expect(l.susceptibility).toEqual({ wind: 1, rain: 0 });
+  });
+
+  it('refuses a force id or key that could not be a registry segment (I-8)', () => {
+    // These become `force.<id>.<key>`; a dot in either would produce a key that
+    // cannot be addressed, so it is refused where it is STORED.
+    expect(() => canonicalizeScene({ id: 's', forces: { 'wi.nd': { a: 1 } } })).toThrow(
+      SceneFormatError,
+    );
+    expect(() => canonicalizeScene({ id: 's', forces: { wind: { 'a b': 1 } } })).toThrow(
+      SceneFormatError,
+    );
+  });
+
+  it('refuses a non-numeric force value rather than reading it as a default', () => {
+    // Silently defaulting would put the operator in front of a wall wondering
+    // why the wind control does nothing.
+    expect(() =>
+      canonicalizeScene({ id: 's', forces: { wind: { strength: '0.5' } } }),
+    ).toThrow(SceneFormatError);
+  });
+
+  it('parallax is normalized like every other spatial value (I-1)', () => {
+    expect(createScene({ id: 's', parallax: { x: 4, y: -4 } }).parallax).toEqual({ x: 1, y: 0 });
+    expect(createScene({ id: 's' }).parallax).toEqual({ x: 0.5, y: 0.5 });
+    expect(canonicalizeScene({ id: 's', parallax: 'nope' }).parallax).toEqual({ x: 0.5, y: 0.5 });
+  });
+});
+
+describe('the Phase 4 gate scene is built to be judged', () => {
+  it('isolates susceptibility at one depth and depth at one susceptibility', () => {
+    const scene = createPhase4Scene();
+    const bars = ['sus-000', 'sus-050', 'sus-100'].map(
+      (id) => scene.layers.find((l) => l.id === id)!,
+    );
+    // Everything held equal except `susceptibility.wind` — otherwise the
+    // operator cannot attribute what they see to the variable under test.
+    expect(new Set(bars.map((b) => b.depth)).size).toBe(1);
+    expect(new Set(bars.map((b) => b.transform.height)).size).toBe(1);
+    expect(new Set(bars.map((b) => b.transform.width)).size).toBe(1);
+    expect(bars.map((b) => b.susceptibility['wind'])).toEqual([0, 0.5, 1]);
+
+    const trees = ['depth-far', 'depth-mid', 'depth-near'].map(
+      (id) => scene.layers.find((l) => l.id === id)!,
+    );
+    expect(new Set(trees.map((t) => t.susceptibility['wind'])).size).toBe(1);
+    expect(trees.map((t) => t.depth)).toEqual([0.15, 0.5, 0.95]);
+  });
+
+  it('opens with the wind already blowing, so there is something to judge', () => {
+    // A gate scene that opens looking like nothing is happening is a gate scene
+    // that has to be explained before it can be judged.
+    expect(createPhase4Scene().forces['wind']?.['strength']).toBeGreaterThan(0.2);
+  });
+
+  it('holds the rain sheet still — a translated full-frame layer shows its edges', () => {
+    expect(createPhase4Scene().layers.find((l) => l.id === 'rain')!.susceptibility['wind']).toBe(0);
+  });
+
+  it('round-trips deep-equal like any other scene', () => {
+    const scene = createPhase4Scene();
+    expect(deepEqual(deserializeScene(serializeScene(scene)), scene)).toBe(true);
   });
 });

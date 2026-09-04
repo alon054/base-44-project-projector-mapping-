@@ -37,8 +37,10 @@ import {
   createPhase3Scene,
   createResilienceVideoScene,
   sceneById,
+  createPhase4Scene,
 } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
+import { ForcePanel } from './ForcePanel';
 import {
   calibrationFor,
   canonicalizeCalibration,
@@ -487,6 +489,13 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
               >
                 I-13 video
               </button>
+              <button
+                type="button"
+                style={{ ...buttonStyle, marginTop: 0 }}
+                onClick={() => setScene(createPhase4Scene())}
+              >
+                Phase 4 forces
+              </button>
               <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
             </div>
             <p style={{ margin: '6px 0 0', fontSize: 12, color: '#8b939b' }}>
@@ -495,6 +504,10 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
               save/load and undo are all Phase 6 and are not built here.
             </p>
           </div>
+        </Panel>
+
+        <Panel title="Forces & parallax — I-4, I-8, I-14, D3">
+          <ForcePanel scene={scene} registry={registry} />
         </Panel>
 
         <Panel title="Layers — z-order, opacity, blend (I-1, I-6, I-8)">

@@ -12,9 +12,16 @@ import {
   assertValidKey,
   cellParameter,
   defineContentParameters,
+  defineForceParameters,
   defineLayerParameters,
+  defineParallaxParameters,
+  defineSusceptibilityParameters,
   defineTestPatternSpeed,
 } from '../core/parameters';
+import { FORCE_DEFINITIONS } from '../core/forceDefs';
+import type { ForceDefinition, ParallaxState } from '../core/forces';
+import { createPhase4Scene } from '../core/defaultScene';
+import type { Scene } from '../core/scene';
 import {
   PROCEDURAL_KINDS,
   ProceduralProvider,
@@ -399,5 +406,164 @@ describe('warp calibration stays out of the registry (I-5)', () => {
     }
     expect(registry.keys('warp')).toEqual([]);
     expect(registry.has('warp.enabled')).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase 4 — I-8 x I-14                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Builds the registry the editor builds, from a real scene, so these tests
+ * exercise the wiring rather than a construction made for them.
+ */
+function registryForScene(scene: Scene, definitions = FORCE_DEFINITIONS): ParameterRegistry {
+  let state = scene;
+  const r = new ParameterRegistry();
+  r.registerAll(
+    defineForceParameters(
+      definitions,
+      () => state.forces,
+      (forceId, key, value) => {
+        state = {
+          ...state,
+          forces: { ...state.forces, [forceId]: { ...state.forces[forceId], [key]: value } },
+        };
+      },
+    ),
+  );
+  r.registerAll(
+    defineParallaxParameters(
+      () => state.parallax,
+      (parallax: ParallaxState) => {
+        state = { ...state, parallax };
+      },
+    ),
+  );
+  for (const layer of scene.layers) {
+    const readLayer = () => state.layers.find((l) => l.id === layer.id)!;
+    r.registerAll(
+      defineSusceptibilityParameters(layer.id, definitions, readLayer, (susceptibility) => {
+        state = {
+          ...state,
+          layers: state.layers.map((l) => (l.id === layer.id ? { ...l, susceptibility } : l)),
+        };
+      }),
+    );
+  }
+  return r;
+}
+
+describe('Gate 4 — every force is enumerable from the registry by hierarchical key', () => {
+  const scene = createPhase4Scene();
+
+  it('every force, and every parameter of it, has a key', () => {
+    const r = registryForScene(scene);
+    for (const def of FORCE_DEFINITIONS) {
+      for (const p of def.params) {
+        const key = `force.${def.id}.${p.key}`;
+        expect(r.has(key), key).toBe(true);
+        expect(() => assertValidKey(key)).not.toThrow();
+      }
+    }
+  });
+
+  it('enumerating `force` finds them and nothing else', () => {
+    const r = registryForScene(scene);
+    const expected = FORCE_DEFINITIONS.flatMap((d) =>
+      d.params.map((p) => `force.${d.id}.${p.key}`),
+    ).sort();
+    expect(r.keys('force')).toEqual(expected);
+  });
+
+  it('reads back the scene\u2019s stored values, not the code defaults', () => {
+    const r = registryForScene(scene);
+    expect(r.read('force.wind.strength')).toBe(scene.forces['wind']?.['strength']);
+    expect(r.read('force.timeOfDay.hour')).toBe(15.5);
+  });
+
+  it('a write lands in scene state and reads back (I-12: one source of truth)', () => {
+    const r = registryForScene(scene);
+    r.write('force.wind.strength', 0.8);
+    expect(r.read('force.wind.strength')).toBe(0.8);
+    // Out of range is clamped, not refused — a mapped knob overshoots.
+    expect(r.write('force.wind.strength', 99)).toBe(1);
+  });
+
+  it('I-14: a fifth force appears in the registry with no edit here', () => {
+    const FOG: ForceDefinition = {
+      id: 'fog',
+      label: 'Fog',
+      axes: ['opacity'],
+      defaultSusceptibility: 1,
+      params: [{ key: 'density', label: 'Density', min: 0, max: 1, default: 0, step: 0.01 }],
+      evaluate: () => ({}),
+    };
+    const r = registryForScene(scene, [...FORCE_DEFINITIONS, FOG]);
+    expect(r.has('force.fog.density')).toBe(true);
+    expect(r.keys('force')).toContain('force.fog.density');
+    // And so does its per-entity subscription, for every layer.
+    for (const l of scene.layers) {
+      expect(r.has(`entity.${l.id}.susceptibility.fog`)).toBe(true);
+    }
+  });
+});
+
+describe('I-4 — susceptibility is addressable per entity per force', () => {
+  const scene = createPhase4Scene();
+
+  it('uses four segments so a force id cannot collide with a content key', () => {
+    // `entity.tree.wind` would collide with a provider that ever exposed a
+    // content key called `wind`. I-8 exists precisely so names cannot collide.
+    const r = registryForScene(scene);
+    const key = 'entity.sus-100.susceptibility.wind';
+    expect(r.has(key)).toBe(true);
+    expect(key.split('.').length).toBe(4);
+  });
+
+  it('reports what the layer will actually do, not 0, when it states nothing', () => {
+    // A registry that answered 0 for a layer visibly moving in the wind would
+    // be an instrument that lies, which is the Phase 3 lesson.
+    const r = registryForScene(scene);
+    const lantern = scene.layers.find((l) => l.id === 'lantern')!;
+    expect(lantern.susceptibility['timeOfDay']).toBeUndefined();
+    expect(r.read('entity.lantern.susceptibility.timeOfDay')).toBe(
+      FORCE_DEFINITIONS.find((d) => d.id === 'timeOfDay')!.defaultSusceptibility,
+    );
+  });
+
+  it('a write is clamped into [0, 1] and reads back', () => {
+    const r = registryForScene(scene);
+    r.write('entity.sus-000.susceptibility.wind', 0.75);
+    expect(r.read('entity.sus-000.susceptibility.wind')).toBe(0.75);
+    expect(r.write('entity.sus-000.susceptibility.wind', 5)).toBe(1);
+  });
+
+  it('deleting a layer takes its susceptibility keys with it', () => {
+    const r = registryForScene(scene);
+    expect(r.keys('entity.lantern').length).toBeGreaterThan(0);
+    r.unregisterPrefix('entity.lantern');
+    expect(r.keys('entity.lantern')).toEqual([]);
+  });
+});
+
+describe('D3 — parallax is addressable, and is NOT filed as a force', () => {
+  it('registers under parallax.*, not force.*', () => {
+    const r = registryForScene(createPhase4Scene());
+    expect(r.has('parallax.x')).toBe(true);
+    expect(r.has('parallax.y')).toBe(true);
+    // Gate 4 asks that every force is enumerable from the registry. If parallax
+    // were filed under `force.`, that enumeration would answer with something
+    // that is not a force — it is the viewpoint, scaled by depth, not by a
+    // per-entity susceptibility (I-4).
+    expect(r.keys('force').some((k) => k.includes('parallax'))).toBe(false);
+    expect(FORCE_DEFINITIONS.some((d) => d.id === 'parallax')).toBe(false);
+  });
+
+  it('round-trips a write through scene state', () => {
+    const r = registryForScene(createPhase4Scene());
+    r.write('parallax.x', 0.2);
+    expect(r.read('parallax.x')).toBe(0.2);
+    expect(r.read('parallax.y')).toBe(0.5);
   });
 });

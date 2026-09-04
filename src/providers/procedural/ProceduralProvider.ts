@@ -22,7 +22,7 @@ import type {
 
 export const PROCEDURAL_PROVIDER_ID = 'procedural';
 
-export const PROCEDURAL_KINDS = ['testPattern', 'tree', 'water', 'glow', 'rect', 'fault'] as const;
+export const PROCEDURAL_KINDS = ['testPattern', 'tree', 'water', 'glow', 'rect', 'rain', 'fault'] as const;
 export type ProceduralKind = (typeof PROCEDURAL_KINDS)[number];
 
 export function isProceduralKind(v: unknown): v is ProceduralKind {
@@ -79,6 +79,35 @@ export class ProceduralProvider implements ContentProvider {
           tint,
           { key: 'cells', label: 'Cells', kind: 'number', default: 8, min: 1, max: 64, step: 1 },
         ];
+      case 'rain':
+        return [
+          tint,
+          // **A8 / I-12.** `drops` is scene state and is NOT derived from the
+          // output's pixel area. SPEC.md §11 Phase 4 is explicit: 1080p has
+          // 2.25x the pixels of 720p, so a count derived from area would make
+          // the same seed and the same state produce 2.25x the drops and a
+          // different intended look at a different resolution. Only the drops'
+          // POSITIONS and SIZES come from the box, via I-1.
+          { key: 'drops', label: 'Drops', kind: 'number', default: 220, min: 1, max: 2000, step: 1 },
+          {
+            key: 'length',
+            label: 'Drop length',
+            kind: 'number',
+            default: 0.045,
+            min: 0.005,
+            max: 0.3,
+            step: 0.005,
+          },
+          {
+            key: 'fallRate',
+            label: 'Fall rate',
+            kind: 'number',
+            default: 0.9,
+            min: 0.05,
+            max: 4,
+            step: 0.01,
+          },
+        ];
       case 'tree':
       case 'rect':
         return [tint];
@@ -105,6 +134,8 @@ export class ProceduralProvider implements ContentProvider {
         return new GlowView(ctx);
       case 'rect':
         return new RectView(ctx);
+      case 'rain':
+        return new RainView(ctx);
       case 'fault':
         return new FaultView(ctx);
     }
@@ -256,8 +287,12 @@ class TreeView extends BaseView {
   }
 
   update(): void {
-    // Static in Phase 1. Wind sway arrives in Phase 4 (I-4), driven by the
-    // global clock (I-2), not by anything this view counts for itself.
+    // Still nothing per frame, and in Phase 4 that is the POINT rather than an
+    // omission. The tree sways because the compositor applies the force bus's
+    // `offsetX`/`offsetY`/`rotate` axes to its holder (I-4) — this provider
+    // does not know that wind exists, has no susceptibility logic in it, and
+    // did not change when forces arrived. That is what "forces are broadcast"
+    // buys: the mechanism is in one place and every entity gets it for free.
   }
 }
 
@@ -410,6 +445,128 @@ class FaultView extends BaseView {
 
   update(): void {
     throw new Error('procedural fault fixture: deliberate failure at update (I-13)');
+  }
+}
+
+/** One drop's geometry, normalized and generated once (I-1, I-12). */
+interface Drop {
+  /** Column, [0, 1) of the box width. */
+  x: number;
+  /** Where in its fall this drop starts, [0, 1). Keeps drops out of lockstep. */
+  phase: number;
+  /** Per-drop speed multiplier — near drops fall faster than distant ones. */
+  speed: number;
+  /** Length multiplier on the layer's `length`, giving depth within the sheet. */
+  scale: number;
+  alpha: number;
+}
+
+/**
+ * Rain — the **entity** half of the `rain` force (Phase 4).
+ *
+ * A force maps parameters onto the axis vocabulary; it cannot create geometry.
+ * The `rain` force definition therefore contributes only the wetness tint, and
+ * the drops live here, as content that reads the force's raw parameters off
+ * `frame.forces`. That is what `LayerFrame.forces` is for.
+ *
+ * Three constraints this view is built around, all of them named in SPEC.md:
+ *
+ * **A8 — density is scene state.** The drop COUNT comes from
+ * `content.drops`. Nothing here reads the output resolution to decide how many
+ * of anything to draw. Only positions and stroke widths derive from the box
+ * (I-1), so the same scene at 1080p is the same rain, larger.
+ *
+ * **I-2 — position is derived from clock time, never accumulated.** A drop's
+ * height is `frac(phase + t * rate)`. There is no per-drop state that a scrub
+ * could fail to update, so scrubbing lands the rain exactly where that time
+ * landed before, the same way Gate 3's sprite loops do.
+ *
+ * **The strokes are deliberately thick.** Gate 2 established, and Phase 3
+ * confirmed, that the blur on the wall is CONTENT and not the projector: thin
+ * strokes, translucent lines and soft gradients are what read as soft. Rain is
+ * exactly that content, so the drop width is floored at 2 px and scaled from
+ * the box rather than left at a hairline.
+ */
+class RainView extends BaseView {
+  private readonly g = new Graphics();
+  private readonly drops: Drop[] = [];
+  private readonly tint: number;
+  private readonly length: number;
+  private readonly fallRate: number;
+
+  constructor(ctx: ProviderContext) {
+    super(ctx);
+    const tint = ctx.content['tint'];
+    this.tint = typeof tint === 'number' ? tint >>> 0 : 0xaad4ff;
+    const len = ctx.content['length'];
+    this.length = typeof len === 'number' && len > 0 ? Math.min(0.3, Math.max(0.005, len)) : 0.045;
+    const rate = ctx.content['fallRate'];
+    this.fallRate = typeof rate === 'number' && rate > 0 ? Math.min(4, Math.max(0.05, rate)) : 0.9;
+
+    // A8: from scene state. Generated ONCE, like the tree's branches — drawing
+    // a fresh stream on resize would give a different rain at a different
+    // resolution, which is the same I-12 violation from the other direction.
+    const count = numberOr(ctx.content['drops'], 220, 1, 2000);
+    const rng = ctx.rng('drops');
+    for (let i = 0; i < count; i++) {
+      this.drops.push({
+        x: rng.next(),
+        phase: rng.next(),
+        speed: rng.range(0.7, 1.45),
+        scale: rng.range(0.55, 1.3),
+        alpha: rng.range(0.35, 0.95),
+      });
+    }
+    this.view.addChild(this.g);
+    this.redraw();
+  }
+
+  protected redraw(): void {
+    // Nothing resolution-derived is cached; `update` redraws from the box every
+    // frame. Present because `BaseView` requires it.
+  }
+
+  update(frame: LayerFrame): void {
+    const { w, h } = this;
+    const g = this.g.clear();
+    if (w === 0 || h === 0) return;
+
+    const intensity = frame.forces.param('rain', 'intensity');
+    if (intensity <= 0) return;
+
+    // Wind slants the rain. The view reads the wind force's raw parameters for
+    // the same reason it reads rain's: a slant is geometry, and geometry is not
+    // something an axis can express. The rain LAYER is authored with a wind
+    // susceptibility of 0 in `defaultScene.ts`, because translating a
+    // full-frame sheet would drag its edges into view — the sheet stays put and
+    // the drops inside it lean.
+    const windStrength = frame.forces.param('wind', 'strength');
+    const windAngle = frame.forces.param('wind', 'direction') * Math.PI * 2;
+    const slant = Math.cos(windAngle) * windStrength * 0.55;
+
+    // Intensity thins the rain out by drawing fewer of the SAME drops, in a
+    // stable order, so turning it up adds drops rather than rearranging them.
+    const shown = Math.max(1, Math.round(this.drops.length * intensity));
+    const t = frame.timeSeconds;
+    // Floored at 2 px — see this class's header on why rain is the content most
+    // likely to read as soft on a wall.
+    const width = Math.max(2, h * 0.005);
+
+    for (let i = 0; i < shown; i++) {
+      const d = this.drops[i]!;
+      // Derived, never accumulated (I-2). `frac` of a linear function of clock
+      // time, so a scrub is exact and a pause is a held frame.
+      const fall = d.phase + t * this.fallRate * d.speed;
+      const y = (fall - Math.floor(fall)) * (1 + this.length) - this.length;
+      const len = this.length * d.scale;
+      const x0 = d.x * w;
+      g.moveTo(x0, y * h).lineTo(x0 + slant * len * h, (y + len) * h);
+      g.stroke({
+        width: width * d.scale,
+        color: this.tint,
+        alpha: d.alpha * Math.min(1, 0.3 + intensity),
+      });
+    }
   }
 }
 

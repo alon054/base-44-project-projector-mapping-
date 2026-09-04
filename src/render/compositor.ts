@@ -17,6 +17,7 @@
  */
 import { Container, Graphics } from 'pixi.js';
 import { toPixelRect, type Layer } from '../core/layer';
+import { identityModulation, type Modulation } from '../core/forces';
 import {
   failedLayers,
   isolateCreate,
@@ -30,6 +31,9 @@ import type { LayerFrame, LayerView, ProviderRegistry } from '../providers/Conte
 import { toPixiBlendMode } from './blend';
 import { createPlaceholderGraphic } from './placeholder';
 
+/** Frozen: the compositor reads it every mount and must never mutate it. */
+const IDENTITY_MODULATION: Modulation = Object.freeze(identityModulation());
+
 export interface CompositorOptions {
   providers: ProviderRegistry;
   width: number;
@@ -41,6 +45,38 @@ export interface CompositorOptions {
 interface Mounted {
   /** Holds the provider view, and carries the layer's transform/blend/alpha. */
   holder: Container;
+  /**
+   * The last modulated values written to `holder`, so a frame in which nothing
+   * moved writes nothing (A14).
+   *
+   * This is not premature: `tint` and `blendMode` are the two properties in
+   * PixiJS v8 whose setters can invalidate a batch, and writing them 60 times a
+   * second on eight layers that are not being modulated would put a cost on the
+   * render thread that no force is asking for. `blendMode` is written only at
+   * mount for the same reason.
+   */
+  applied: AppliedModulation;
+}
+
+/** What actually reaches the renderer, after modulation. Pixels and radians. */
+interface AppliedModulation {
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  alpha: number;
+  tint: number;
+}
+
+const TAU = Math.PI * 2;
+
+/** The axis triple as a PixiJS tint. White is the no-op — see `forces.ts`. */
+function tintFromAxes(m: Modulation): number {
+  const to8 = (v: number): number => {
+    const n = Math.round((v < 0 ? 0 : v > 1 ? 1 : v) * 255);
+    return n < 0 ? 0 : n > 255 ? 255 : n;
+  };
+  return (to8(m.tintR) << 16) | (to8(m.tintG) << 8) | to8(m.tintB);
 }
 
 export class Compositor {
@@ -128,9 +164,48 @@ export class Compositor {
     holder.addChild(entry.view.view);
     this.applyTransform(holder, entry.layer);
     this.layerRoot.addChild(holder);
-    this.mounts.set(entry.layer.id, { holder });
+    this.mounts.set(entry.layer.id, {
+      holder,
+      // Seeded with exactly what `applyTransform` just wrote, so an unmodulated
+      // scene writes nothing on its first frame and the blessed golden frames
+      // are unchanged by the force bus existing (§8.1).
+      applied: this.appliedFor(entry.layer, IDENTITY_MODULATION),
+    });
     const box = this.pixelBox(entry.layer);
     entry.view.resize(box.w, box.h);
+  }
+
+  /**
+   * I-1 and I-4 meeting. The stored transform is normalized and the modulation
+   * is normalized; both become pixels here and nowhere else, and neither is
+   * ever written back into the layer — a modulated position is a fact about
+   * this frame, not an edit to the scene.
+   */
+  private appliedFor(layer: Layer, m: Modulation): AppliedModulation {
+    const rect = toPixelRect(layer.transform, this.width, this.height);
+    return {
+      x: rect.cx + m.offsetX * this.width,
+      y: rect.cy + m.offsetY * this.height,
+      rotation: rect.rotation + m.rotate * TAU,
+      scale: m.scale,
+      alpha: layer.opacity * m.opacity,
+      tint: tintFromAxes(m),
+    };
+  }
+
+  /**
+   * Writes only what changed. `blendMode`, `visible` and the pivot are not here
+   * — no force axis drives them, and they are written at mount and on resize.
+   */
+  private writeModulation(mount: Mounted, next: AppliedModulation): void {
+    const prev = mount.applied;
+    const holder = mount.holder;
+    if (next.x !== prev.x || next.y !== prev.y) holder.position.set(next.x, next.y);
+    if (next.rotation !== prev.rotation) holder.rotation = next.rotation;
+    if (next.scale !== prev.scale) holder.scale.set(next.scale);
+    if (next.alpha !== prev.alpha) holder.alpha = next.alpha;
+    if (next.tint !== prev.tint) holder.tint = next.tint;
+    mount.applied = next;
   }
 
   private pixelBox(layer: Layer): { w: number; h: number } {
@@ -167,7 +242,13 @@ export class Compositor {
     this.drawBackground();
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
-      if (mount) this.applyTransform(mount.holder, entry.layer);
+      if (mount) {
+        this.applyTransform(mount.holder, entry.layer);
+        // Every cached pixel value was derived from the old size. Rebase, or
+        // the next frame's change detection compares against stale pixels and
+        // a layer stays where the previous resolution put it.
+        mount.applied = this.appliedFor(entry.layer, IDENTITY_MODULATION);
+      }
       const box = this.pixelBox(entry.layer);
       entry.view.resize(box.w, box.h);
     }
@@ -188,6 +269,19 @@ export class Compositor {
       mount.holder.addChild(entry.view.view);
       const box = this.pixelBox(entry.layer);
       entry.view.resize(box.w, box.h);
+    }
+
+    // I-4. The force bus reaches EVERY layer here, generically — a layer sways
+    // in the wind without its provider knowing that wind exists, which is what
+    // makes "one wind change ripples through the whole scene" (D4) a property
+    // of the compositor rather than of the providers that happened to
+    // implement it. A layer showing an I-13 placeholder is modulated too: a
+    // broken layer that stopped responding to the scene would read as a second
+    // failure on top of the first.
+    for (const entry of this.entries) {
+      const mount = this.mounts.get(entry.layer.id);
+      if (!mount) continue;
+      this.writeModulation(mount, this.appliedFor(entry.layer, frame.forces.modulationFor(entry.layer)));
     }
   }
 
