@@ -134,6 +134,25 @@ describe('sprite-sheet frame selection', () => {
     expect(frameAt((1 / 1.8) % 1, 9)).toBe(5);
   });
 
+  it('a scrub lands both sheets where their own period says (Gate 3)', () => {
+    // t = 7.3 s, the time the `bundled-spritesheets-scrubbed` golden renders
+    // at. Computed here by hand so the golden is checked against arithmetic
+    // rather than against whatever it happened to produce when it was blessed.
+    //   puff  2.5 s / 25 f: 7.3/2.5 = 2.92 -> phase 0.92 -> frame 23
+    //   burst 1.8 s /  9 f: 7.3/1.8 = 4.06 -> phase 0.06 -> frame 0
+    expect(frameAt((7.3 / 2.5) % 1, 25)).toBe(23);
+    expect(frameAt((7.3 / 1.8) % 1, 9)).toBe(0);
+    // And the Lottie's frame, for `bundled-lottie-scrubbed`: 3 s / 90 f.
+    expect(Math.round(((7.3 / 3) % 1) * 90)).toBe(39);
+  });
+
+  it('the scrubbed frames differ from the un-scrubbed ones', () => {
+    // Otherwise the two goldens would be the same picture and would prove
+    // nothing about the scrub at all.
+    expect(frameAt((7.3 / 2.5) % 1, 25)).not.toBe(frameAt((1 / 2.5) % 1, 25));
+    expect(frameAt((7.3 / 1.8) % 1, 9)).not.toBe(frameAt((1 / 1.8) % 1, 9));
+  });
+
   it('holds still for a nonsense frame count rather than throwing', () => {
     expect(frameAt(0.5, 0)).toBe(0);
     expect(frameAt(0.5, -3)).toBe(0);

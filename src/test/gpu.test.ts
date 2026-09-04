@@ -9,10 +9,13 @@
 import { describe, expect, it } from 'vitest';
 import { judgeSoak, readGpuResources, type GpuSample } from '../debug/gpu';
 
-const census = (buffers: number, geometries: number, textures = 0) => ({
+const census = (buffers: number, geometries: number, textures = 0, slots = textures) => ({
   valid: true,
   invalidReason: '',
   textureCount: textures,
+  // Defaults to the live count. A test that wants the tombstone case — the
+  // Phase 3 defect where `length` grew while nothing leaked — passes both.
+  textureSlots: slots,
   textureBytesEstimate: textures * 1024,
   bufferCount: buffers,
   geometryCount: geometries,
@@ -121,6 +124,7 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         valid: true,
         invalidReason: '',
         textureCount: 2,
+        textureSlots: 2,
         textureBytesEstimate: 8,
         bufferCount: g * 2,
         geometryCount: g,
@@ -155,6 +159,7 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         valid: true,
         invalidReason: '',
         textureCount: 0,
+        textureSlots: 0,
         textureBytesEstimate: 0,
         bufferCount: g,
         geometryCount: g,
@@ -187,8 +192,83 @@ describe('the GPU census survives a destroyed texture', () => {
       geometry: { _managedGeometries: { items: {} } },
     };
     const report = readGpuResources(renderer);
-    expect(report.textureCount).toBe(2);
+    // ONE live texture and one grave. This assertion read `2` until Phase 3 —
+    // it was asserting `managedTextures.length`, which is exactly the bug the
+    // 20-minute soak surfaced as a 5209% false leak. The byte estimate beside
+    // it always described one texture, and nobody noticed the two numbers
+    // disagreeing because Phase 2 never destroyed one.
+    expect(report.textureCount).toBe(1);
+    expect(report.textureSlots).toBe(2);
     expect(report.textureBytesEstimate).toBe(1280 * 720 * 4);
     expect(report.valid).toBe(true);
+  });
+});
+
+/**
+ * The Phase 3 defect: `textureCount` was `managedTextures.length`, and PixiJS
+ * nulls a destroyed entry rather than compacting the array.
+ *
+ * Phase 1 had no textures and Phase 2 had one composite render texture that
+ * was never destroyed, so `length` and "live count" were the same number and
+ * the difference could not show. Phase 3 creates and destroys a texture per
+ * video and per Lottie on every scene rebuild, and the 20-minute soak read
+ * 23 → 1221 across 604 rebuilds: a reported 5209% drift and a failed rolling
+ * check, with `textureBytesEstimate` pinned flat at 12,861,448 the entire time.
+ *
+ * A9: "an instrument that emits a plausible wrong number is worse than one
+ * that fails loudly." A FALSE leak is the worse kind, because it sends someone
+ * hunting something that is not there and makes the next real one easier to
+ * disbelieve.
+ */
+describe('the census counts live textures, not graves', () => {
+  const withSlots = (live: (unknown | null)[]): unknown => ({
+    texture: { managedTextures: live },
+    // The shape PixiJS actually uses — a hash with an `items` map, not an
+    // array. `countManaged` returns null for anything else and the census
+    // then reports INVALID, which is A9 working.
+    buffer: { _managedBuffers: { items: {} } },
+    geometry: { _managedGeometries: { items: {} } },
+  });
+  const tex = (w: number, h: number) => ({ pixelWidth: w, pixelHeight: h });
+
+  it('ignores null slots in the count', () => {
+    const r = readGpuResources(withSlots([tex(2, 2), null, null, tex(4, 4)]));
+    expect(r.valid).toBe(true);
+    expect(r.textureCount).toBe(2);
+    // The array's own length is reported too — as information, because it does
+    // grow without bound and that is worth being able to see.
+    expect(r.textureSlots).toBe(4);
+  });
+
+  it('the count and the byte estimate describe the SAME set', () => {
+    // This is the property whose absence produced the false leak: a count of
+    // 1221 sitting beside a flat 12.8 MB could only mean the two numbers were
+    // measuring different things.
+    const r = readGpuResources(withSlots([tex(10, 10), null, tex(10, 10)]));
+    expect(r.textureCount).toBe(2);
+    expect(r.textureBytesEstimate).toBe(2 * 10 * 10 * 4);
+  });
+
+  it('a soak that destroys and recreates textures is FLAT', () => {
+    // 600 rebuilds, two textures destroyed and two created each time. Live
+    // count and bytes never move; only the array's length does.
+    const soak = series(
+      census(4, 2, 3, 3),
+      census(4, 2, 3, 603),
+      census(4, 2, 3, 1203),
+    );
+    const v = judgeSoak(soak, 600);
+    expect(v.valid).toBe(true);
+    expect(v.driftTextureCount).toBe(0);
+    expect(v.flat).toBe(true);
+  });
+
+  it('a REAL texture leak is still caught', () => {
+    // The check must not have been softened into uselessness by the fix. Live
+    // count rising is still a failure, however small the slope.
+    const leaking = series(census(4, 2, 3, 3), census(4, 2, 9, 9), census(4, 2, 15, 15));
+    const v = judgeSoak(leaking, 600);
+    expect(v.driftTextureCount).toBeGreaterThan(0);
+    expect(v.flat).toBe(false);
   });
 });

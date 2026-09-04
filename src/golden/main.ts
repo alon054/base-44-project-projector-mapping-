@@ -31,7 +31,7 @@ import { createLayer } from '../core/layer';
 import { createScene, type Scene } from '../core/scene';
 import { addLayer, moveLayer } from '../core/sceneEdit';
 import { createDefaultScene, createPhase3Scene } from '../core/defaultScene';
-import { ProviderRegistry } from '../providers/ContentProvider';
+import { ProviderRegistry, type LayerFrame } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider, BUNDLED_PROVIDER_ID } from '../providers/bundled/BundledProvider';
 import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manifest';
@@ -111,6 +111,16 @@ interface GoldenCase {
    * what the `warp-identity` and `warp-disabled` cases are compared against.
    */
   warp?: ViewportCalibration;
+  /**
+   * Render at this clock time instead of `GOLDEN_FRAME`'s.
+   *
+   * Gate 3 asks that "two sprite/Lottie loops of different lengths stay
+   * phase-consistent relative to the clock after a scrub". `clock.test.ts`
+   * proves that of the arithmetic; this proves it of the RENDER, which is a
+   * different claim — a view that ignored `timeSeconds` and advanced a counter
+   * of its own would pass every pure test and fail here.
+   */
+  timeSeconds?: number;
   /**
    * Asset URLs to load before rendering.
    *
@@ -340,6 +350,36 @@ function cases(): GoldenCase[] {
       // as a flagged placeholder, not as a crash and not as a black rectangle.
       name: 'bundled-missing-asset',
       scene: bundledMissing(),
+    },
+    {
+      // -------------------------------------------------------------------
+      // THE SCRUB, at the render level (Gate 3, I-2).
+      //
+      // Same scene as `bundled-spritesheets`, same everything, rendered at
+      // t = 7.3 s instead of t = 1 s. Nothing "played" between the two — this
+      // IS a scrub, in the only sense the engine has: a different clock time
+      // handed to the same views.
+      //
+      // The frames are computable by hand and are asserted in `seam.test.ts`
+      // as arithmetic:
+      //   puff  2.5 s / 25 f: 7.3/2.5 = 2.92 -> phase 0.92 -> frame 23
+      //   burst 1.8 s /  9 f: 7.3/1.8 = 4.06 -> phase 0.06 -> frame 0
+      // Both loops land where their own period says, and neither lands where
+      // 6.3 seconds of playback would have left an accumulating counter.
+      // -------------------------------------------------------------------
+      name: 'bundled-spritesheets-scrubbed',
+      scene: bundledSheets('none'),
+      timeSeconds: 7.3,
+      preload: sheetUrls,
+    },
+    {
+      // The Lottie under the same scrub. 7.3/3 = 2.433 -> phase 0.433 -> frame
+      // 39 of 90. A player running on its own timeline would be wherever
+      // `requestAnimationFrame` had carried it, which is the I-2 violation
+      // this case exists to catch.
+      name: 'bundled-lottie-scrubbed',
+      scene: bundledLottie(),
+      timeSeconds: 7.3,
     },
   ];
 }
@@ -764,10 +804,16 @@ async function run(): Promise<GoldenResult[]> {
       await Promise.allSettled(c.preload.map((u) => Assets.load(u)));
     }
 
+    // Typed as the contract, not as `typeof GOLDEN_FRAME`: that constant is
+    // `as const`, so its `timeSeconds` is the literal 1 and a scrubbed case
+    // could not be built from it.
+    const caseFrame: LayerFrame =
+      c.timeSeconds === undefined ? GOLDEN_FRAME : { ...GOLDEN_FRAME, timeSeconds: c.timeSeconds };
+
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.
       compositor.setScene(c.afterScene);
-      compositor.update(GOLDEN_FRAME);
+      compositor.update(caseFrame);
       warp?.prepare();
       app.renderer.render(app.stage);
     }
@@ -776,15 +822,15 @@ async function run(): Promise<GoldenResult[]> {
     // placeholder on the frame it throws, so a single-frame harness would hash
     // the frame before the swap and never see the placeholder it is meant to
     // be testing (I-13).
-    compositor.update(GOLDEN_FRAME);
-    compositor.update(GOLDEN_FRAME);
+    compositor.update(caseFrame);
+    compositor.update(caseFrame);
     // Let each view's own `Assets.load(...).then(...)` run. The cache is warm
     // from `preload` above, so this is a microtask drain rather than a wait —
     // but it has to happen between `setScene` and the render or the frame is
     // hashed before any texture has been attached.
     if (c.preload && c.preload.length > 0) {
       await new Promise((r) => setTimeout(r, 0));
-      compositor.update(GOLDEN_FRAME);
+      compositor.update(caseFrame);
     }
     warp?.prepare();
     app.renderer.render(app.stage);

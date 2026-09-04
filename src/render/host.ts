@@ -21,6 +21,11 @@ import { Application } from 'pixi.js';
 import { DEV_RESOLUTION, TARGET_RESOLUTION, type KReport, type ScaleReport } from '@shared/ipc';
 import { FrameMetrics } from '../debug/hud';
 import { runRenderMultiplierProbe } from '../debug/probe';
+import {
+  describeClockSource,
+  selectClockSource,
+  type ClockSourceReport,
+} from '../debug/clock-source';
 import { readGpuResources, type GpuResourceReport } from '../debug/gpu';
 import { createDefaultScene } from '../core/defaultScene';
 import { Clock, type ClockTransport } from '../core/clock';
@@ -111,6 +116,14 @@ export interface RenderHost {
   scaleReport(): ScaleReport;
   /** A8: run the render-multiplier probe. Hitches by design; resets metrics. */
   probe(order?: 'dev-first' | 'target-first'): KReport;
+  /**
+   * A14: which clock the instrument settled on, and what it measured about it.
+   *
+   * Reported rather than assumed. `performance.now()` is coarsened to 100 us
+   * in a renderer, which is wider than the render duration §4's metric 2 is
+   * defined as — see `debug/clock-source.ts`.
+   */
+  readonly clockSource: ClockSourceReport;
   /** §8.2: managed GPU resources. Cheap, but never call it per frame (A14). */
   gpuResources(): GpuResourceReport;
   /** Re-applies the current scene, exercising the teardown/rebuild path. */
@@ -188,6 +201,15 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
   let currentScene: Scene = createDefaultScene();
   compositor.setScene(currentScene);
 
+  // A14. Chosen by MEASUREMENT — cost per call and resolution — before any
+  // frame is timed with it, and logged either way.
+  const { now: instrumentNow, report: clockSource } = selectClockSource(
+    typeof window !== 'undefined' && typeof window.engine?.nowMs === 'function'
+      ? () => window.engine.nowMs()
+      : undefined,
+  );
+  console.log(describeClockSource(clockSource));
+
   const metrics = new FrameMetrics(opts.nominalMs);
 
   // I-2. One per host: the output window and the editor preview are separate
@@ -263,15 +285,15 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     // Both draws sit inside one timed region. The render-to-texture IS the
     // warp stage's cost, and Gate 2 asks for that cost as a number — measuring
     // it outside the clock that produces M2 would report a warp that is free.
-    const t0 = performance.now();
+    const t0 = instrumentNow();
     warp?.prepare();
     app.renderer.render(app.stage);
-    const t1 = performance.now();
+    const t1 = instrumentNow();
     metrics.noteRenderDuration(t1 - t0);
     metrics.notePresentation(now);
     // A14: one extra clock read per frame buys the instrument's own per-frame
     // cost as a reported number instead of an inference from a later stall.
-    metrics.noteInstrumentCost(performance.now() - t1);
+    metrics.noteInstrumentCost(instrumentNow() - t1);
 
     if (pending) {
       renderedPending = pending;
@@ -284,6 +306,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   return {
     metrics,
+    clockSource,
     clock,
     setSpeed(v) {
       clock.setRate(v);
@@ -342,6 +365,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
         target: TARGET_RESOLUTION,
         order,
         subject: 'composite',
+        now: instrumentNow,
       });
       metrics.setK(k);
       // The probe deliberately saturates the GPU. Anything measured across it

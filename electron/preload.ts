@@ -46,6 +46,49 @@ const api = {
     ipcRenderer.on(CH.sceneSet, h);
     return () => ipcRenderer.off(CH.sceneSet, h);
   },
+  /**
+   * A monotonic clock in **milliseconds, with nanosecond resolution** — WHEN
+   * THIS PRELOAD CAN OFFER ONE. It usually cannot; see below.
+   *
+   * `performance.now()` in a renderer is deliberately coarsened to 100 us by
+   * Chromium (a Spectre mitigation). §4's metric 2 is "PixiJS CPU render
+   * duration, p99 <= 60% of N", and at Phase 3's layer load that duration is
+   * about 47 us — HALF a tick of the only clock the renderer had. The result
+   * is that metric 2 reported the identical value, 0.200 ms = 1.200% of N, at
+   * Gate 0, Gate 1, Gate 2 and Gate 3, and across load steps from 1 video to
+   * 6. It was not stable; it was quantised, and the quantum was larger than
+   * the thing being measured.
+   *
+   * §4 does not name a clock — it names a quantity. `process.hrtime.bigint()`
+   * is available here in the preload, is not coarsened, and needs no IPC round
+   * trip. Its own call cost is measured rather than assumed, and reported: see
+   * `debug/hud.ts` and the `[timer]` line at startup. A14 is explicit that the
+   * measurement apparatus is subject to the budget it measures.
+   *
+   * **This preload is sandboxed** (`sandbox: true` in `main.ts`), and a
+   * sandboxed preload gets a stripped `process` polyfill with no `hrtime`. The
+   * first version of this function assumed otherwise and threw
+   * `Cannot read properties of undefined (reading 'bigint')` straight through
+   * render-host creation — the output window died before it drew a frame. The
+   * fix is not to reach for `hrtime` unguarded, and not to hand the renderer a
+   * function that throws when called.
+   *
+   * `null` is returned rather than a guess when no fine clock exists, so the
+   * caller falls back loudly instead of timing frames with a broken stopwatch
+   * (A9: an instrument that emits a plausible wrong number is worse than one
+   * that fails loudly).
+   *
+   * Returns milliseconds as a float so it is a drop-in for `performance.now()`.
+   */
+  nowMs(): number | null {
+    const hr = (process as { hrtime?: { bigint?: () => bigint } }).hrtime;
+    if (typeof hr?.bigint !== 'function') return null;
+    try {
+      return Number(hr.bigint()) / 1e6;
+    } catch {
+      return null;
+    }
+  },
   /** §4: ask main to focus the output window as the measured window opens. */
   focusOutput(): void {
     ipcRenderer.send(CH.focusOutput);

@@ -33,9 +33,11 @@ import type { LayerFrame, LayerView } from '../ContentProvider';
 import { createPlaceholderGraphic } from '../../render/placeholder';
 import { phaseAt } from '../../core/clock';
 import { createVideoSyncState, noteScrub, stepVideoSync } from './videoSync';
+import { resolveVideoStage, type VideoStage, type VideoStageInput } from './videoStage';
 
-/** What the view is currently showing. Reported to the HUD and the log. */
-export type VideoStage = 'loading' | 'poster' | 'playing' | 'placeholder';
+// The chain itself lives in `videoStage.ts`, pure, and is tested as a table —
+// see that file for why the ORDER the two loads settle in must not matter.
+export type { VideoStage } from './videoStage';
 
 export interface VideoViewOptions {
   asset: VideoAsset;
@@ -95,22 +97,34 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
   let videoTexture: Texture | null = null;
   const sync = createVideoSyncState();
 
+  /**
+   * The facts. The STAGE is derived from these and never assigned directly, so
+   * the order the poster and the decoder settle in cannot change where the
+   * layer ends up (I-13; see `videoStage.ts`).
+   */
+  const facts: VideoStageInput = {
+    decoding: decode,
+    decoded: false,
+    decodeFailed: false,
+    hasPoster: false,
+    posterFailed: false,
+  };
+
   ph.draw(w, h);
 
-  const setStage = (next: VideoStage, detail: string): void => {
-    if (stage === next) return;
+  /** Record a fact, re-derive the stage, and log only when it actually moved. */
+  const note = (change: Partial<VideoStageInput>, detail: string): void => {
+    if (destroyed) return;
+    Object.assign(facts, change);
+    const next = resolveVideoStage(facts);
+    if (next === stage) return;
     stage = next;
     ph.view.visible = next === 'placeholder' || next === 'loading';
-    poster.visible = next === 'poster' || (next === 'placeholder' && posterW > 0);
+    poster.visible = next === 'poster';
     video.visible = next === 'playing';
     badge.visible = !decode && next === 'poster';
-    // I-13's second rung, made explicit: a decode failure with a usable poster
-    // is NOT a placeholder, it is a poster. Only a failure with no poster
-    // either falls all the way through.
-    if (next === 'placeholder' && posterW > 0) {
-      poster.visible = true;
-      ph.view.alpha = 0.55;
-    }
+    // A placeholder is drawn at full strength; there is nothing behind it.
+    ph.view.alpha = 1;
     opts.onStage?.(next, detail);
   };
 
@@ -132,17 +146,13 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
       posterH = tex.height;
       layout();
       // A poster that arrives after the decoder already failed still rescues
-      // the layer: I-13's chain is poster THEN placeholder, and which rung the
-      // layer lands on does not depend on which load finished first.
-      if (stage === 'loading' || stage === 'placeholder') {
-        setStage('poster', 'poster ready');
-      }
+      // the layer. Nothing here checks the current stage — the resolver does.
+      note({ hasPoster: tex.width > 0 && tex.height > 0 }, 'poster ready');
     })
     .catch(() => {
-      if (destroyed) return;
-      // Poster gone too. The placeholder is the whole of the chain that is
-      // left, and it is why the chain has three rungs and not two.
-      setStage('placeholder', 'poster failed to load');
+      // Poster gone. Whether that is the END of the chain depends on the
+      // decoder, which the resolver knows about and this callback does not.
+      note({ posterFailed: true }, 'poster failed to load');
     });
 
   if (decode) {
@@ -156,12 +166,9 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
     // as well as sampled by us, which is the same pixels paid for twice.
     el.crossOrigin = 'anonymous';
 
-    const fail = (detail: string): void => {
-      if (destroyed) return;
-      // I-13: poster if we have one, placeholder if we do not. Never a throw,
-      // and never a black rectangle.
-      setStage(posterW > 0 ? 'poster' : 'placeholder', detail);
-    };
+    // I-13: never a throw, and never a black rectangle. Which rung this lands
+    // on is the resolver's decision, not this callback's.
+    const fail = (detail: string): void => note({ decodeFailed: true }, detail);
 
     el.addEventListener('error', () => {
       const code = el?.error?.code;
@@ -182,7 +189,7 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
       videoTexture = Texture.from(el);
       video.texture = videoTexture;
       layout();
-      setStage('playing', `decoding ${videoW}x${videoH}`);
+      note({ decoded: true }, `decoding ${videoW}x${videoH}`);
     });
     // A rejected play() is not fatal — the element may still be primed and the
     // poster is already on the wall.
@@ -191,8 +198,10 @@ export function createVideoView(opts: VideoViewOptions): LayerView {
     });
   } else {
     // Preview (§5/A2). No element, no decoder, no second copy of the frame
-    // pool. The poster load above is the whole of this layer's cost.
-    setStage('loading', 'preview: poster only, no decode');
+    // pool. The poster load above is the whole of this layer's cost, and
+    // `decoding: false` is already in `facts` — the resolver will settle on
+    // the poster the moment it arrives.
+    opts.onStage?.('loading', 'preview: poster only, no decode');
   }
 
   return {

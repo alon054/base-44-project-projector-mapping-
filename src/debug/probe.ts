@@ -68,8 +68,9 @@ function timeBurst(
   container: Container,
   target: RenderTexture,
   iterations: number,
+  now: () => number,
 ): number {
-  const t0 = performance.now();
+  const t0 = now();
   for (let i = 0; i < iterations; i++) {
     renderer.render({ container, target });
   }
@@ -82,7 +83,7 @@ function timeBurst(
   // readback made the fixed cost this function is built to cancel both large
   // AND variable, and its variance landed directly in the probe's spread.
   renderer.extract.pixels({ target, frame: SYNC_PIXEL });
-  return performance.now() - t0;
+  return now() - t0;
 }
 
 /**
@@ -99,9 +100,10 @@ function measure(
   container: Container,
   rt: RenderTexture,
   iterations: number,
+  now: () => number,
 ): number {
-  const one = timeBurst(renderer, container, rt, 1);
-  const many = timeBurst(renderer, container, rt, iterations);
+  const one = timeBurst(renderer, container, rt, 1, now);
+  const many = timeBurst(renderer, container, rt, iterations, now);
   return perRenderFromBurst(one, many, iterations);
 }
 
@@ -134,6 +136,14 @@ export interface ProbeOptions {
   repeats?: number;
   /** What the caller handed us, recorded in the report. */
   subject?: 'composite' | 'stage';
+  /**
+   * The instrument's clock. Defaults to `performance.now()`, which in a
+   * renderer is coarsened to 100 us — see `debug/clock-source.ts`. The probe's
+   * bursts are milliseconds long so quantisation is not its dominant error,
+   * but there is no reason to time them with the blunter of two available
+   * clocks.
+   */
+  now?: () => number;
 }
 
 /**
@@ -186,6 +196,7 @@ export function runRenderMultiplierProbe(
   const iterations = opts.iterations ?? PROBE_ITERATIONS;
   const repeats = Math.max(1, Math.floor(opts.repeats ?? PROBE_REPEATS));
   const startDevFirst = (opts.order ?? 'dev-first') === 'dev-first';
+  const now = opts.now ?? ((): number => performance.now());
 
   // Allocated ONCE for the whole run. See `measure`.
   const devRt = RenderTexture.create({
@@ -211,8 +222,8 @@ export function runRenderMultiplierProbe(
     // path, and the cold probe's first repeats were visibly slower than its
     // last — 82% dispersion cold against 27% warm on the same scene, which is
     // a warm-up ramp inside the probe rather than a property of the scene.
-    timeBurst(renderer, container, devRt, iterations);
-    timeBurst(renderer, container, targetRt, iterations);
+    timeBurst(renderer, container, devRt, iterations, now);
+    timeBurst(renderer, container, targetRt, iterations, now);
 
     for (let r = 0; r < repeats; r++) {
       // Alternates every repeat. With an odd count the first order is used one
@@ -220,11 +231,11 @@ export function runRenderMultiplierProbe(
       // than only the median — a residual bias shows up as width.
       const devFirst = r % 2 === 0 ? startDevFirst : !startDevFirst;
       if (devFirst) {
-        devMsSamples.push(measure(renderer, container, devRt, iterations));
-        targetMsSamples.push(measure(renderer, container, targetRt, iterations));
+        devMsSamples.push(measure(renderer, container, devRt, iterations, now));
+        targetMsSamples.push(measure(renderer, container, targetRt, iterations, now));
       } else {
-        targetMsSamples.push(measure(renderer, container, targetRt, iterations));
-        devMsSamples.push(measure(renderer, container, devRt, iterations));
+        targetMsSamples.push(measure(renderer, container, targetRt, iterations, now));
+        devMsSamples.push(measure(renderer, container, devRt, iterations, now));
       }
     }
   } finally {

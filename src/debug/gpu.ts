@@ -23,8 +23,38 @@ export interface GpuResourceReport {
   valid: boolean;
   /** Why it is invalid; empty when valid. */
   invalidReason: string;
-  /** Managed texture sources. Zero in Phase 1 — everything is Graphics. */
+  /**
+   * **Live** managed texture sources — null slots excluded.
+   *
+   * Phase 3 changed what this had to mean. PixiJS nulls an entry in
+   * `managedTextures` when a source is destroyed and never compacts the array,
+   * so `managedTextures.length` counts tombstones as well as textures. Phase 1
+   * had no textures and Phase 2 had one composite render texture that was
+   * never destroyed, so `length` and "live count" were the same number and the
+   * difference could not show.
+   *
+   * Phase 3 creates and destroys a texture per video and per Lottie on every
+   * scene rebuild. The 20-minute soak rebuilt 604 times and this counter read
+   * **23 rising to 1221** — a reported 5209% drift, `flat: false`, and a
+   * failed rolling check. Nothing had leaked: `textureBytesEstimate` was
+   * pinned at 12,861,448 the whole time, buffers 4 → 4, geometries 2 → 2. The
+   * instrument was counting graves.
+   *
+   * A9 names this exactly: "an instrument that emits a plausible wrong number
+   * is worse than one that fails loudly." A false leak is worse than a missing
+   * number, because it sends somebody hunting a leak that is not there — and
+   * because the next real one is now easier to disbelieve.
+   */
   textureCount: number;
+  /**
+   * `managedTextures.length`, tombstones included. Reported as INFORMATION.
+   *
+   * Not a defect of ours and not a gate number, but worth having visible: the
+   * array itself grows without bound across a long session, at roughly one
+   * slot per destroyed texture. It is a few tens of kilobytes over an evening,
+   * and it is the reason `textureCount` above had to stop being `length`.
+   */
+  textureSlots: number;
   /**
    * Estimated bytes behind those textures, at 4 bytes per pixel and ignoring
    * mipmaps and compressed formats. **An estimate, labelled as one**, and the
@@ -41,6 +71,7 @@ export const INVALID_GPU_REPORT: GpuResourceReport = {
   valid: false,
   invalidReason: 'not sampled',
   textureCount: 0,
+  textureSlots: 0,
   textureBytesEstimate: 0,
   bufferCount: 0,
   geometryCount: 0,
@@ -72,6 +103,7 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
   const missing: string[] = [];
 
   let textureCount = 0;
+  let textureSlots = 0;
   let textureBytesEstimate = 0;
   // `Renderer` is a union of the WebGL, WebGPU and Canvas renderers and only
   // one of them declares these systems, so every lookup here is a probe rather
@@ -81,7 +113,7 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
     subsystem(renderer, 'texture') as { managedTextures?: readonly TextureSource[] } | null
   )?.managedTextures;
   if (Array.isArray(textures)) {
-    textureCount = textures.length;
+    textureSlots = textures.length;
     for (const t of textures) {
       // `managedTextures` can hold a null slot: PixiJS nulls an entry when a
       // texture source is destroyed rather than compacting the array, so
@@ -94,6 +126,11 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
       // Phase 2 there is a composite render texture, so this is now on the
       // path of the soak check itself.
       if (!t) continue;
+      // Counted HERE, past the null guard, so the count and the byte estimate
+      // describe the same set of objects. They did not before: the count was
+      // the array's length and the bytes were the sum over its live entries,
+      // which is how a flat 12.8 MB could sit beside a count of 1221.
+      textureCount++;
       const w = typeof t.pixelWidth === 'number' ? t.pixelWidth : 0;
       const h = typeof t.pixelHeight === 'number' ? t.pixelHeight : 0;
       textureBytesEstimate += w * h * 4;
@@ -115,6 +152,7 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
         ? ''
         : `renderer internals not found: ${missing.join(', ')} (PixiJS version change?)`,
     textureCount,
+    textureSlots,
     textureBytesEstimate,
     bufferCount: bufferCount ?? 0,
     geometryCount: geometryCount ?? 0,

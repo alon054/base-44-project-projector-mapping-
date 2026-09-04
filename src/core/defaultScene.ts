@@ -8,7 +8,7 @@
  * Gate 1's first condition ("a dark-background `add` glow layer visibly
  * brightens layers beneath it").
  */
-import { createLayer } from './layer';
+import { createLayer, type Layer } from './layer';
 import { createScene, type Scene } from './scene';
 import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
 import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
@@ -269,6 +269,105 @@ export function createResilienceVideoScene(): Scene {
 }
 
 /**
+ * Phase 3's load, multiplied — for §4's "record the measured headroom" and for
+ * §10 row 2's concurrent video and Lottie caps.
+ *
+ * §4 is explicit that the Phase-3 load is "a **floor** to validate the
+ * pipeline, not the ceiling for a finished scene. Raise it deliberately,
+ * measuring at each step, and record the measured headroom." A gate that only
+ * ever measured the floor would report that the floor is comfortable, which is
+ * not the same statement and is the one that gets read as headroom later.
+ *
+ * `n` multiplies every kind together — `n` videos, `2n` sprites, `n` Lotties —
+ * because §5 names video count and live-Lottie count as the two things
+ * expected to blow the budget first, and finding out which of them does it
+ * needs them raised past the point where one of them wins.
+ *
+ * Layers are spread across the frame rather than stacked, so the cost is real
+ * fill and not a stack of layers the GPU can trivially occlude.
+ */
+export function createPhase3LoadScene(n: number): Scene {
+  const mult = Math.max(1, Math.floor(n));
+  const layers: Layer[] = [];
+  let z = 0;
+  const videos = ['test.video.seamless', 'test.video.nonSeamless'];
+  const sheets = ['kenney.smoke.whitePuff', 'kenney.smoke.explosion'];
+
+  for (let i = 0; i < mult; i++) {
+    layers.push(
+      createLayer({
+        id: `video${i}`,
+        name: `Video ${i + 1}`,
+        providerId: BUNDLED_PROVIDER_ID,
+        // Alternating clips, so a second decoder is a second FILE and not the
+        // same one shared — a browser may back two elements on one source with
+        // one decode, which would make the count meaningless.
+        content: { assetId: videos[i % videos.length] as string, seam: 'none' },
+        transform: {
+          x: 0.5,
+          y: 0.5,
+          width: 1,
+          height: 1,
+          rotation: 0,
+        },
+        zOrder: z++,
+        opacity: i === 0 ? 0.85 : 0.4,
+        blendMode: i === 0 ? 'normal' : 'add',
+        depth: 0.05,
+      }),
+    );
+  }
+  for (let i = 0; i < mult * 2; i++) {
+    layers.push(
+      createLayer({
+        id: `sprite${i}`,
+        name: `Sprite ${i + 1}`,
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: sheets[i % sheets.length] as string },
+        transform: {
+          x: 0.12 + ((i * 0.19) % 0.76),
+          y: 0.25 + ((i * 0.23) % 0.5),
+          width: 0.3,
+          height: 0.53,
+          rotation: 0,
+        },
+        zOrder: z++,
+        blendMode: i % 2 === 0 ? 'normal' : 'add',
+        depth: 0.5,
+      }),
+    );
+  }
+  for (let i = 0; i < mult; i++) {
+    layers.push(
+      createLayer({
+        id: `lottie${i}`,
+        name: `Lottie ${i + 1}`,
+        providerId: BUNDLED_PROVIDER_ID,
+        content: { assetId: 'authored.lottie.clockRings' },
+        transform: {
+          x: 0.2 + ((i * 0.27) % 0.6),
+          y: 0.3 + ((i * 0.17) % 0.4),
+          width: 0.36,
+          height: 0.56,
+          rotation: 0,
+        },
+        zOrder: z++,
+        opacity: 0.9,
+        blendMode: 'add',
+        depth: 0.8,
+      }),
+    );
+  }
+  return createScene({
+    id: `phase3-x${mult}`,
+    name: `Phase 3 headroom — ${mult} video + ${mult * 2} sprite + ${mult} Lottie`,
+    seed: 0x3eed + mult,
+    background: 0x000000,
+    layers,
+  });
+}
+
+/**
  * The named scenes this build can open at, by id.
  *
  * A real scene bank is Phase 6 (D12); this is the minimum that lets `§4`'s
@@ -281,6 +380,15 @@ export const NAMED_SCENES: Readonly<Record<string, () => Scene>> = {
   'phase1-alt': createAltScene,
   'phase3-load': createPhase3Scene,
   'phase3-resilience': createResilienceVideoScene,
+  // §4's headroom steps. x1 is the same LOAD as `phase3-load` but laid out by
+  // the generator, so the steps are comparable to each other; the gate number
+  // is taken on `phase3-load` itself.
+  'phase3-x1': () => createPhase3LoadScene(1),
+  'phase3-x2': () => createPhase3LoadScene(2),
+  'phase3-x3': () => createPhase3LoadScene(3),
+  'phase3-x4': () => createPhase3LoadScene(4),
+  'phase3-x5': () => createPhase3LoadScene(5),
+  'phase3-x6': () => createPhase3LoadScene(6),
 };
 
 /** Undefined for an unknown id — the caller keeps its current scene (I-13). */

@@ -410,5 +410,35 @@
       191
     ],
     "meanLuminance": 0.003135
+  },
+  "bundled-spritesheets-scrubbed": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ea408bad",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.213935
+  },
+  "bundled-lottie-scrubbed": {
+    "width": 1280,
+    "height": 720,
+    "hash": "b63d1ac3",
+    "coverage": 1,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      16,
+      24,
+      40
+    ],
+    "meanLuminance": 0.158693
   }
 }
