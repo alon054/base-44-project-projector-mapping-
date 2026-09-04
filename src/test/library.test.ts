@@ -218,3 +218,78 @@ describe('the bundled manifest (D6, D7)', () => {
     expect(nonSeamless && 'seamless' in nonSeamless && nonSeamless.seamless).toBe(false);
   });
 });
+
+/**
+ * §10 row 2 — the concurrency caps, ratified by the operator 2026-09-04.
+ *
+ * Video 4, measured: the `phase3-x{n}` ladder passed §4's M1 with 0.0000% late
+ * frames at n = 1..5 and FAILED at n = 6 on a 14-frame late run plus 9
+ * clause-3 events. Lottie 4, by analogy and NOT measured — no run isolated
+ * Lottie count from video count, and that weakness is recorded rather than
+ * glossed.
+ *
+ * WARN, not refuse: exceeding the cap cost 15 late frames in 3555 and one
+ * 150 ms hitch. Nothing crashed — no errors, no placeholders, all six decoders
+ * reached `playing`, memory flat. This is performance equipment (I-13).
+ */
+describe('§10 row 2 — concurrency caps', () => {
+  it('is silent at and below the cap', async () => {
+    const { capBreaches, MAX_CONCURRENT_VIDEO } = await import('../core/library');
+    expect(capBreaches([])).toEqual([]);
+    expect(capBreaches(['video', 'video', 'spritesheet', 'still'])).toEqual([]);
+    // Exactly at the cap is not a breach. 5 videos measured clean; 4 is the
+    // margin, not the failure.
+    expect(capBreaches(Array(MAX_CONCURRENT_VIDEO).fill('video'))).toEqual([]);
+  });
+
+  it('reports the overage, not just a boolean', async () => {
+    const { capBreaches } = await import('../core/library');
+    // "6 videos against a cap of 4" is a message an operator can act on;
+    // "caps exceeded" is not.
+    expect(capBreaches(Array(6).fill('video'))).toEqual([
+      { kind: 'video', count: 6, cap: 4 },
+    ]);
+  });
+
+  it('reports every breached kind, stably ordered', async () => {
+    const { capBreaches } = await import('../core/library');
+    const kinds = [...Array(6).fill('video'), ...Array(5).fill('lottie')];
+    expect(capBreaches(kinds)).toEqual([
+      { kind: 'lottie', count: 5, cap: 4 },
+      { kind: 'video', count: 6, cap: 4 },
+    ]);
+  });
+
+  it('caps only the kinds that carry a per-frame cost', async () => {
+    const { CONCURRENCY_CAPS, capBreaches } = await import('../core/library');
+    // §5 names video and live Lottie as the two per-frame costs. A sprite
+    // sheet is a texture lookup and a still is a quad; capping those would be
+    // inventing a constraint nothing measured.
+    expect(Object.keys(CONCURRENCY_CAPS).sort()).toEqual(['lottie', 'video']);
+    expect(capBreaches(Array(50).fill('spritesheet'))).toEqual([]);
+    expect(capBreaches(Array(50).fill('still'))).toEqual([]);
+  });
+
+  it('the video cap sits one step below the measured failure', async () => {
+    const { MAX_CONCURRENT_VIDEO } = await import('../core/library');
+    // Guards the number against a later edit that forgets what it came from.
+    // 5 passed §4 cleanly, 6 failed M1. Anything above 5 is above a measured
+    // failure; anything below 4 throws away measured headroom.
+    expect(MAX_CONCURRENT_VIDEO).toBe(4);
+    expect(MAX_CONCURRENT_VIDEO).toBeLessThan(6);
+  });
+
+  it('the shipped Phase 3 gate scene is within every cap', async () => {
+    const { capBreaches } = await import('../core/library');
+    const { createPhase3Scene } = await import('../core/defaultScene');
+    const library = createBundledLibrary();
+    const kinds = createPhase3Scene()
+      .layers.map((l) => library.get(String(l.content['assetId'] ?? '')))
+      .filter((a): a is NonNullable<typeof a> => a !== undefined)
+      .map((a) => a.kind);
+    // §4's stated Phase 3 load is 1 video + 2 sprite + 1 Lottie. If the gate
+    // scene ever breached its own caps, the gate would be measuring something
+    // the engine tells operators not to do.
+    expect(capBreaches(kinds)).toEqual([]);
+  });
+});

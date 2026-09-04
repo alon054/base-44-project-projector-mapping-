@@ -3061,3 +3061,76 @@ number this project records is an upper bound and should be read as one.**
 - The Kenney source frames are trimmed to per-frame bounding boxes with no
   offset metadata, so the sheets are centre-registered. Good enough for a puff
   expanding from its centre; a walk cycle would need real registration.
+
+## 2026-09-04 — Phase 3 (session 2, part 2) — the caps, ratified
+
+- DID: the operator ruled on §10 row 2. Recorded here, wired into the code as a
+  named constant with a `[caps]` log line, and `CHECKLIST.md` updated.
+- BLOCKER: **one mechanical step is outstanding and it is not the agent's.**
+  `SPEC.md` §10 row 2 still reads "Phase 3, confirmed Phase 9" as its due date
+  and carries no number. CLAUDE.md makes `SPEC.md` read-only to the agent, so
+  the row is edited by the operator.
+- NEXT: Phase 4 — forces and parallax, the first demoable milestone (§2.4).
+
+`SPEC-CHANGE-RATIFIED` — **§10 row 2, decided by the operator, 2026-09-04.**
+
+> **Concurrent video cap: 4. Concurrent live-Lottie cap: 4.**
+> **Behaviour: WARN, do not refuse.**
+
+**The video number is measured.** The `phase3-x{n}` ladder (n videos, 2n
+sprites, n Lotties), all six runs valid — no focus changes, none throttled:
+
+| load | fps | M1 | late | worst run | worst interval | clause 3 |
+|---|---|---|---|---|---|---|
+| x1–x5 | 59.999–60.001 | pass | 0.0000% | 0 | 17.70–17.80 ms | 0 |
+| **x6** | **59.234** | **FAIL** | **0.4219%** | **14** | **150.00 ms** | **9** |
+
+Five passes cleanly; six fails M1 on two clauses at once. **4 is one step below
+the measured failure** — the ordinary engineering margin, and §5's "use
+sparingly, cap hard".
+
+**The Lottie number is NOT measured, and that is recorded rather than glossed.**
+It is 4 by analogy with the video cap. No run isolated Lottie count from video
+count — the ladder raised all three kinds together, so nothing here separates a
+Lottie's main-thread re-render from a decoder or a sprite. §5 names Lottie as an
+active CPU cost and the mean render duration does climb across the ladder
+(0.281% → 0.409% of N from x1 to x5), but that is the whole scene climbing.
+**If the Lottie cap ever matters, it needs its own ladder.** Phase 9 confirms
+both, and that is where this should be done properly.
+
+**Why WARN and not REFUSE.** §5's wording is "cap hard", and the literal reading
+is to refuse the sixth layer. The operator ruled the other way, and the
+measurement supports it: exceeding the cap costs **15 late frames out of 3555**
+and one 150 ms hitch — a visible stumble, not a failure. Nothing crashed at x6:
+zero errors, zero placeholders, all six decoders reached `playing`, memory flat,
+M2 comfortable at 2.400% of a 60% budget. This is performance equipment (I-13's
+premise), and an instrument that refuses its operator mid-show for a stumble it
+could merely have flagged is the wrong trade.
+
+**What the cap actually limits, which is not what it counts.** The x6 failure is
+a **burst** — all nine clause-3 events inside t = 1.667–2.367 s, intervals of
+150.0, 133.3, 100.0, 83.6, 83.3, 83.3, 66.7, 66.5 and 50.0 ms. Per-decoder cost
+is nearly flat from one to five. What breaks is **simultaneous seeking**: D5
+realigns each video at its own loop boundary, `phase3-x6` alternates a 4-second
+clip with a 3-second one, so three decoders reach a boundary in the same frame
+and every twelve seconds all six do. Nothing staggers them.
+
+So **4 is a symptom-level cap**, and it is being recorded as one. The cause fix
+— a deterministic per-layer offset on the boundary realignment — is **option C
+of the proposal, parked for Phase 9** because it changes D5's behaviour and
+Phase 9 is where §4 already plans the soak that would confirm a new ceiling. It
+may lift the cap a long way.
+
+`NOTE` — **what is implemented here, and what deliberately is not.**
+
+Implemented: `MAX_CONCURRENT_VIDEO` and `MAX_CONCURRENT_LOTTIE` as named
+constants carrying the measurement in their comment, and a `[caps]` line on the
+output window whenever an applied scene exceeds either. That follows this
+project's own evidence — `[scene]`, `[warp]`, `[clock]` and `[video]` between
+them found eleven of thirteen defects across three phases, and a cap nobody can
+see breached is a cap nobody will notice breaching.
+
+**Not implemented: the operator-facing warning in the layer panel.** That is
+editor interaction and belongs to **Phase 5**, not here (CLAUDE.md rule 1: one
+phase at a time). Gate 3's condition is "caps **decided and recorded**", which
+this discharges; enforcement lands where the layer-adding UI does.

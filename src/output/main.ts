@@ -25,6 +25,8 @@ import {
 import { createOutputs, primaryViewport } from '../render/outputs';
 import { canonicalizeScene, deepEqual, layersInDrawOrder, type Scene } from '../core/scene';
 import { sceneById } from '../core/defaultScene';
+import { capBreaches } from '../core/library';
+import { createBundledLibrary } from '../providers/bundled/manifest';
 import { judgeSoak, type GpuSample } from '../debug/gpu';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
@@ -67,6 +69,8 @@ const pendingSpeed: { v: { value: number; token: number; t0: number } | null } =
 const pendingClock: { v: ReturnType<typeof canonicalizeClockTransport> | null } = { v: null };
 /** The scene currently on the wall, for the identical-apply check below. */
 let appliedScene: Scene | null = null;
+/** For the §10 caps check: which kind each layer's asset is. */
+const bundledLibrary = createBundledLibrary();
 /** Same race as the speed above: a scene can arrive before Pixi has finished init. */
 const pendingScene: { v: Scene | null } = { v: null };
 /**
@@ -142,6 +146,26 @@ function applyScene(raw: unknown): void {
   // Without it, "the editor changed something and the wall did not" is
   // unanswerable from the wall — exactly the class of question A12 and A3
   // exist to make answerable rather than arguable.
+  // §10 row 2. A cap nobody can see breached is a cap nobody will notice
+  // breaching — the same reasoning behind `[scene]`, `[warp]` and `[clock]`,
+  // which between them found eleven of this project's thirteen defects.
+  //
+  // The OPERATOR-facing warning belongs in the layer panel and is Phase 5's
+  // (editor interaction). This is the log line, and it is deliberately a
+  // warning rather than a refusal — see `core/library.ts`.
+  const breaches = capBreaches(
+    scene.layers
+      .map((l) => bundledLibrary.get(String(l.content['assetId'] ?? '')))
+      .filter((a): a is NonNullable<typeof a> => a !== undefined)
+      .map((a) => a.kind),
+  );
+  for (const b of breaches) {
+    console.warn(
+      `[caps] ${b.count} concurrent ${b.kind} layers, over the cap of ${b.cap} ` +
+        '(§10 row 2). Expect dropped frames; the session continues.',
+    );
+  }
+
   console.log(
     `[scene] applied "${scene.id}" draw order: ` +
       layersInDrawOrder(scene)

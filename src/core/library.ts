@@ -50,6 +50,64 @@ export interface LicenseRecord {
   licenseFile?: string;
 }
 
+/**
+ * §10 row 2 — the concurrent caps, ratified by the operator 2026-09-04.
+ *
+ * **Video: 4, and this one is measured.** The `phase3-x{n}` ladder ran n
+ * videos + 2n sprites + n Lotties at DEV_RESOLUTION. n = 1..5 all passed §4's
+ * M1 with 0.0000% late frames and a worst interval of 17.70-17.80 ms. n = 6
+ * FAILED M1 on two clauses at once: a run of 14 consecutive late frames
+ * against a limit of 2, and 9 intervals over 3 x N against A12's allowance of
+ * one. 4 is one step below the measured failure.
+ *
+ * **Lottie: 4, and this one is NOT measured.** It is set by analogy with the
+ * video cap. No run isolated Lottie count from video count — the ladder raised
+ * all three kinds together — so nothing separates a Lottie's main-thread
+ * re-render from a decoder or a sprite. If it ever matters it needs its own
+ * ladder. Phase 9 confirms both.
+ *
+ * **What the video cap actually limits is not what it counts.** The x6 failure
+ * was a BURST — all nine events inside 0.7 s — because D5 realigns each video
+ * at its own loop boundary and nothing staggers them, so decoders sharing a
+ * period seek in the same frame. Per-decoder cost is nearly flat from one to
+ * five. Staggering the realignment is parked for Phase 9; it may lift this
+ * number a long way.
+ *
+ * **WARN, do not refuse.** Exceeding the cap costs 15 late frames in 3555 and
+ * one 150 ms hitch — a visible stumble, not a failure. Nothing crashed at x6:
+ * no errors, no placeholders, all six decoders reached `playing`, memory flat.
+ * This is performance equipment (I-13), and refusing an operator mid-show over
+ * a stumble that could be flagged instead is the wrong trade.
+ */
+export const MAX_CONCURRENT_VIDEO = 4;
+export const MAX_CONCURRENT_LOTTIE = 4;
+
+/** Kinds that carry a concurrency cap, and the cap for each. */
+export const CONCURRENCY_CAPS: Readonly<Partial<Record<AssetKind, number>>> = {
+  video: MAX_CONCURRENT_VIDEO,
+  lottie: MAX_CONCURRENT_LOTTIE,
+};
+
+/**
+ * Which caps a set of asset kinds exceeds, and by how much. Empty when none.
+ *
+ * Pure, so §8.1 can test it without a renderer, and returning the overage
+ * rather than a boolean because "6 videos against a cap of 4" is the message
+ * an operator can act on.
+ */
+export function capBreaches(
+  kinds: readonly AssetKind[],
+): { kind: AssetKind; count: number; cap: number }[] {
+  const counts = new Map<AssetKind, number>();
+  for (const k of kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
+  const out: { kind: AssetKind; count: number; cap: number }[] = [];
+  for (const [kind, cap] of Object.entries(CONCURRENCY_CAPS) as [AssetKind, number][]) {
+    const count = counts.get(kind) ?? 0;
+    if (count > cap) out.push({ kind, count, cap });
+  }
+  return out.sort((a, b) => a.kind.localeCompare(b.kind));
+}
+
 /** What kind of layer view a bundled asset produces. */
 export const ASSET_KINDS = ['still', 'spritesheet', 'video', 'lottie'] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
