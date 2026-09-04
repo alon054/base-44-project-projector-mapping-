@@ -2408,3 +2408,50 @@ Two smaller observations from the same table, neither concluded:
 A8 now carries a second, separate problem (above) beyond the noise. A15's
 statistic measured **0.600% of N** in all four Phase 2 runs, against its own 2%
 trigger, and stays ratified as written.
+
+## 2026-09-04 — Phase 2 (session 1, part 7) — A1 reconciliation ratified
+
+- DID: the A1 ↔ §4 contradiction is closed. `SPEC.md` now says the same thing
+  in all six places, and `CHECKLIST.md` carries the new Gate 3 condition.
+- BLOCKER: none. Phase 3 is unblocked.
+- NEXT: Phase 3 — global clock, animated layers, bundled assets.
+
+`SPEC-CHANGE-RATIFIED` — **option (A) of the proposal in part 6, decided by the
+operator.** k_dev, k_target and the minute-1 → minute-20 thermal derate are
+recorded at **the Phase 3 and Phase 9 gates**, not at every gate.
+
+Six sites, now consistent: §1's A1 and A8 amendment summaries, §4's
+thermal-derate paragraph, §4's k-probe list, §9's thermal-throttling risk row,
+and **§11's Gate 3, which previously named neither** and was the reason the
+inconsistency was four-way rather than two. §4's closing sentence and Gate 9
+already said this and were not touched. The five other "every gate" mentions —
+§4's metric-2 line, the headroom lines in §4 and §6, and §8.2's heading — are
+about different subjects and were deliberately left alone.
+
+The reasoning is in part 6 and is not repeated. The short version: the derate is
+defined as a delta in k, eight real-scene k samples span **0.9262–1.3269**, and
+Phase 2's measured render cost is **0.37–0.46% of N** — there is nothing to
+throttle at an early gate, and no derate would be visible beneath the probe's
+own spread if there were.
+
+**Consequence for the passed gates:** Gates 0, 1 and 2 are unaffected and are
+not reopened. Under the previous wording each had been crossed with a required
+number unrecorded; under the ratified wording they never owed it.
+
+**Consequence for Gate 3:** it now owes k_dev, k_target and the derate, and
+`CHECKLIST.md` carries that as its own box rather than as prose inside another
+condition — a gate condition buried in a neighbouring bullet is one that gets
+skipped when the gate is actually run.
+
+**Recorded because the log's last word would otherwise be wrong.** Part 6 ends
+"Not decided here… this entry is the proposal". Leaving that as the final state
+would send the next session to re-litigate a settled decision against a spec
+that already disagrees with it. The decision is the operator's; this entry is
+the record that it was made and applied.
+
+`BLOCKER` — **A8 goes into Gate 3 with two known problems, not one.** The
+spread above is the first. The second, found in part 6: the probe renders
+`app.stage`, so with the warp enabled it times **the mesh rather than the
+composite** — `k_dev` 42–50 warp-off against 90–96 warp-on, which is not a
+speedup. Any fix must render the composite. A15 also remains due at Gate 3 and
+measured 0.600% of N against its 2% trigger across all four Phase 2 runs.
