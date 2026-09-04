@@ -75,17 +75,17 @@ describe('the [force] line', () => {
     expect(wind.immediate).toBe(false);
   });
 
-  it('a fifth force gets a line without the logger being told about it', () => {
-    const FOG = {
-      id: 'fog',
-      label: 'Fog',
+  it('a new force gets a line without the logger being told about it', () => {
+    const CURRENT = {
+      id: 'current',
+      label: 'Current',
       axes: ['opacity'] as const,
       defaultSusceptibility: 1,
       params: [{ key: 'density', label: 'Density', min: 0, max: 1, default: 0, step: 0.01 }],
       evaluate: () => ({}),
     };
-    const out = describeForces(createPhase4Scene(), [...FORCE_DEFINITIONS, FOG]);
-    expect(out.some((l) => l.line.startsWith('[force] fog density=0.000'))).toBe(true);
+    const out = describeForces(createPhase4Scene(), [...FORCE_DEFINITIONS, CURRENT]);
+    expect(out.some((l) => l.line.startsWith('[force] current density=0.000'))).toBe(true);
   });
 });
 

@@ -250,6 +250,57 @@ export const TEMPERATURE: ForceDefinition = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* fog — THE FIFTH FORCE (Gate 4, I-14)                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Distance haze. **This is Gate 4's I-14 condition, and it is the whole of it.**
+ *
+ * "A fifth force is added in under 30 minutes, as data, touching no bus code."
+ * What was written to add it: this block, and one entry in `FORCE_DEFINITIONS`
+ * below. Nothing in `core/forces.ts`, the compositor, the registry, the editor
+ * panel, the `[force]` log or the scene model changed — the timed diff is in
+ * `BUILD_LOG.md`. It appeared in the registry as `force.fog.density`, in the
+ * editor panel with a slider and a per-entity susceptibility column, and in the
+ * run log as its own `[force] fog …` line, without being mentioned to any of
+ * them.
+ *
+ * It is the first force to use `ctx.depth`, which is what makes it a real test
+ * rather than a copy of `temperature`: near things stay clear and far things
+ * haze out, so it exercises a part of `ForceEvalContext` none of the four v1
+ * forces did.
+ *
+ * Opacity is floored at 0.35 rather than reaching 0. On a projector the
+ * background is black (D1), so a layer faded to nothing does not go misty — it
+ * goes *away*, and a far layer vanishing reads as a bug rather than as weather.
+ * The tint axes cannot brighten (see `forces.ts`), so fog greys down toward the
+ * dark rather than up toward white; that is the honest limit of a multiply-only
+ * tint and `grade.*` in Phase 9 is where a lifted black would come from.
+ */
+export const FOG: ForceDefinition = {
+  id: 'fog',
+  label: 'Fog',
+  axes: ['tintR', 'tintG', 'tintB', 'opacity'],
+  defaultSusceptibility: 1,
+  params: [{ key: 'density', label: 'Density', min: 0, max: 1, default: 0, step: 0.01 }],
+  evaluate(ctx) {
+    const density = ctx.param('density');
+    if (density <= 0) return {};
+    // Far things haze first. `depth` 1 is nearest the viewer, so the far plane
+    // takes the full density and the near plane takes none.
+    const k = density * (1 - ctx.depth);
+    return {
+      tintR: 1 - 0.32 * k,
+      tintG: 1 - 0.28 * k,
+      // Blue survives: haze is cool, and holding one channel up is what keeps
+      // this from being a brightness control wearing a colour's name.
+      tintB: 1 - 0.12 * k,
+      opacity: 1 - 0.65 * k,
+    };
+  },
+};
+
+/* -------------------------------------------------------------------------- */
 
 /**
  * The forces this build ships. **Adding a force is adding an entry here.**
@@ -263,6 +314,8 @@ export const FORCE_DEFINITIONS: readonly ForceDefinition[] = [
   RAIN,
   TIME_OF_DAY,
   TEMPERATURE,
+  // Gate 4's fifth force. Added as data, in one commit, touching no bus code.
+  FOG,
 ];
 
 /** Lookup, for the editor and the tests. */

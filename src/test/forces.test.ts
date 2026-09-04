@@ -32,7 +32,7 @@ import {
   type ForceDefinition,
   type ForceSubject,
 } from '../core/forces';
-import { FORCE_DEFINITIONS, RAIN, TIME_OF_DAY, WIND, forceById } from '../core/forceDefs';
+import { FOG, FORCE_DEFINITIONS, RAIN, TIME_OF_DAY, WIND, forceById } from '../core/forceDefs';
 import { createLayer } from '../core/layer';
 
 /** A plain subject. `Layer` satisfies this structurally; the bus needs no scene. */
@@ -343,13 +343,19 @@ describe('the empty field is the identity of the whole system', () => {
 
 describe('I-14 — a force is data, not a branch in the bus', () => {
   /**
-   * The fifth force, added the way Gate 4 requires: as a definition, with no
-   * edit anywhere else. If this needed a change in `forces.ts`, the compositor,
-   * the registry or the log to work, the test would not compile or would fail.
+   * A force that is NOT shipped, added the way Gate 4 requires: as a
+   * definition, with no edit anywhere else. If this needed a change in
+   * `forces.ts`, the compositor, the registry or the log to work, the test
+   * would not compile or would fail.
+   *
+   * `current` and not `fog`: `fog` is now a shipped force (it WAS this test's
+   * synthetic, and adding it for real was Gate 4's timed exercise), and a
+   * synthetic that collides with a shipped id tests the registry's collision
+   * detection instead of the mechanism. `current` is I-14's own second example.
    */
-  const FOG: ForceDefinition = {
-    id: 'fog',
-    label: 'Fog',
+  const CURRENT: ForceDefinition = {
+    id: 'current',
+    label: 'Current',
     axes: ['tintR', 'tintG', 'tintB', 'opacity'],
     defaultSusceptibility: 1,
     params: [{ key: 'density', label: 'Density', min: 0, max: 1, default: 0, step: 0.01 }],
@@ -362,9 +368,9 @@ describe('I-14 — a force is data, not a branch in the bus', () => {
     },
   };
 
-  it('a fifth force modulates entities with no change to the bus', () => {
-    const withFog = [...FORCE_DEFINITIONS, FOG];
-    const f = field(withFog, { fog: { density: 1 } });
+  it('a force this build does not ship modulates with no change to the bus', () => {
+    const withCurrent = [...FORCE_DEFINITIONS, CURRENT];
+    const f = field(withCurrent, { current: { density: 1 } });
     const far = f.modulationFor(subject({ depth: 0 }));
     const near = f.modulationFor(subject({ depth: 1 }));
     expect(far.opacity).toBeCloseTo(0.4, 10);
@@ -374,12 +380,12 @@ describe('I-14 — a force is data, not a branch in the bus', () => {
   });
 
   it('and it composes with the forces already there', () => {
-    const f = field([...FORCE_DEFINITIONS, FOG], {
-      fog: { density: 1 },
+    const f = field([...FORCE_DEFINITIONS, CURRENT], {
+      current: { density: 1 },
       timeOfDay: { hour: 0 },
     });
     const m = f.modulationFor(subject({ depth: 0 }));
-    // Both the night ramp and the fog have pulled red down; the axes multiplied.
+    // Both the night ramp and the haze have pulled red down; the axes multiplied.
     expect(m.tintR).toBeLessThan(0.3);
   });
 
@@ -420,12 +426,17 @@ describe('I-14 — a force is data, not a branch in the bus', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('the four v1 forces', () => {
-  it('ships exactly the four SPEC.md names, each with a unique id', () => {
+  it('ships the four SPEC.md v1 names plus the Gate 4 fifth, each unique', () => {
+    // SPEC.md I-14 names four v1 forces and says they are "the first four
+    // instances of the mechanism, not the mechanism itself". `fog` is the fifth,
+    // added at Gate 4 as the timed I-14 exercise and kept — it is I-14's own
+    // first example of what adding one should cost.
     expect(FORCE_DEFINITIONS.map((d) => d.id)).toEqual([
       'wind',
       'rain',
       'timeOfDay',
       'temperature',
+      'fog',
     ]);
     expect(new Set(FORCE_DEFINITIONS.map((d) => d.id)).size).toBe(FORCE_DEFINITIONS.length);
     expect(forceById('wind')).toBe(WIND);
@@ -565,6 +576,38 @@ describe('the four v1 forces', () => {
       expect(t(1).tintB).toBeLessThan(t(1).tintR);
       expect(t(0).tintR).toBeLessThan(t(0).tintB);
     });
+  });
+});
+
+describe('fog — the fifth force, shipped (Gate 4, I-14)', () => {
+  it('hazes the far plane and leaves the near plane alone', () => {
+    const f = field(FORCE_DEFINITIONS, { fog: { density: 1 } });
+    const far = f.modulationFor(subject({ depth: 0 }));
+    const near = f.modulationFor(subject({ depth: 1 }));
+    expect(far.opacity).toBeCloseTo(0.35, 10);
+    expect(near.opacity).toBeCloseTo(1, 10);
+    // Blue survives further than red — haze is cool, not merely dim.
+    expect(far.tintB).toBeGreaterThan(far.tintR);
+  });
+
+  it('never fades a layer to nothing — on black, gone is not misty', () => {
+    for (let d = 0; d <= 1; d += 0.05) {
+      const m = field(FORCE_DEFINITIONS, { fog: { density: 1 } })
+        .modulationFor(subject({ depth: d }));
+      expect(m.opacity).toBeGreaterThanOrEqual(0.35);
+    }
+  });
+
+  it('is the first force to use ctx.depth, which is why it is a real test', () => {
+    const f = field(FORCE_DEFINITIONS, { fog: { density: 0.7 } });
+    const a = f.modulationFor(subject({ depth: 0.2 }));
+    const b = f.modulationFor(subject({ depth: 0.8 }));
+    expect(a.opacity).toBeLessThan(b.opacity);
+  });
+
+  it('is inert at its default, like every other force', () => {
+    expect(FOG.params.find((p) => p.key === 'density')!.default).toBe(0);
+    expect(isIdentityModulation(field([FOG]).modulationFor(subject()))).toBe(true);
   });
 });
 

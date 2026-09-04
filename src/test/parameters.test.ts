@@ -491,20 +491,23 @@ describe('Gate 4 — every force is enumerable from the registry by hierarchical
   });
 
   it('I-14: a fifth force appears in the registry with no edit here', () => {
-    const FOG: ForceDefinition = {
-      id: 'fog',
-      label: 'Fog',
+    // NOT `fog` — that is a shipped force now (Gate 4's timed exercise). A
+    // synthetic colliding with a shipped id would test collision detection
+    // rather than the mechanism. `current` is I-14's own second example.
+    const CURRENT: ForceDefinition = {
+      id: 'current',
+      label: 'Current',
       axes: ['opacity'],
       defaultSusceptibility: 1,
       params: [{ key: 'density', label: 'Density', min: 0, max: 1, default: 0, step: 0.01 }],
       evaluate: () => ({}),
     };
-    const r = registryForScene(scene, [...FORCE_DEFINITIONS, FOG]);
-    expect(r.has('force.fog.density')).toBe(true);
-    expect(r.keys('force')).toContain('force.fog.density');
+    const r = registryForScene(scene, [...FORCE_DEFINITIONS, CURRENT]);
+    expect(r.has('force.current.density')).toBe(true);
+    expect(r.keys('force')).toContain('force.current.density');
     // And so does its per-entity subscription, for every layer.
     for (const l of scene.layers) {
-      expect(r.has(`entity.${l.id}.susceptibility.fog`)).toBe(true);
+      expect(r.has(`entity.${l.id}.susceptibility.current`)).toBe(true);
     }
   });
 });
