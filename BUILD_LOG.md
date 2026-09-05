@@ -3516,3 +3516,500 @@ which is the only reason it was visible at all. This is the sixth instrument
 defect of the same family in this project and the argument for putting the
 VALUE in the log line rather than only the verdict. The guard is now falsy-based
 and says explicitly that a missing hash "is not a pass".
+
+---
+
+## 2026-09-05 — Phase 4 (session 2) — the S-series ratified, and a consistency sweep
+
+- DID: no code. Two document batches. **v3.3** — the S-series (S1–S10), from a
+  design consultation with the operator on four gaps they named, worked into one
+  amendment and ratified in the same session. **v3.3.1** — the B-series (B1–B9),
+  a consistency sweep with no new decisions in it, run immediately afterwards
+  because propagating S8's renumbering exposed how much of the two mutable
+  documents still spoke in v3.2 numbers.
+- MEASURED: nothing new. **No §4 number in this project is affected by either
+  batch** — they change plans and wording, not measurements, and no gate run was
+  taken.
+- BLOCKER: none, and deliberately so — see the order note below. **Gate 4 is
+  still open on one condition and nothing in Phases 6+ is built until it closes.**
+- NEXT: show it to one other human, on a wall, warped, and log their reaction
+  verbatim. That is the whole of Gate 4's remainder.
+
+### The operator's four gaps, as stated
+
+Recorded in their own framing before being reorganised, because the
+reorganisation is an interpretation and the next reader should be able to check
+it:
+
+1. **Hierarchy** — folders inside folders, holding layers and entities, so they
+   can be grouped and filed.
+2. **Serial and parallel motion** — "something that happens after something, or
+   something that happens at the same time as something". Named as absent.
+3. **Per-animation warp** — an element marked or added, then shaped against the
+   projector, needs its own warp.
+4. **A boundary and a path inside it** — mark a window in the projector's
+   throw, project only its outline, run an animation along that outline; four
+   windows in a queue folder, one after another, while a second folder fills all
+   four at the same time. "Then there is a flow."
+
+Plus, in the same session: cubes standing in the projection space, and an AI
+prompt filling a marked shape or walking a marked route.
+
+### `DECISION` — the four gaps are one feature, and naming it that way is what made the amendment small
+
+Presented as four, they read as four phases. They are one model:
+
+- a **Surface** — a marked piece of real geometry with a shape, a mask, a path
+  and its own mapping (gaps 3 and 4),
+- a **content tree** organised into groups that run together or in turn
+  (gaps 1 and 2),
+- and a **binding** between them.
+
+Gap 4's four-window example is not a fifth feature; it is what the other three
+produce when composed. That is why this lands as **two phases and three
+invariants** rather than four independent workstreams, and it is the reason the
+amendment could be ratified in one session.
+
+### `DECISION` — the surface question, which is the one that cost the most
+
+Asked directly: is the target a flat wall with shapes marked on it, or real
+geometry at different angles? Answer: **both.**
+
+That answer is what forces I-5's restatement. **A single transform can square
+exactly one plane.** Faces of a cube sit at different angles to the projector,
+so no one transform aligns them — geometry, not implementation. And "both" is
+better than either alone, because it collapses to one model: **a flat wall is
+not a special case, it is one surface filling the frame.**
+
+### The S-series amendment table
+
+| # | Change | Reason | Alternative rejected |
+|---|---|---|---|
+| **S1** | §2.1 gains a third usage mode: object & architectural mapping | v3 named two modes; the operator's actual target is a third, and the spec did not say so. A scope this size discovered later is a scope crept into rather than chosen | Treat it as a variant of worldbuilding. Rejected: worldbuilding is about depth and weather in a frame, not about aligning to facets of real objects. Calling them the same thing is how the second one never gets designed for |
+| **S2** | I-5 restated as **two** mapping levels — per-surface, and the final output mapping — both calibration, both isolated from scene logic | One transform squares one plane; cubes need more. Stating two levels keeps the isolation I-5 exists for and makes the second one legal instead of leaving it to appear as a per-layer hack | A per-layer warp stored in the scene file. **Rejected as the thing I-5 exists to refuse**: it puts physical geometry inside content, and there is then no statement of where the room ends and the show begins. Also rejected: a scene-space corner-pin that is *not* calibration — the same problem in politer clothes |
+| **S3** | I-15 added: surface tree (where) and content tree (what), bound by **role** | Keeps I-5 stateable, and buys portability for free — a scene authored in one room loads in another once that room is calibrated and tagged | One tree holding both, the obvious shape. Rejected: it makes every scene file room-specific and makes the calibration/scene split — Gate 2's own proof — unstateable. Also rejected: binding by surface **id**, which works and quietly destroys the portability that is the best thing here |
+| **S4** | I-16 added: hierarchy, and `parallel` \| `sequence` with per-child durations summing to the group's, position **derived** from the one clock | It answers "this, then that" with no new time source and no per-child state, so pause and scrub keep working exactly as Phase 3 built them | "When A finishes, start B" — the natural reading of the request. **Rejected on Phase 3's own evidence:** derived phase is what makes a scrub land and a pause freeze in one frame, and a completion trigger reintroduces per-child accumulated state through the back door. Also rejected: an absolute timeline with a playhead, which §2.2 forbids and which S4 exists to give an alternative to |
+| **S5** | I-17 added: one path primitive with `closed` and `interpolation`; three uses — boundary, outline, route | A surface outline and a movement path are the same object; building them separately creates two pointer paths and two stored types for one idea | Curves now (Catmull-Rom or Bézier). **Rejected as four decisions, not one** — curve family, handle UI, corner behaviour, and arc-length reparametrisation for constant speed — in a batch already doubling scope. Mitigated rather than deferred blindly: `interpolation` ships serialized with one legal value, so a curve is a later **value**, never a migration of every stored path. Also rejected: separate straight and freehand tools, which is a mode switch users pay for forever |
+| **S6** | §10 row 2 CLOSED with the ratified caps: video 4, live Lottie 4, WARN not refuse | It was ratified 2026-09-04 and wired into the code while §10 still read "Phase 3, confirmed Phase 9" and carried no number. Named as outstanding in two prior entries; the operator is the only one who can edit it and is here | Leaving it for the Phase 11 confirmation. Rejected: a decision that is live in code and absent from the spec is exactly the drift §0's three-artefact rule exists to prevent |
+| **S7** | §10 gains a row: the projector's adaptive picture features are disabled, **before Gate 4** | Proposed 2026-09-04 against the colour-shift report. Same class as A7's auto-keystone and auto-focus, and a **measurement precondition** for every colour judgement from Gate 4 on | Leaving it in the build log as a note. Rejected on A7's precedent: an installation prerequisite that lives in somebody's memory is discovered on site. **Discharged the same day it was written**, which is the argument for the row rather than against it |
+| **S8** | Two phases inserted; §11 renumbered P6→P8 … P11→P13; Phases 0–5 unchanged | Surfaces and sequencing each carry a gate's worth of conditions and cannot be bullet points inside Phase 5 | Appending them after Phase 11 to avoid renumbering. Rejected: Phase 8's serialization, Phase 9's calibration format and Phase 11's caps all depend on these models, so appending would mean designing three formats twice. Renumbering was made cheap by leaving 0–5 alone, so **no passed gate moves** |
+| **S9** | An inactive sequence block is dismounted; the next is prewarmed, with the lead **measured** | Sequencing is a performance fact, not a UI detail: it puts decoders in series where §4 measured six colliding in parallel | Keeping every block resident. Rejected: it discards the main performance benefit and multiplies the x6 burst. Also rejected: a guessed prewarm lead — A9's principle, an instrument (or a constant) that emits a plausible wrong number is worse than one that fails loudly |
+| **S10** | D20: the AI provider supplies **pixels**, never motion or geometry | The engine already owns paths, pace, size and boundaries. Asking a model for them breaks I-3 and does not work reliably today | Prompting for the full behaviour — "a zombie walking along this path inside this shape". Rejected twice over: it makes the compositor care where pixels came from, and current models cannot hold a seamless alpha walk cycle at consistent scale and heading |
+
+### `SPEC-CHANGE-RATIFIED` — v3.3, all ten, by the operator, 2026-09-05
+
+Propagated in the same session, so the three-artefact rule (§0) is satisfied by
+this entry plus the §1 v3.3 block plus the body edits:
+
+- §2.1 third mode · §2.4 unchanged
+- **I-5 restated**; **I-15, I-16, I-17 added** — invariants now I-1 … I-17
+- **D17** (two trees + calibration/performance modes), **D18** (duration blocks,
+  loop default on, hard cuts, longest-child rule), **D19** (one path tool,
+  shift-constrain, simplify on release), **D20** (AI supplies pixels)
+- §7 gains `core/paths.ts`, `core/surfaces.ts`, `core/roles.ts`,
+  `core/groups.ts`, `render/mask.ts`, `render/surfaceMap.ts`,
+  `render/lifecycle.ts`; `calibration/` splits into `output.json` and
+  `surfaces.json`; a "which tree owns which file" note added beside A13's policy
+- §8.1 gains four test groups; §8.2 gains three rolling checks
+- §9 gains five risk rows; the scope-creep row now names I-16 as the line
+- §10: row 2 **closed**, rows 6–10 added
+- §11: Phase 5 extended, **Phases 6 and 7 new**, 8–13 renumbered, Gates 8, 9,
+  11 and 12 extended
+- §12 gains eleven terms
+
+### The B-series table — a sweep, not a batch of decisions
+
+Every row makes one document say what the project had already decided somewhere
+else. **Nothing here is a decision**, and each is labelled so a later reader can
+tell a correction from an amendment.
+
+| # | Fix | What it was inconsistent with |
+|---|---|---|
+| **B1** | `SPEC.md`'s header said `v3` while §1's top block said v3.2 | Itself. A spec whose header disagrees with its own revision history is §0's auditability defect in its smallest form. The header now carries version *and* build status, so the two cannot drift apart silently again |
+| **B2** | Six pre-S8 phase numbers in `CHECKLIST.md` prose: "Phase 2 and Phase 7 calibrate one transform" (→9), "residual at the limits is Phase 7's subject" (→9), "parked for Phase 9" (→11), "grade wired in Phase 9" (→11), and Gate 0's carried-forward k note naming Phase 9 and Phase 8 (→11 and 10) | S8's own claim that no phase label goes stale. That was true of headings and false of forward references inside prose. **A renumbering that sweeps headings and not prose is a renumbering half done** |
+| **B3** | `CHECKLIST.md` still said §10 row 2 "needs the operator's edit" | S6, which closed it. A checkbox describing an action already discharged is the stale-note defect Gate 0 hit twice |
+| **B4** | `BUILD_LOG.md`'s pre-v3.3 entries left **unedited** | §0's append-only rule. They were correct when written. The reconciliation is stated once, here, rather than by rewriting history: **a phase number in an entry dated before 2026-09-05 is a v3.2 number** |
+| **B5** | §9's projector-side geometric row read as still pending; there was no photometric row at all | The 2026-09-03 verification at the projector, and the 2026-09-05 adaptive-brightness fix. Both rows now record that they fired and were discharged, and the requirement still stands for future devices |
+| **B6** | §4's A14 clause said the instrument "has now been the bug three times" | The log. It is six. The sixth is the region-hash guard printing `pixel-identical (undefined)` on 2026-09-05 — a green line over a measurement that never happened, caught only because the missing value was visible in the message. **The clause is unchanged; the count is corrected, and one sentence is added: a gate line prints the VALUE, not only the verdict** |
+| **B7** | §10 rows 1 and 2 did not say they were closed *in code* | The code. `MAX_CONCURRENT_VIDEO` / `MAX_CONCURRENT_LOTTIE` were wired with a `[caps]` log line before the row said anything |
+| **B8** | Gate 4's status was stated differently in three places | The wall session. Header, §11 and `CHECKLIST.md` now agree: five passed 2026-09-05, one open, and the open one is not a measurement |
+| **B9** | Three live rulings had no §10 row and no due phase: M2's `performance.now()` quantization, A8's `k` probe, the memory-soak verdict | §10 itself, which is the register of what is undecided. Each was named at every gate since Phase 2, each waits on the operator, and each lived **only in build-log prose**. They are now rows 11, 12 and 13, due at Phase 6, Phase 11 and Phase 6. **A decision that is open, load-bearing and absent from §10 is open with no due date, which is how an open decision becomes a permanent one** |
+
+### `DECISION` — the order, which is the part most likely to be ignored
+
+**Nothing in the S-series is built until Gate 4 is crossed.** Written into §11's
+preamble rather than left to discipline, because this is the exact moment §9's
+scope-creep row fires: a ratified amendment is the most legitimate-looking
+reason there has ever been to leave a gate condition open.
+
+Gate 4 is §2.4's first demoable milestone — "treat reaching it as a deadline,
+not a byproduct" — and after 2026-09-05 it has **one** condition left, which
+needs a person and not a phase. The order that follows: **show it to somebody →
+log their reaction → Gate 4 closed → §10 rows 11 and 13 ruled → Phase 5.**
+
+The formulation worth keeping: an amendment that is ratified and then queued is
+scope **chosen**; one that is ratified and then started is scope **crept**.
+
+### `DECISION` — what this costs, stated in days rather than implied
+
+`CHECKLIST.md`'s totals are restated. **v1 shippable moves from 45–67 days to
+63–94 — roughly +40%.** Phase 5 grew (path tool), Phases 6 and 7 are new, and
+Phase 9 grew because I-5 now has two levels to calibrate.
+
+Recorded as a headline rather than buried in a table because the estimates exist
+to detect drift, and a 40% increase absorbed silently into a table is drift that
+was never written down — rule 4, applied to a plan instead of to a phase.
+
+### `NOTE` — three predictions this batch makes, so they can be checked later
+
+Written down now because a prediction recorded before the run is evidence and
+one recalled afterwards is not. This project has already lost a cliff to a
+retraction for want of exactly this.
+
+1. **Sequencing raises the video ceiling.** §10 row 2's cap of 4 is
+   symptom-level; the x6 failure was a 0.7 s burst of simultaneous
+   loop-boundary seeks. Six videos **in sequence** should hold both §4 metrics
+   where six concurrent ones did not. Gate 7 asks for it directly and asks that
+   a negative result be stated.
+2. **Most surfaces will not need a render target.** On a flat wall the surface
+   mapping is identity and a clip should suffice. If that is wrong, §9's
+   per-surface render-target row does real work and Phase 6's stated surface
+   count will be low.
+3. **The AI fill case works well before the character case.** D20 already
+   bounds the consequence — the failure is an ugly asset, not a broken feature.
+
+### `IDEAS` — parked, not built
+
+- **Per-surface content in the preview at reduced fidelity.** I-7 already makes
+  the preview an approximation, and A2 forbids a second video decoder. Any
+  surface preview must respect both.
+- **Nested sequences as a "scene bank" of one scene.** Phase 8's bank and a
+  top-level sequence are structurally similar and should not be merged without
+  a reason; noted so the similarity is not mistaken for a refactor opportunity.
+- **The coalescer's fourth instance.** Still three (`warp.ts`, `clockLog.ts`,
+  `debug/coalesce.ts`). Phase 6's surface log would be a fourth and should use
+  the existing module rather than adding one.
+- **A per-region golden assertion — now built, and its scope is worth noting.**
+  `GoldenCase.region` landed on 2026-09-05 for the reference patch. Surfaces
+  make it more valuable still: hashing a sub-rectangle is exactly how a
+  boundary's containment gets proved in pixels rather than by unit test.
+
+
+---
+
+## 2026-09-05 — Phase 4 (session 3) — GATE 4 PASSED, and row 11 put to the operator
+
+- DID: closed Gate 4's sixth and last condition on the operator's report, marked
+  it `[x]`, and crossed the gate. No engine code changed. Restored the three
+  mutable documents, which had arrived in the working directory as
+  `SPEC (1).md` / `CHECKLIST (1).md` / `BUILD_LOG (1).md` with the tracked
+  originals deleted. Read `src/debug/clock-source.ts` and `electron/main.ts` to
+  cost `SPEC.md` §10 row 11 properly, and put it to the operator as a
+  `SPEC-CHANGE-PROPOSED` with a recommendation.
+- MEASURED: **507 tests / 24 files green** and **43 golden frames match**, both
+  re-run today before the gate box was ticked rather than quoted from the gate
+  run. The golden run printed the region assertion with its **value** —
+  `the reference patch is pixel-identical at wind 0 and wind 1 (1a00d8e5) while
+  the frames differ (7874f3b5 vs 0204c000)` — which is B6 working as intended:
+  the line that once printed `(undefined)` now cannot hide a missing hash.
+  No new §4 number; no gate run was taken and none was needed.
+- BLOCKER: none. Gate 4 is closed; the queue is `SPEC.md` §10 row 11, then row
+  13, then Phase 5.
+- NEXT: the operator rules on row 11. Then row 13, then Phase 5 — **not**
+  Phase 6, which stays queued behind Phase 5 exactly as S8 ratified it.
+  Crossing Gate 4 releases the S-series from its hold; it does not reorder the
+  phases.
+
+### `GATE-PASSED` — Gate 4, all six conditions, 2026-09-05
+
+§2.4's **first demoable milestone**, reached. Five conditions were judged on the
+wall by the operator earlier the same day and are recorded in the Phase 4
+session 1 part 2 entry; the sixth was discharged that evening. The numbers, so
+this entry is complete on its own and not a pointer to another one:
+
+**Run `p4-gate`, scene `phase4-forces`, 11 layers.** `disturbed=false`,
+`throttled=false`, 1:1 to panel, `pin=PINNED`, 3601 samples over 60.0 s after
+the discarded 10 s warmup, fps 60.000067 against a nominal 60.000004.
+
+| metric | value | reading |
+|---|---|---|
+| **M1** — frames late | **0.0000%**, worst run 0, worst interval 18.80 ms, clause 3 empty | a measurement |
+| **M2** — p99 render | **0.2000 ms = 1.200% of N** | an **UPPER BOUND**, exactly two quanta of a 0.100 ms clock |
+| `renderMeanMs` (informational) | 0.0649 ms = 0.390% of N | a measurement |
+| regression `p4-regression`, Phase 3's load | M2 p99 **0.600% of N**, identical to Gate 3 | the force bus costs nothing measurable |
+
+Suites: **507 tests**, **43 golden frames**. Fifth force added as data in
+**1 min 34 s**, one production file, `core/forceDefs.ts`, +53 lines, zero lines
+in the bus, compositor, registry, editor panel, log or scene model.
+
+**M2 is stated as a ceiling in the gate's own record, not in a footnote.** Every
+M2 p99 this project has recorded is an upper bound in whole quanta, and Gate 4
+is no exception. That is §10 row 11 and it is the next thing on the queue,
+which is the correct relationship between the two: the gate passed on a metric
+that cannot yet see its own subject, and it says so.
+
+### The sixth condition, and what kind of evidence it is
+
+- **date:** 2026-09-05 · **scene:** `phase4-forces` · **warp:** on
+- **projector:** adaptive brightness and dynamic contrast **OFF** (§10 row 6),
+  so the colour half of what they saw was seen under the ratified precondition
+- **they saw the `timeOfDay` sweep:** yes
+- **who, by role:** a friend / family member — a non-technical viewer with no
+  professional stake in the tool, which is arguably the strongest form of this
+  test, since §2.4 asks whether the thing reads as a product rather than as an
+  exercise
+- **contradictions with a passed condition:** none reported
+
+**The reaction is a SUMMARY, not a quote, and this entry labels it as the
+weaker evidence it is.** The operator reports the reaction as strongly
+positive — *"they loved it"* — and states plainly that the words themselves
+were not written down in the room and are **not being reconstructed after the
+fact**.
+
+The gate line asked for a verbatim reaction and said, in its own text, that *"a
+remembered 'they liked it' is not"* data. That warning was left standing in
+`CHECKLIST.md` rather than softened to fit what was returned. The operator ruled
+that the condition is satisfied — the thing was shown to another human, on a
+wall, warped, and the reaction is on the record — and that the shortfall is
+recorded as a shortfall.
+
+**A9 applies to prose as much as to numbers.** A reconstructed quote is a
+plausible wrong value in a field that would look like a fact, and this project
+has already lost a cliff to a retraction for want of a record made before rather
+than after. Refusing to invent one is why this reads as a summary. Three fields
+in the operator's report arrived as unfilled placeholders — date, sweep, role —
+and were asked for rather than inferred, for the same reason: an append-only
+file cannot be corrected in place, only appended to.
+
+**For the next showing: write the words down in the room.**
+
+### `SPEC-CHANGE-PROPOSED` — §10 row 11, M2's resolution floor
+
+The row is due before Phase 6 records its first gate number, it has been open
+since Phase 2, and it is the operator's ruling to make. Presented with a
+recommendation; not taken.
+
+**What the code already does, because it changes the cost of every option.**
+`src/debug/clock-source.ts` is finished, not a stub. `selectClockSource()`
+accepts any candidate fine clock and **measures it before committing** —
+monotonicity, resolution, and per-call cost against `CLOCK_CALL_BUDGET_MS` —
+refusing a candidate that does not advance, that is not monotonic, that costs
+more than it resolves, or that is no finer than `performance.now()`, each with a
+printed reason and a loud fallback. `ClockSourceReport.coarserThanSubject`
+already makes the ceiling condition self-reporting.
+
+**The fine clock is not being refused for a hard reason. It is being handed
+nothing.** `electron/main.ts` sets `sandbox: true` on both windows; a sandboxed
+preload gets a stripped `process` with no `hrtime`; `preload.ts:nowMs()`
+therefore returns `null`, and the fine branch is never taken. The consumer is
+built, guarded and tested, and the producer is one line away.
+
+| option | resolution vs the ~47 µs subject | cost | risk |
+|---|---|---|---|
+| **1. drop the preload sandbox** | `hrtime.bigint()`, sub-µs, ~50× finer | one line + a re-run | a security-posture change bought for an instrument |
+| **2. custom protocol + COOP/COEP** | `performance.now()` → 5 µs, ~9 quanta — **documented, not measured here** | days: `registerSchemesAsPrivileged`, `protocol.handle`, rewritten asset URLs, CORP on every subresource, dev-server headers | **it changes the asset load path**, which is the path §4's video numbers are taken on. Production loads `file://`, which cannot carry the headers at all |
+| **3. accept p99 as a ceiling, judge on `renderMeanMs`** | none | free | M2 stays decorative at low load, entering the phase that adds render targets |
+
+**RECOMMENDED: option 1, narrowed — drop `sandbox` on the OUTPUT window only,
+keep it on the editor.**
+
+| | |
+|---|---|
+| **Reason** | `CLAUDE.md` measures on the output window, so that is the only window that needs the fine clock and the only one that should pay for it. **The risk is bounded by code that already shipped:** if `hrtime` proves unaffordable, `selectClockSource` rejects it on the measured `callCostMs` and falls back with a printed reason, so this change cannot silently produce a better-looking wrong number — the failure mode A9 exists for and the one this project has hit six times. The editor keeps the stricter posture, and the editor is where posture matters: file dialogs, UI, and Phase 12's AI provider, the first thing here that touches a network. `contextIsolation` and `nodeIntegration` are untouched in both windows. And it clears the row **before** Phase 6 records a number, as the row's due date requires, without disturbing the substrate Gate 6's video regression is measured on |
+| **Alternative rejected** | **Option 2**, the technically cleaner fix, which keeps the sandbox and is what a remote-content app would be forced into. Rejected **for now and not on principle**: it fixes the clock by changing the asset load path immediately before a gate whose numbers depend on that path, and it is days of work against one line. Option 1 does not foreclose it — if this app ever loads remote content, option 2 stops being optional. Also rejected: **option 3**, which is honest and free and leaves M2 unable to judge its own gate condition at low load, three phases after that was discovered |
+| **Honest weakness, stated rather than buried** | Electron's own guidance is that `sandbox` stays on. This is a real posture change, made for a measurement. Confining it to one window makes it small; it does not make it nothing |
+
+**A prediction, recorded before the run so it counts as evidence later.** Phase 6
+draws surfaces with `Graphics` and adds render targets, so the subject may grow
+past the 100 µs quantum on its own and make M2 self-resolving. That would be
+luck rather than a plan, and it would not retroactively measure Gates 0–4.
+
+### `SPEC-CHANGE-PROPOSED` — propagate Gate 4's status into `SPEC.md`
+
+Not a decision and not an amendment — a status propagation, listed because
+`SPEC.md` is the operator's file and it now states something that stopped being
+true today. Four places:
+
+| line | says today | should say |
+|---|---|---|
+| 11–13 (header **Status**) | "Gate 4 is one condition from closed — five of its six passed" | Gate 4 **passed** 2026-09-05, all six; building Phase 5 next |
+| 1285 (§11 "Where that stands today") | "Five of Gate 4's six conditions passed… Until it is met, the sanctioned work is Gate 4's closure and the §10 rulings" | Gate 4 crossed 2026-09-05; the sanctioned work is §10 rows 11 and 13, then Phase 5 |
+| 1381 (§11 Gate 4 heading) | "*five of six passed 2026-09-05; the sixth is the only thing between this project and Phase 5*" | all six passed 2026-09-05 |
+| 1394–1395 (§11 Gate 4, sixth bullet) | "**OPEN.**" | **PASSED 2026-09-05**, with the note that the reaction is on the record as a summary rather than a quote, and is weaker for it |
+
+B1's lesson is the argument for doing all four together: a header that disagrees
+with the body is §0's auditability defect in its smallest form, and B8 had to
+fix Gate 4's status being stated three different ways once already. A §1
+revision block goes with them if the operator wants the propagation auditable as
+a change rather than a correction.
+
+### `NOTE` — the three documents were restored, not edited
+
+They arrived as `SPEC (1).md`, `CHECKLIST (1).md` and `BUILD_LOG (1).md` with
+the tracked originals deleted from the working tree. Each was diffed against
+`HEAD` before anything else happened: all three are strict supersets of the
+committed versions — the v3.3.1 header, the B-series block, the Phase 4 session
+2 entry appended at line 3519 — so they are the newer copies and nothing
+committed was lost. Renamed into place. `SPEC.md` was **read and not written**.
+
+### `IDEAS` — parked, not built
+
+- **A verbatim-capture habit, not a feature.** Gate 6 and Gate 7 both end in a
+  human judgement on a wall, and both will hit this. The cheap fix is a phone
+  voice memo in the room, transcribed into the log afterwards — a record made
+  before rather than after, which is the whole of A9 applied to people.
+- **`coarserThanSubject` belongs on the gate line.** It already exists in
+  `ClockSourceReport`. Printing it beside every M2 figure would mean no future
+  reader can mistake a ceiling for a measurement, whichever way row 11 is ruled
+  — including option 3, where it becomes the only thing standing between the
+  number and a misreading. Cheap, and squarely B6's principle: print the value,
+  not only the verdict.
+
+## 2026-09-05 — Phase 4 (session 4) — the goldens drifted, and the machine moved under them
+
+- DID: no code, no engine change, no spec edit. Verified the previous session's
+  uncommitted work before committing it rather than after, which is the only
+  reason this entry exists. Re-ran both suites the session-3 entry cites. The
+  unit suite reproduced exactly; **the golden suite did not**. Traced the
+  difference to a macOS update installed between the blessing and the re-run,
+  updated `CHECKLIST.md`'s golden rolling check to say what is true on this
+  machine today, and put §4's TARGET_MACHINE to the operator as a
+  `SPEC-CHANGE-PROPOSED`. Committed the v3.3.1 document replacement, the Gate 4
+  entry and this one together.
+- MEASURED: **507 tests / 24 files green** — matches session 3 exactly.
+  **Golden frames: 40 of 43.** Three mismatches, hashes stable across two
+  consecutive runs:
+
+  | case | rendered | blessed |
+  |---|---|---|
+  | `resilience` | `071a69af` | `c8d0e8e7` |
+  | `phase3-load-preview` | `5c548a84` | `af59b5a4` |
+  | `bundled-missing-asset` | `f1546bfd` | `9510edbd` |
+
+  The I-4 region assertion printed **identically** to session 3 — reference
+  patch `1a00d8e5`, frames `7874f3b5` vs `0204c000` — as did I-5 (`ba2e7858` /
+  `fc055613`) and I-6 (additive gain 1.1441×). The values are quoted, not the
+  verdicts (B6).
+- BLOCKER: **the golden rolling check is `[!]`, not `[x]`.** It is one ruling,
+  not a defect in the engine. Gate 4 is **not** withdrawn and no Gate 4 box
+  changed.
+- NEXT: the operator rules on the goldens and on §4's TARGET_MACHINE. Then §10
+  row 11, then row 13, then Phase 5 — the queue is unchanged and this does not
+  reorder it.
+
+### What actually happened, with the timestamps that make it a diagnosis
+
+| when | what |
+|---|---|
+| 2026-09-04 18:42 / 18:43 | `p4-gate` and `p4-regression` written — **every §4 number in this project predates what follows** |
+| 2026-09-05 00:05 | `test/golden/frames.json` blessed, **43 of 43 green** |
+| **2026-09-05 00:53:25** | **macOS 26.6.2 (26.6.2) installed** — `/Library/Receipts/InstallHistory.plist` |
+| 2026-09-05 14:18 | unit suite re-run: 507 green, unchanged |
+| 2026-09-05 14:19 | golden suite re-run: **40 of 43** |
+
+**The engine did not change.** The working tree is three documents; `git diff`
+touches no file under `src/`, and the goldens were blessed against this exact
+source. So the variable is the environment, and the timestamps bracket it to a
+48-minute window that contains exactly one event.
+
+**The three cases are precisely the three that draw text**, and that correlation
+is the evidence, not an intuition about fonts:
+
+- `render/placeholder.ts:42` and `providers/bundled/VideoView.ts:87` both set
+  `fontFamily: 'monospace'` — a **generic family the OS resolves**, not a font
+  the repository ships or pins.
+- `resilience` draws two placeholder labels, `bundled-missing-asset` one, and
+  `phase3-load-preview` the video badge `▶ live in output`. That is every text
+  in the suite, and all three fail.
+- The other **40 hash byte-identically** — every filter, blend mode, warp,
+  video, Lottie, spritesheet and all five forces. A GPU or driver change would
+  have moved those too, which is what rules that class of cause out.
+- Both runs produced the same three hashes, so this is a **new deterministic
+  baseline, not flake**.
+- The rendered placeholder was inspected by eye and is **correct** under I-13:
+  magenta outline, cross, and a legible label. Nothing is broken; the bytes
+  moved.
+
+**A hash-only golden can say "different" and never "how different."** There are
+43 hashes in `frames.json` and no reference images, so the suite cannot show
+that a difference is confined to glyph pixels — the eye had to do it from the
+preview PNGs. That is B6's principle with one more instance: the instrument
+reports a verdict where it could report the value. Parked under `IDEAS`.
+
+### `SPEC-CHANGE-PROPOSED` — §4 TARGET_MACHINE's OS version
+
+§4 records TARGET_MACHINE as **macOS 26.2 (25C56)**. This machine has run
+**macOS 26.6.2 (25G83)** since 2026-09-05 00:53:25. §4's own sentence is *"If
+the machine changes, the numbers get re-measured, not re-assumed"*, so this is
+the clause firing, on the smallest possible subject, before a phase that will
+record new numbers.
+
+| | |
+|---|---|
+| **Proposed** | §4's TARGET_MACHINE line reads **macOS 26.6.2 (25G83)**, with a note that Gates 0–4 were measured on 26.2 (25C56) and that the boundary falls between `p4-regression` (2026-09-04 18:43) and Phase 5's first run |
+| **Reason** | The numbers are not wrong and must not be restated as though they were taken here. They are correct **for the machine §4 described when they were taken**. Recording the boundary is what keeps a Phase 5 comparison against Gate 4 honest — without it, the next person to compare an M2 across that line will be comparing two machines and will not be able to tell |
+| **Alternative rejected** | **Silently updating the version**, which is the tidier-looking option and destroys exactly the fact worth keeping: *where* the boundary is. A spec that says 26.6.2 with no note claims every gate was measured on 26.6.2, and four of them were not |
+| **Also rejected** | **Re-measuring Gates 0–4 on 26.6.2.** Disproportionate, and it would reopen four passed gates to restate numbers that were honestly taken. §0.1 freezes a passed gate; A1's derate and the row-11 ruling are the sanctioned places for re-measurement, not a retrospective sweep |
+| **Not proposed** | Any change to Gate 4's result. It passed on the machine of record, with the suites green at the time, and this entry does not touch it |
+
+### The goldens: a ruling, with a recommendation
+
+`CHECKLIST.md`'s line permits *"green, or re-blessed in a commit that says why"*,
+so re-blessing is sanctioned and the reason would be a good one. It is put to
+the operator anyway, because the cause is a spec fact and because re-blessing is
+a decision about **evidence**, not about code.
+
+| option | what it does | cost | weakness |
+|---|---|---|---|
+| **1. Re-bless the three, reason in the commit** | new baseline on 26.6.2 | minutes | the suite stays hostage to the next OS update, and the next one may land mid-phase |
+| **2. Pin the font** — ship one and name it, instead of `monospace` | removes the OS from the render path for text | small, but it **edits Phase 4 code**, and §0.1 freezes a passed surface | changes all three hashes anyway, so option 1 happens too |
+| **3. Drop text from golden scenes** | goldens stop covering the label | small | throws away I-13 coverage to protect a hash — the label **is** the deliverable |
+
+**RECOMMENDED: option 1 now, option 2 proposed separately for Phase 5.**
+Re-blessing records the truth of this machine and unblocks the line today.
+Pinning the font is the actual fix and belongs where it can be done without
+reaching into a frozen phase — Phase 5 already opens the editor and pointer
+surface, and a pinned font is a one-field change reviewable on its own. Doing
+option 2 first would mean editing passed-phase render code to fix a test, which
+is the shape of change `CLAUDE.md` warns about even when the change is right.
+
+**Not done unilaterally**, though the checklist would have permitted it: three
+green boxes would have appeared with no operator in the loop, on the same day
+the machine underneath them changed. That is the "silently downgrade a gate to
+make it pass" failure wearing a permitted hat.
+
+### `NOTE` — the session-3 entry's golden claim, reconciled not rewritten
+
+The session-3 entry says *"43 golden frames match, re-run today."* That was
+**true when written** — `frames.json` is timestamped 00:05 and the OS landed at
+00:53. `BUILD_LOG.md` is append-only (§0, B4), so the line stands as written and
+this entry is the reconciliation, exactly as B4 handled the phase renumbering: a
+record is corrected by appending to it, never by editing it into agreement.
+
+### `IDEAS` — parked, not built
+
+- **Store reference PNGs, or a per-region hash, beside the 43 whole-frame
+  hashes.** Today a mismatch costs a human eye on a preview to classify. A
+  per-region hash would have said *"the difference is inside the label box"*
+  mechanically. The I-4 region assertion already proves the mechanism exists in
+  this suite — it is one call, used once.
+- **Record the OS build in each run's conditions block.** The block already
+  captures `spans-displays`, the pin, display count and fullscreen state,
+  precisely so conditions are captured rather than reconstructed. The OS build
+  belongs in it, and this session had to reconstruct it from an install receipt
+  — the thing that block exists to prevent.
+
+### `SPEC-CHANGE-PROPOSED` — the version header, B1 recurring
+
+`SPEC.md:9` reads **`**Spec version:** v3.3`** while §1's top block is
+**v3.3.1**. This is B1's defect exactly — *"this file's version header said `v3`
+while §1's top block said v3.2"* — recurring in the same shape one version
+later, and B1's own remedy was to make the header carry version *and* status
+*"so the two cannot drift apart silently again."* They drifted again, silently,
+which suggests the remedy was a correction rather than a mechanism.
+
+Proposed: the header reads **v3.3.1**. Session 3's propagation table lists four
+Gate 4 status lines and does **not** include this one, so it would have been
+propagated around and left standing. Worth one line in whatever revision block
+carries the Gate 4 propagation, and worth a thought about whether a header this
+easy to forget should be asserted by a test rather than by care.
