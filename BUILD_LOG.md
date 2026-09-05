@@ -4271,3 +4271,108 @@ in 1090 s.
 - **A pinned font is a Phase 5 product decision, not a test fix** — whether the
   HUD and placeholder labels should look identical on every machine. Parked
   there, which is where it belongs now that the goldens no longer depend on it.
+
+## 2026-09-05 — Phase 5 (session 1) — previews retained, the window order made unreachable, row 11 shipped
+
+**APPENDED LATE, 2026-09-05 18:30, by the following session.** This entry
+records commit `6051526`, which shipped without one. `BUILD_LOG.md` is
+append-only, so the entry goes at the end in the order it was *written*, not the
+order it happened; its subject is the session before the one appending it. The
+defect is stated rather than hidden: for a few hours the only account of 1.1,
+1.2 and 1.4 was a commit message, and a commit message is not one of §0's three
+artefacts. **The session-end rule in `CLAUDE.md` is "append one entry, always" —
+it was not followed, and the cost was that the next session had to reconstruct
+what happened from `git show` and two log files.** Content below is from the
+commit message, `measurements/p5-smoke-hrtime-DISCARDED-focus.log`, and
+`.golden-preview/prev/manifest.json`; nothing is reconstructed from memory.
+
+- DID: Part 1 blocks 1.1, 1.2 and 1.4 of the Phase 5 handoff. 1.3 was started and
+  left idling; it produced no output file and is not reported here.
+- MEASURED: **524 tests / 27 files green** (was 519 / 26), **43 of 43 goldens**,
+  typecheck clean. Instrument clock on the output window: `hrtime`,
+  resolution **0.000084 ms**, call cost **0.000188 ms** against a 0.0028 ms
+  budget.
+- BLOCKER: none. Three rulings still owed (§4's OS boundary, §10 row 11's
+  shipped form, §10 row 13).
+- NEXT: 1.3, the cold/warm runs. *(Written by the appending session from the
+  handoff, not by the session this entry describes.)*
+
+### 1.1 — previews retained, so the next drift is a diff and not an inference
+
+Last session's central question was unanswerable because the run that *found* the
+golden drift overwrote the only pixels that could have explained it, and
+`frames.json` stores hashes with no reference images. That was filed under
+`IDEAS`; this session built it.
+
+`.golden-preview/prev/` is rotated on every run and carries a
+`manifest.json` recording the case count, the platform and OS release, the
+Electron and Chrome builds, whether the run that wrote it **completed**, and the
+case names. The `complete` flag is the load-bearing field: a baseline written by
+a run that died halfway is worse than no baseline, and a manifest that cannot say
+so is the same defect as a verdict without its value (A9).
+
+The diff uses the tool that already exists rather than a second one:
+
+    npx electron scripts/font-probe.mjs --diff .golden-preview/prev .golden-preview
+
+**Proven rather than wired.** Diffed against a shift-perturbed dump it localised
+the simulated drift to the same three cases and their pixel bounding boxes — the
+answer that was unavailable last session. A retention mechanism that has never
+been diffed is a directory, not an instrument.
+
+Recorded baseline at the time of writing: 43 cases, `complete: true`,
+`osRelease` 25.6.0, Electron 44.1.1, Chrome 152.0.7977.65.
+
+### 1.2 — §10 row 11 shipped as a mechanism, not a flag with a guard
+
+The output window drops `sandbox`, so its preload gets a real `process.hrtime`
+and the instrument finally has a clock finer than its subject. `contextIsolation`
+stays on and `nodeIntegration` stays off; what changes is that the preload runs
+with a real `process`. The editor keeps its sandbox and keeps
+`performance.now()`.
+
+**The ordering dependency was the actual problem, and it was fixed at the level
+it lives at.** Last session measured that the mixed configuration is
+order-dependent, three runs of three: editor-first works, output-first fails to
+load with `ERR_FAILED (-2)` and dies `SIGTRAP`. The obvious response — a comment
+and a guard at the window-creation site — leaves the wrong order *reachable* and
+relies on a future reader obeying a comment. Instead `openOutputWindow`
+establishes its own precondition by calling `ensureEditorWindow` first, and
+`createWindows()` is the only path that brings up a fresh pair. **Swapping those
+two lines now changes nothing**, which is the property worth having.
+
+Asserted in `src/test/windowOrder.test.ts`, 5 tests, mutation-checked: removing
+the precondition call fails the suite. *A fix that ships as an edit comes back; a
+fix that ships as a mechanism does not.*
+
+| | output window | editor window |
+|---|---|---|
+| `sandbox` | **false** | true |
+| instrument clock | **`hrtime`** | `performance.now()` |
+| resolution | **0.000084 ms (84 ns)** | 0.100000 ms |
+| call cost | **0.000188 ms (188 ns)** | 0.000100 ms |
+| COARSER-THAN-ITS-SUBJECT | **gone, first time in the project** | still reported |
+
+**The editor still reporting the warning is correct and is kept in the record.**
+It is a sandboxed renderer with a 100 µs clock and it says so. §4's metrics are
+measured on the output window; the editor's line is not a failure to fix.
+
+### 1.4 — B10: an expired note on a live line
+
+Gate 0's note that the `pinned-fingerprint` fallback *"resolved in unit tests but
+has still never fired in the field"* was true when written and stopped being true
+on 2026-09-05, when it fired in `p4-gate-os2662` because the macOS update changed
+the display id. Filed as **B10**, same family as B3: a note that describes the
+world at the moment it was written, sitting on a line that is still live.
+
+### The smoke run that confirmed the clock — DISCARDED
+
+`p5-smoke-hrtime` came back `disturbed=true`, `focusHeld=false`, **focus LOST at
+t = 58.8667 s of 60**. Renamed `p5-smoke-hrtime-DISCARDED-focus.log` and not
+reported as a run. It is kept because the `[timer]` line it printed at startup is
+what the table above is quoting, and that line is emitted before the measurement
+window opens and is unaffected by focus.
+
+**Two runs discarded for lost focus in two sessions is a pattern**, and this one
+died 1.1 seconds from the end. Carried into the next session as block 1.8.
+

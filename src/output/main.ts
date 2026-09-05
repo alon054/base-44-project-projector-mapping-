@@ -15,6 +15,7 @@ import { WARMUP_MS, WINDOW_MS, Hud, formatReport, passesHeadroom, passesPresenta
 import { createRenderHost } from '../render/host';
 import { canonicalizeClockTransport } from '../core/clock';
 import { attachClockLog } from '../debug/clockLog';
+import { CLOCK_CALL_BUDGET_MS } from '../debug/clock-source';
 import { attachForceLog } from '../debug/forceLog';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import {
@@ -29,7 +30,7 @@ import { canonicalizeScene, deepEqual, layersInDrawOrder, type Scene } from '../
 import { sceneById } from '../core/defaultScene';
 import { capBreaches } from '../core/library';
 import { createBundledLibrary } from '../providers/bundled/manifest';
-import { judgeSoak, type GpuSample } from '../debug/gpu';
+import { describeSoak, judgeSoak, type GpuSample } from '../debug/gpu';
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
@@ -937,6 +938,12 @@ function startMeasurementRun(
       provocations: provocationVerdicts,
     };
     console.log('[run] SUMMARY ' + JSON.stringify(summary));
+    // §10 row 13: the soak's numbers in the log, in words, with both terms of
+    // every pair. The SUMMARY JSON has carried them all along, and for four
+    // gates nobody read them out of it — which is how a `flat: false` over a
+    // miscounted quantity survived that long. A verdict that has to be
+    // extracted with a JSON parser is a verdict nobody checks.
+    if (summary.soak !== null) console.log(describeSoak(summary.soak));
     console.log(`[run] END label=${label} disturbed=${summary.disturbed}`);
     window.engine.measureDone();
   }, totalMs + 500);
@@ -985,9 +992,58 @@ if (config.measureLabel === 'probe-only') {
   window.engine.measureDone();
 }
 
+/**
+ * 1.8 — a smoke run that verifies the instrument clock and does NOT care about
+ * focus.
+ *
+ * Three runs have been discarded for lost focus in three sessions, and the last
+ * one died at t = 58.87 s of 60 — 1.1 seconds from the end, having already
+ * printed the only line it was taken for. That is a minute of the operator's
+ * hands-off time spent to obtain a string that was available at startup.
+ *
+ * `[timer]` is emitted by `createRenderHost` before any measurement window
+ * opens, and nothing about it depends on which window is frontmost: it is a
+ * property of the preload the renderer was given. So a run that only needs to
+ * confirm the clock has no reason to open a §4 window, and therefore has no
+ * `disturbed` concept to fail on.
+ *
+ * **The real §4 runs are deliberately untouched.** There, discarding on focus
+ * loss is correct and stays correct — last session's discarded run landed
+ * within 0.4% of its clean re-take, and today's landed within 6.8%, which is
+ * the argument FOR the rule rather than against it: a run that agrees with
+ * expectation is exactly the one that gets waved through. This adds a path for
+ * the question that never needed the window; it does not soften the one that
+ * does.
+ *
+ * Reserved label, following `probe-only`'s precedent rather than adding a
+ * second mechanism for reserved labels.
+ */
+if (config.measureLabel === 'clock-only') {
+  const cs = host.clockSource;
+  const budgetShare = cs.callCostMs / CLOCK_CALL_BUDGET_MS;
+  // A9: print the values, and state the verdict as a consequence of them.
+  console.log(
+    `[clock] source=${cs.source}  resolution=${cs.resolutionMs.toFixed(6)}ms  ` +
+      `callCost=${cs.callCostMs.toFixed(6)}ms  ` +
+      `budget=${CLOCK_CALL_BUDGET_MS}ms (${(budgetShare * 100).toFixed(1)}% of it)  ` +
+      `coarserThanSubject=${String(cs.coarserThanSubject)}` +
+      (cs.rejectedBecause === '' ? '' : `  rejected=${cs.rejectedBecause}`),
+  );
+  const ok = cs.source === 'hrtime' && !cs.coarserThanSubject && budgetShare <= 1;
+  console.log(
+    `[clock] VERDICT ${ok ? 'PASS' : 'FAIL'} — focus-independent, no measurement window opened`,
+  );
+  window.engine.measureDone();
+}
+
 // Kick off the unattended run last, so every listener, the HUD and the focus
 // trail are already live when the window opens (SPEC.md §4).
-if (config.measureLabel !== '' && config.measureLabel !== 'probe-only' && config.measureLabel !== 'latency') {
+if (
+  config.measureLabel !== '' &&
+  config.measureLabel !== 'probe-only' &&
+  config.measureLabel !== 'clock-only' &&
+  config.measureLabel !== 'latency'
+) {
   if (config.conditions) {
     const c = config.conditions;
     console.log(

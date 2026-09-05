@@ -1,0 +1,27 @@
+[clock-probe] 2026-09-05T15:50:48.902Z
+[clock-probe] Darwin 25.6.0  electron=44.1.1  chrome=152.0.7977.65  node=24.19.0
+[clock-probe] sandbox=false  contextIsolation=true  hrtime available in preload: true
+
+[clock-probe] counter's own tick, 200000 consecutive raw reads, no calibration loop:
+  hardware quantum      41 ns
+  consecutive reads returning the SAME value  129663 of 199999
+  wall time per raw read (span/reads)  24.7 ns
+
+[clock-probe] shared calibrator, median of 5 runs each:
+
+  clock                      crosses bridge   resolution      call cost
+  ------------------------------------------------------------------------
+  bigint-bare                no                    41.0 ns        32.0 ns
+  nowMs-in-preload           no                    41.0 ns        28.6 ns
+  nowMs-over-bridge          YES                   83.0 ns       112.5 ns
+  performance-in-preload     no                100000.0 ns        50.0 ns
+  performance-in-renderer    no                100000.0 ns       100.0 ns
+
+[clock-probe] bridge crossing costs 80.5 ns per call (3.5x the bare counter).
+
+[clock-probe] per-run spread, so a median is not read as a measurement:
+  bigint-bare                cost 71.8 / 29.0 / 32.0 / 30.4 / 36.9 ns   res 41.0 / 41.0 / 41.0 / 41.0 / 41.0 ns
+  nowMs-in-preload           cost 61.8 / 50.1 / 26.9 / 28.6 / 28.3 ns   res 41.0 / 41.0 / 41.0 / 41.0 / 41.0 ns
+  nowMs-over-bridge          cost 117.4 / 112.5 / 105.5 / 100.0 / 116.5 ns   res 83.0 / 83.0 / 83.0 / 83.0 / 83.0 ns
+  performance-in-preload     cost 100.0 / 50.0 / 50.0 / 50.0 / 50.0 ns   res 100000.0 / 100000.0 / 100000.0 / 100000.0 / 100000.0 ns
+  performance-in-renderer    cost 100.0 / 100.0 / 100.0 / 100.0 / 50.0 ns   res 100000.0 / 100000.0 / 100000.0 / 100000.0 / 100000.0 ns

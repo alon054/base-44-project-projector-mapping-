@@ -7,9 +7,16 @@
  * the renderer is worse than one that fails loudly.
  */
 import { describe, expect, it } from 'vitest';
-import { judgeSoak, readGpuResources, type GpuSample } from '../debug/gpu';
+import { describeSoak, judgeSoak, readGpuResources, type GpuSample } from '../debug/gpu';
 
-const census = (buffers: number, geometries: number, textures = 0, slots = textures) => ({
+const census = (
+  buffers: number,
+  geometries: number,
+  textures = 0,
+  slots = textures,
+  bufferSlots = buffers,
+  geometrySlots = geometries,
+) => ({
   valid: true,
   invalidReason: '',
   textureCount: textures,
@@ -18,7 +25,9 @@ const census = (buffers: number, geometries: number, textures = 0, slots = textu
   textureSlots: slots,
   textureBytesEstimate: textures * 1024,
   bufferCount: buffers,
+  bufferSlots,
   geometryCount: geometries,
+  geometrySlots,
 });
 
 const series = (...c: ReturnType<typeof census>[]): GpuSample[] =>
@@ -127,7 +136,9 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         textureSlots: 2,
         textureBytesEstimate: 8,
         bufferCount: g * 2,
+        bufferSlots: g * 2,
         geometryCount: g,
+        geometrySlots: g,
       },
     }));
 
@@ -162,7 +173,9 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         textureSlots: 0,
         textureBytesEstimate: 0,
         bufferCount: g,
+        bufferSlots: g,
         geometryCount: g,
+        geometrySlots: g,
       },
     }));
     const v = judgeSoak(leak, 100);
@@ -270,5 +283,167 @@ describe('the census counts live textures, not graves', () => {
     const v = judgeSoak(leaking, 600);
     expect(v.driftTextureCount).toBeGreaterThan(0);
     expect(v.flat).toBe(false);
+  });
+});
+
+/**
+ * §10 row 13 — the tombstone fix, the split verdict, and K.
+ *
+ * The `flat: false` this project has carried since Phase 4 was not a leak and
+ * was not a property of PixiJS's pooling either. `buffer._managedBuffers` is a
+ * `GCManagedHash`, whose `remove()` writes `items[uid] = null` rather than
+ * deleting the key, so counting keys counts graves — the identical defect the
+ * texture path had already fixed twelve lines earlier in the same file.
+ */
+describe('row 13 — buffers and geometries stop counting graves', () => {
+  it('counts LIVE entries, not keys, for buffers and geometries', () => {
+    const r = readGpuResources({
+      texture: { managedTextures: [] },
+      // Three added, two since removed. `GCManagedHash.remove()` tombstones.
+      buffer: { _managedBuffers: { items: { 1: {}, 2: null, 3: null } } },
+      geometry: { _managedGeometries: { items: { 7: {}, 8: null } } },
+    });
+    expect(r.valid).toBe(true);
+    expect(r.bufferCount).toBe(1);
+    expect(r.geometryCount).toBe(1);
+  });
+
+  it('still reports the key count as slots, so the old number stays readable', () => {
+    const r = readGpuResources({
+      texture: { managedTextures: [] },
+      buffer: { _managedBuffers: { items: { 1: {}, 2: null, 3: null } } },
+      geometry: { _managedGeometries: { items: { 7: {}, 8: null } } },
+    });
+    expect(r.bufferSlots).toBe(3);
+    expect(r.geometrySlots).toBe(2);
+  });
+
+  it('a hash that is only accumulating tombstones reads as flat on live counts', () => {
+    // The exact shape row 13 is about: keys climb without bound, nothing leaks.
+    const grave = (live: number, slots: number) => ({
+      valid: true as const,
+      invalidReason: '',
+      textureCount: 2,
+      textureSlots: 2,
+      textureBytesEstimate: 8,
+      bufferCount: live * 2,
+      bufferSlots: slots * 2,
+      geometryCount: live,
+      geometrySlots: slots,
+    });
+    const v = judgeSoak(
+      [grave(37, 37), grave(37, 120), grave(37, 227)].map((gpu, i) => ({
+        atSeconds: i * 30,
+        gpu,
+      })),
+      600,
+    );
+    expect(v.flatBuffers).toBe(true);
+    expect(v.flatGeometries).toBe(true);
+    expect(v.flat).toBe(true);
+    // And the growth is still visible, as information, never gated.
+    expect(v.driftGeometrySlots).toBeGreaterThan(5);
+  });
+});
+
+describe('row 13 — the verdict is split, and the AND is preserved', () => {
+  it('reports each subsystem separately', () => {
+    // Textures flat, buffers and geometries growing.
+    const v = judgeSoak(series(census(40, 12, 5), census(400, 120, 5)), 600);
+    expect(v.flatTextures).toBe(true);
+    expect(v.flatBuffers).toBe(false);
+    expect(v.flatGeometries).toBe(false);
+  });
+
+  it('`flat` remains the AND, so nothing loosens by splitting it', () => {
+    const v = judgeSoak(series(census(40, 12, 5), census(400, 120, 5)), 600);
+    expect(v.flat).toBe(v.flatTextures && v.flatBuffers && v.flatGeometries);
+    expect(v.flat).toBe(false);
+  });
+});
+
+describe('row 13 — K fails in both directions and passes in neither', () => {
+  // Warm-up then a long plateau, matching the measured p4-soak shape.
+  const settling = (quietSamples: number): GpuSample[] => {
+    const g = [19, 46, 91, 133, ...Array(quietSamples).fill(133)];
+    return g.map((n, i) => ({
+      atSeconds: i * 30,
+      gpu: {
+        valid: true as const,
+        invalidReason: '',
+        textureCount: 2,
+        textureSlots: 2,
+        textureBytesEstimate: 8,
+        bufferCount: n * 2,
+        bufferSlots: n * 2,
+        geometryCount: n,
+        geometrySlots: n,
+      },
+    }));
+  };
+
+  it('settles when K quiet rebuilds pass with zero post-settle drift', () => {
+    // 40 samples of plateau at ~0.5 rebuilds/s over 30 s each = ~600 rebuilds.
+    const v = judgeSoak(settling(40), 660, 64);
+    expect(v.settled).toBe(true);
+    expect(v.notSettledBecause).toBe('');
+    expect(v.rebuildsAfterSettled).toBeGreaterThanOrEqual(64);
+    expect(v.steadyDriftBufferCount).toBe(0);
+  });
+
+  it('K too large — never reaches the threshold, so it FAILS, not passes', () => {
+    const v = judgeSoak(settling(40), 660, 100_000);
+    expect(v.settled).toBe(false);
+    expect(v.notSettledBecause).toMatch(/under K=100000/);
+  });
+
+  it('K too small — settles early, later growth lands post-settle, so it FAILS', () => {
+    // Growth resumes after a quiet stretch: a slow leak wearing a plateau.
+    const resumes: GpuSample[] = [19, 46, 91, 133, 133, 133, 180, 240].map((n, i) => ({
+      atSeconds: i * 30,
+      gpu: {
+        valid: true as const,
+        invalidReason: '',
+        textureCount: 2,
+        textureSlots: 2,
+        textureBytesEstimate: 8,
+        bufferCount: n * 2,
+        bufferSlots: n * 2,
+        geometryCount: n,
+        geometrySlots: n,
+      },
+    }));
+    const v = judgeSoak(resumes, 240, 1);
+    expect(v.settled).toBe(false);
+  });
+
+  it('carries its own K, so a verdict can be read without knowing the default', () => {
+    expect(judgeSoak(settling(40), 660, 64).settleRebuilds).toBe(64);
+  });
+});
+
+describe('row 13 — the description prints both terms, never a bare ratio', () => {
+  it('prints buffers and geometries as a pair at each end', () => {
+    const line = describeSoak(judgeSoak(series(census(74, 37), census(454, 227)), 604));
+    // The measured relation is exactly 2.00 on every scene on record; the
+    // "1.20 anomaly" was 274/227 — one scene's buffers over another's
+    // geometries. Both terms make that unwriteable.
+    expect(line).toContain('first 74/37');
+    expect(line).toContain('last 454/227');
+  });
+
+  it('never prints a lone buffers-per-geometry number', () => {
+    const line = describeSoak(judgeSoak(series(census(74, 37), census(454, 227)), 604));
+    expect(line).not.toMatch(/per geometry[^\n]*\b2\.00\b/);
+  });
+
+  it('states why it did not settle rather than only that it did not', () => {
+    const line = describeSoak(judgeSoak(series(census(40, 12), census(400, 120)), 600));
+    expect(line).toMatch(/NOT SETTLED: /);
+  });
+
+  it('reports slots beside live, labelled as never gated', () => {
+    const line = describeSoak(judgeSoak(series(census(74, 37), census(454, 227)), 604));
+    expect(line).toContain('never gated');
   });
 });

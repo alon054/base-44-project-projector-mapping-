@@ -61,10 +61,48 @@ export interface GpuResourceReport {
    * reason `textureCount` is reported beside it as a fact.
    */
   textureBytesEstimate: number;
-  /** GPU buffers Pixi is managing — vertex, index and uniform. */
+  /**
+   * **Live** GPU buffers Pixi is managing — vertex, index and uniform,
+   * tombstones excluded.
+   *
+   * This counter was counting graves too, for exactly the reason `textureCount`
+   * above was, and the fix arrived four phases later because nobody read what
+   * produces it. `buffer._managedBuffers` is not an array and is not a `Pool`:
+   * in PixiJS 8.20.1 it is a **`GCManagedHash`**, and its `remove()` does
+   *
+   *     this.items[item.uid] = null;
+   *
+   * — a tombstone, not a delete, the same shape as `managedTextures`' null
+   * slots. `Object.keys(items).length` therefore counts every uid ever managed,
+   * live or destroyed, and **cannot go down**. A quantity that cannot go down
+   * cannot be flat, so `flat: false` on a `Graphics`-heavy scene was not a leak
+   * report and was not a property of the renderer either: it was this function
+   * counting the wrong set.
+   *
+   * The correction is the one the texture path already made twelve lines above,
+   * applied to the sibling quantity for consistency rather than as a new idea.
+   */
   bufferCount: number;
-  /** Geometries Pixi is managing. Graphics allocates one per distinct shape. */
+  /**
+   * `Object.keys(_managedBuffers.items).length`, tombstones included. INFORMATION.
+   *
+   * Kept and reported for the same reason `textureSlots` is: the difference
+   * between this and `bufferCount` is the tombstone count, and a reader who
+   * cannot see both has to take the live number on trust. It is also the number
+   * every soak before this commit was judged on, so keeping it visible is what
+   * makes those runs re-readable rather than merely superseded.
+   */
+  bufferSlots: number;
+  /**
+   * **Live** geometries Pixi is managing, tombstones excluded. `Graphics`
+   * allocates one per distinct shape.
+   *
+   * Same mechanism as `bufferCount`: `geometry._managedGeometries` is also a
+   * `GCManagedHash` (`GlGeometrySystem.mjs:31`), also tombstoning on remove.
+   */
   geometryCount: number;
+  /** `Object.keys(_managedGeometries.items).length`, tombstones included. INFORMATION. */
+  geometrySlots: number;
 }
 
 export const INVALID_GPU_REPORT: GpuResourceReport = {
@@ -74,7 +112,9 @@ export const INVALID_GPU_REPORT: GpuResourceReport = {
   textureSlots: 0,
   textureBytesEstimate: 0,
   bufferCount: 0,
+  bufferSlots: 0,
   geometryCount: 0,
+  geometrySlots: 0,
 };
 
 function subsystem(renderer: unknown, name: string): unknown {
@@ -82,14 +122,33 @@ function subsystem(renderer: unknown, name: string): unknown {
   return (renderer as Record<string, unknown>)[name] ?? null;
 }
 
-/** Counts the keys of a Pixi `GCManagedHash.items`, or null if it is not one. */
-function countManaged(system: unknown, field: string): number | null {
+/**
+ * Counts a Pixi `GCManagedHash.items` BOTH ways, or null if it is not one.
+ *
+ * `slots` is every key — every uid ever added. `live` is the non-null values.
+ * The difference is the tombstone count, because `GCManagedHash.remove()`
+ * assigns `null` rather than deleting the key:
+ *
+ *     remove(item) { ...; this.items[item.uid] = null; }
+ *
+ * Returning one number here was the defect. Returning both is not defensive
+ * coding; it is the only way the caller can tell a pool that filled up from a
+ * hash that is accumulating graves, and those two have opposite meanings for
+ * the rolling check.
+ */
+function countManagedHash(
+  system: unknown,
+  field: string,
+): { slots: number; live: number } | null {
   if (system === null || typeof system !== 'object') return null;
   const hash = (system as Record<string, unknown>)[field];
   if (hash === null || typeof hash !== 'object') return null;
   const items = (hash as Record<string, unknown>)['items'];
   if (items === null || typeof items !== 'object') return null;
-  return Object.keys(items as object).length;
+  const values = Object.values(items as Record<string, unknown>);
+  let live = 0;
+  for (const v of values) if (v) live++;
+  return { slots: values.length, live };
 }
 
 /**
@@ -139,11 +198,11 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
     missing.push('texture.managedTextures');
   }
 
-  const bufferCount = countManaged(subsystem(renderer, 'buffer'), '_managedBuffers');
-  if (bufferCount === null) missing.push('buffer._managedBuffers');
+  const buffers = countManagedHash(subsystem(renderer, 'buffer'), '_managedBuffers');
+  if (buffers === null) missing.push('buffer._managedBuffers');
 
-  const geometryCount = countManaged(subsystem(renderer, 'geometry'), '_managedGeometries');
-  if (geometryCount === null) missing.push('geometry._managedGeometries');
+  const geometries = countManagedHash(subsystem(renderer, 'geometry'), '_managedGeometries');
+  if (geometries === null) missing.push('geometry._managedGeometries');
 
   return {
     valid: missing.length === 0,
@@ -154,8 +213,10 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
     textureCount,
     textureSlots,
     textureBytesEstimate,
-    bufferCount: bufferCount ?? 0,
-    geometryCount: geometryCount ?? 0,
+    bufferCount: buffers?.live ?? 0,
+    bufferSlots: buffers?.slots ?? 0,
+    geometryCount: geometries?.live ?? 0,
+    geometrySlots: geometries?.slots ?? 0,
   };
 }
 
@@ -170,12 +231,35 @@ export interface SoakVerdict {
   valid: boolean;
   invalidReason: string;
   samples: GpuSample[];
-  /** Fractional change from first to last sample, per counter. */
+  /** Fractional change from first to last sample, per counter. LIVE counts. */
   driftTextureCount: number;
   driftBufferCount: number;
   driftGeometryCount: number;
-  /** §8.2's condition, and Gate 9's: flat within ±5%, across the WHOLE window. */
+  /**
+   * The same drifts over SLOT counts — tombstones included.
+   *
+   * Reported, never gated. A slot count is monotone non-decreasing by
+   * construction (`GCManagedHash.remove()` writes a tombstone), so gating on it
+   * would be asking a flatness question of a quantity that cannot be flat. It
+   * is here so that the number every soak before this commit was judged on
+   * stays visible beside the one that replaced it.
+   */
+  driftTextureSlots: number;
+  driftBufferSlots: number;
+  driftGeometrySlots: number;
+  /**
+   * §8.2's condition, and Gate 9's: flat within ±5% across the WHOLE window.
+   *
+   * The conjunction of the three below. Kept as one field so nothing silently
+   * loosens, but **it is no longer the thing to read** — a single boolean over
+   * three subsystems answers a question nobody asked, which is what §10 row 13
+   * is about.
+   */
   flat: boolean;
+  /** Split verdicts, on LIVE counts. Read these; `flat` is their AND. */
+  flatTextures: boolean;
+  flatBuffers: boolean;
+  flatGeometries: boolean;
   /**
    * Seconds at which the last counter change occurred. Everything after this is
    * steady state. Reported as a NUMBER rather than assumed, because the whole
@@ -195,7 +279,63 @@ export interface SoakVerdict {
   rebuildsAfterSettled: number;
   /** How many scene rebuilds were driven during the soak. */
   rebuilds: number;
+  /**
+   * The K actually used: rebuilds that must pass with no increase before the
+   * series is called settled. Reported so a verdict carries its own threshold.
+   */
+  settleRebuilds: number;
+  /**
+   * Did the series accumulate K quiet rebuilds AND then drift by zero?
+   *
+   * This is §10 row 13's proposed criterion. It is deliberately two clauses:
+   * reaching K without a subsequent increase is what "settled" means, and zero
+   * post-settle drift is what makes it a pool rather than a slow leak.
+   */
+  settled: boolean;
+  /** Why not, when `settled` is false. Empty otherwise. A9: state the reason. */
+  notSettledBecause: string;
 }
+
+/**
+ * K — quiet rebuilds required before a series counts as settled.
+ *
+ * **Justified from the mechanism and from measurement, before being run.**
+ *
+ * The mechanism (`GCManagedHash`, read at PixiJS 8.20.1): `add()` is a no-op
+ * for a uid already present, so the live count grows only when the renderer
+ * needs an object it has never needed before. Growth is therefore bounded by
+ * the peak concurrent demand of the scene, and a scene rebuilt over and over
+ * reaches that peak early and then stops. That is a settling curve, not a leak,
+ * and the two are distinguished by whether growth resumes.
+ *
+ * The measurement (`p4-soak`, `p4-soak-p1`, both `disturbed=false`): counter
+ * increases land at 20.3 s, 50.3 s, 80.3 s and 110.3 s and then never again, in
+ * both runs, on two different scenes. At the soaks' 0.503 rebuilds/s that is a
+ * warm-up of **≈55 rebuilds with no quiet interval inside it at all**, followed
+ * by a quiet tail of **548 rebuilds** (`p4-soak`) and **188** (`p4-soak-p1`).
+ *
+ * So K must sit above the warm-up and below the shorter tail: 55 < K < 188.
+ * **K = 64** — above the whole warm-up, so settling cannot be declared while
+ * warm-up is still running; roughly a third of the shorter observed tail, so a
+ * genuinely settled run clears it with margin.
+ *
+ * **Choosing K wrong causes a failure, never a false pass**, which is the
+ * asymmetry A9 asks for:
+ *
+ *  - K too small — settling is declared early, the increases that follow land
+ *    inside the post-settle window, post-settle drift is non-zero, FAIL.
+ *  - K too large — the run never accumulates K quiet rebuilds, NOT SETTLED,
+ *    FAIL.
+ *
+ * **Stated limit of the evidence.** The soak samples every 30 s while rebuilds
+ * run at ~0.5/s, so the instrument cannot resolve the true gap between two
+ * increases — it can only say that each of the first four 30 s windows
+ * contained one. K is expressed in rebuilds but evaluated at sample
+ * granularity, giving it an effective resolution of ~15 rebuilds. That is a
+ * property of the sampling rate, not of K, and it is recorded rather than
+ * smoothed over.
+ */
+export const SETTLE_REBUILDS = 64;
 
 const FLAT_TOLERANCE = 0.05;
 
@@ -211,19 +351,32 @@ function drift(first: number, last: number): number {
  * start: a renderer legitimately allocates while it warms up, and counting
  * that as a leak would make every soak fail for the wrong reason.
  */
-export function judgeSoak(samples: GpuSample[], rebuilds: number): SoakVerdict {
+export function judgeSoak(
+  samples: GpuSample[],
+  rebuilds: number,
+  settleRebuilds: number = SETTLE_REBUILDS,
+): SoakVerdict {
   const base: Omit<SoakVerdict, 'valid' | 'invalidReason'> = {
     samples,
     driftTextureCount: 0,
     driftBufferCount: 0,
     driftGeometryCount: 0,
+    driftTextureSlots: 0,
+    driftBufferSlots: 0,
+    driftGeometrySlots: 0,
     flat: false,
+    flatTextures: false,
+    flatBuffers: false,
+    flatGeometries: false,
     settledAtSeconds: 0,
     steadySeconds: 0,
     steadyDriftBufferCount: 0,
     steadyDriftGeometryCount: 0,
     rebuildsAfterSettled: 0,
     rebuilds,
+    settleRebuilds,
+    settled: false,
+    notSettledBecause: 'not judged',
   };
   if (samples.length < 2) {
     return { ...base, valid: false, invalidReason: 'need at least two samples' };
@@ -258,6 +411,29 @@ export function judgeSoak(samples: GpuSample[], rebuilds: number): SoakVerdict {
   const rebuildsAfterSettled =
     totalSeconds > 0 ? Math.round(rebuilds * (steadySeconds / totalSeconds)) : 0;
 
+  const steadyDriftBufferCount = drift(steadyFirst.bufferCount, steadyLast.bufferCount);
+  const steadyDriftGeometryCount = drift(steadyFirst.geometryCount, steadyLast.geometryCount);
+
+  // §10 row 13's criterion. Two clauses, and the reason is stated when it
+  // fails: a verdict that cannot say why is the same defect as one that
+  // prints no value (A9).
+  const postSettleDrift =
+    Math.abs(steadyDriftBufferCount) + Math.abs(steadyDriftGeometryCount);
+  let notSettledBecause = '';
+  if (rebuildsAfterSettled < settleRebuilds) {
+    notSettledBecause =
+      `only ${rebuildsAfterSettled} rebuilds passed after the last increase at ` +
+      `${settledAtSeconds.toFixed(1)}s, under K=${settleRebuilds}`;
+  } else if (postSettleDrift > 0) {
+    notSettledBecause =
+      `post-settle drift is not zero: buffers ${steadyDriftBufferCount}, ` +
+      `geometries ${steadyDriftGeometryCount}`;
+  }
+
+  const flatTextures = Math.abs(driftTextureCount) <= FLAT_TOLERANCE;
+  const flatBuffers = Math.abs(driftBufferCount) <= FLAT_TOLERANCE;
+  const flatGeometries = Math.abs(driftGeometryCount) <= FLAT_TOLERANCE;
+
   return {
     valid: true,
     invalidReason: '',
@@ -265,15 +441,59 @@ export function judgeSoak(samples: GpuSample[], rebuilds: number): SoakVerdict {
     driftTextureCount,
     driftBufferCount,
     driftGeometryCount,
+    driftTextureSlots: drift(first.textureSlots, last.textureSlots),
+    driftBufferSlots: drift(first.bufferSlots, last.bufferSlots),
+    driftGeometrySlots: drift(first.geometrySlots, last.geometrySlots),
     settledAtSeconds,
     steadySeconds,
-    steadyDriftBufferCount: drift(steadyFirst.bufferCount, steadyLast.bufferCount),
-    steadyDriftGeometryCount: drift(steadyFirst.geometryCount, steadyLast.geometryCount),
+    steadyDriftBufferCount,
+    steadyDriftGeometryCount,
     rebuildsAfterSettled,
-    flat:
-      Math.abs(driftTextureCount) <= FLAT_TOLERANCE &&
-      Math.abs(driftBufferCount) <= FLAT_TOLERANCE &&
-      Math.abs(driftGeometryCount) <= FLAT_TOLERANCE,
+    flatTextures,
+    flatBuffers,
+    flatGeometries,
+    flat: flatTextures && flatBuffers && flatGeometries,
     rebuilds,
+    settleRebuilds,
+    settled: notSettledBecause === '',
+    notSettledBecause,
   };
+}
+
+/**
+ * One line describing a soak, with **numerator and denominator, never a ratio**.
+ *
+ * §10 row 13's second condition, and it is not a formatting preference. The
+ * "buffers-per-geometry anomaly" that prompted it — 1.20 on one scene against
+ * exactly 2.00 on another — does not exist: every soak on record reads exactly
+ * 2.0000 at both ends, on every scene. **1.20 was 274/227: one scene's buffer
+ * count over another scene's geometry count.** A ratio hides its sample size
+ * and, as it turned out, hides which sample it came from at all. Printing both
+ * terms makes that mistake unwriteable.
+ */
+export function describeSoak(v: SoakVerdict): string {
+  if (!v.valid) return `[soak] INVALID: ${v.invalidReason}`;
+  const first = v.samples[0]!.gpu;
+  const last = v.samples[v.samples.length - 1]!.gpu;
+  const pair = (a: number, b: number): string => `${a}->${b}`;
+  return (
+    `[soak] live  textures ${pair(first.textureCount, last.textureCount)}  ` +
+    `buffers ${pair(first.bufferCount, last.bufferCount)}  ` +
+    `geometries ${pair(first.geometryCount, last.geometryCount)}\n` +
+    `[soak] slots textures ${pair(first.textureSlots, last.textureSlots)}  ` +
+    `buffers ${pair(first.bufferSlots, last.bufferSlots)}  ` +
+    `geometries ${pair(first.geometrySlots, last.geometrySlots)}  ` +
+    `(tombstones included; monotone by construction, never gated)\n` +
+    `[soak] buffers per geometry, both terms: ` +
+    `first ${first.bufferCount}/${first.geometryCount}  ` +
+    `last ${last.bufferCount}/${last.geometryCount}\n` +
+    `[soak] flat textures=${v.flatTextures} buffers=${v.flatBuffers} ` +
+    `geometries=${v.flatGeometries} (AND=${v.flat})\n` +
+    `[soak] settled=${v.settled} K=${v.settleRebuilds} ` +
+    `lastIncrease=${v.settledAtSeconds.toFixed(1)}s ` +
+    `quietRebuilds=${v.rebuildsAfterSettled} ` +
+    `postSettleDrift buffers=${v.steadyDriftBufferCount} ` +
+    `geometries=${v.steadyDriftGeometryCount}` +
+    (v.settled ? '' : `  — NOT SETTLED: ${v.notSettledBecause}`)
+  );
 }
