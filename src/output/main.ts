@@ -31,7 +31,7 @@ import {
 import { createOutputs, primaryViewport } from '../render/outputs';
 import { canonicalizeScene, deepEqual, layersInDrawOrder, type Scene } from '../core/scene';
 import { sceneById } from '../core/defaultScene';
-import { capBreaches } from '../core/library';
+import { capBreachMessage, sceneCapBreaches } from '../core/library';
 import { createBundledLibrary } from '../providers/bundled/manifest';
 import { describeSoak, judgeSoak, type GpuSample } from '../debug/gpu';
 
@@ -158,20 +158,13 @@ function applyScene(raw: unknown): void {
   // breaching — the same reasoning behind `[scene]`, `[warp]` and `[clock]`,
   // which between them found eleven of this project's thirteen defects.
   //
-  // The OPERATOR-facing warning belongs in the layer panel and is Phase 5's
-  // (editor interaction). This is the log line, and it is deliberately a
-  // warning rather than a refusal — see `core/library.ts`.
-  const breaches = capBreaches(
-    scene.layers
-      .map((l) => bundledLibrary.get(String(l.content['assetId'] ?? '')))
-      .filter((a): a is NonNullable<typeof a> => a !== undefined)
-      .map((a) => a.kind),
-  );
-  for (const b of breaches) {
-    console.warn(
-      `[caps] ${b.count} concurrent ${b.kind} layers, over the cap of ${b.cap} ` +
-        '(§10 row 2). Expect dropped frames; the session continues.',
-    );
+  // The OPERATOR-facing half of this landed in P5-F: the editor's layer panel
+  // shows the same breaches, from the same function and the same sentence, so
+  // the wall's log and the operator's warning cannot come to differ about what
+  // a breach is or what it costs. Both are a warning and neither is a refusal
+  // — see `core/library.ts` for the measurement that decided that.
+  for (const b of sceneCapBreaches(scene.layers, bundledLibrary)) {
+    console.warn(`[caps] ${capBreachMessage(b)}`);
   }
 
   console.log(

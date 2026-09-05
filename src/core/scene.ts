@@ -21,8 +21,10 @@ import {
   type JsonValue,
   type Layer,
 } from './layer';
+import type { RouteMotion } from './motion';
 import { DEFAULT_PARALLAX, defaultForceValues, type ParallaxState } from './forces';
 import { FORCE_DEFINITIONS } from './forceDefs';
+import { MotionFormatError, canonicalizeRouteMotion } from './motion';
 
 /**
  * Bumped whenever a stored scene's shape changes incompatibly. A file from a
@@ -278,7 +280,29 @@ function canonicalizeLayer(raw: unknown, index: number): Layer {
     visible: typeof o['visible'] === 'boolean' ? o['visible'] : true,
     ...(typeof o['seed'] === 'number' ? { seed: o['seed'] } : {}),
     susceptibility: canonicalizeSusceptibility(o['susceptibility']),
+    ...canonicalizeLayerMotion(o['motion'], index),
   });
+}
+
+/**
+ * I-18's record, judged at the scene boundary (P5-F).
+ *
+ * Absent stays absent — `{ motion: undefined }` and `{}` serialize identically
+ * but are not deep-equal, and the round-trip check is on deep equality. Present
+ * goes through `canonicalizeRouteMotion`, which is the one validator; its
+ * refusal is re-thrown as a `SceneFormatError` so that a caller loading a file
+ * catches one error type and still gets told which layer and which value.
+ */
+function canonicalizeLayerMotion(raw: unknown, index: number): { motion?: RouteMotion } {
+  if (raw === undefined || raw === null) return {};
+  try {
+    return { motion: canonicalizeRouteMotion(raw) };
+  } catch (e) {
+    if (e instanceof MotionFormatError) {
+      throw new SceneFormatError(`layers[${index}].motion: ${e.message}`);
+    }
+    throw e;
+  }
 }
 
 /**

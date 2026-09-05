@@ -11,24 +11,21 @@
  * The accessors read through a ref rather than a captured value: React state is
  * immutable and a captured `scene` goes stale the moment anything writes, which
  * would make `registry.read` return the value from before the last edit.
+ *
+ * **The binding itself lives in `sceneRegistry.ts`, which has no React in it.**
+ * P5-F's gate condition is that a scene edited only through the panel
+ * round-trips deep-equal, and that cannot be checked while the only path to the
+ * panel's writes runs through a hook. This file is the shell: refs, effects,
+ * and the one thing the pure module refuses to import — the provider registry.
  */
 import { useEffect, useMemo, useRef } from 'react';
-import type { Layer } from '../core/layer';
-import {
-  ParameterRegistry,
-  defineContentParameters,
-  defineForceParameters,
-  defineLayerParameters,
-  defineParallaxParameters,
-  defineSusceptibilityParameters,
-  defineTestPatternSpeed,
-} from '../core/parameters';
-import { FORCE_DEFINITIONS } from '../core/forceDefs';
+import { ParameterRegistry, defineTestPatternSpeed } from '../core/parameters';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
-import { createBundledLibrary } from '../providers/bundled/manifest';
+import { editorLibrary } from './assets';
 import type { Scene } from '../core/scene';
+import { layerSignature, registerGlobalParameters, syncEntityParameters } from './sceneRegistry';
 
 /**
  * The editor's own provider registry. It exists only to ask providers which
@@ -42,7 +39,7 @@ providers.register(new ProceduralProvider());
 // — the exact hole I-8 exists to prevent. Nothing here renders (the flags below
 // are inert for `contentParameters`), it only answers "what keys do you expose".
 providers.register(
-  new BundledProvider({ library: createBundledLibrary(), decodeVideo: false, lottieResolution: 1 }),
+  new BundledProvider({ library: editorLibrary, decodeVideo: false, lottieResolution: 1 }),
 );
 
 export function useSceneRegistry(
@@ -51,6 +48,7 @@ export function useSceneRegistry(
 ): ParameterRegistry {
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
+  const read = useRef(() => sceneRef.current).current;
 
   const registry = useMemo(() => {
     const r = new ParameterRegistry();
@@ -59,87 +57,26 @@ export function useSceneRegistry(
     return r;
   }, []);
 
-  /**
-   * I-8 / I-14 / Gate 4: "every force is enumerable from the parameter registry
-   * by hierarchical key".
-   *
-   * Registered ONCE, from `FORCE_DEFINITIONS`, outside the per-layer effect —
-   * force parameters are global (I-4) and do not come and go with layers. A
-   * fifth force appears here by existing; nothing in this file names a force.
-   */
+  // I-8 / I-14 / Gate 4: "every force is enumerable from the parameter registry
+  // by hierarchical key". Registered once, from `FORCE_DEFINITIONS`, outside
+  // the per-layer effect — a fifth force appears by existing.
   useEffect(() => {
-    // Idempotent: React runs effects twice in StrictMode and the registry
-    // throws `ParameterCollisionError` on a duplicate key by design (I-8).
-    if (registry.keys('force').length > 0) return;
-    registry.registerAll(
-      defineForceParameters(
-        FORCE_DEFINITIONS,
-        () => sceneRef.current.forces,
-        (forceId, key, value) => {
-          setScene((prev) => ({
-            ...prev,
-            forces: { ...prev.forces, [forceId]: { ...prev.forces[forceId], [key]: value } },
-          }));
-        },
-      ),
-    );
-    // D3. Not a force — see `defineParallaxParameters` — but it is the other
-    // thing that moves entities, and it is addressable for the same reason.
-    registry.registerAll(
-      defineParallaxParameters(
-        () => sceneRef.current.parallax,
-        (parallax) => setScene((prev) => ({ ...prev, parallax })),
-      ),
-    );
-  }, [registry, setScene]);
+    registerGlobalParameters(registry, read, setScene);
+  }, [registry, read, setScene]);
 
-  // Keyed on the layer ids, not the scene: re-registering on every opacity
-  // change would churn the registry sixty times a drag for no change in its
-  // key set.
-  const layerIds = scene.layers.map((l) => l.id).join(' ');
+  // Keyed on the layers' identity and structure, not the whole scene:
+  // re-running this on every opacity change would churn the registry sixty
+  // times a drag for no change in its key set. A provider or a structural
+  // content key changing DOES change the key set, which is why the signature
+  // carries them — see `layerSignature`.
+  const signature = layerSignature(scene);
 
   useEffect(() => {
-    const ids = layerIds === '' ? [] : layerIds.split(' ');
-    for (const id of ids) {
-      if (registry.has(`entity.${id}.opacity`)) continue;
-      const readLayer = () => {
-        const layer = sceneRef.current.layers.find((l) => l.id === id);
-        if (!layer) throw new Error(`layer ${id} is gone`);
-        return layer;
-      };
-      const patchLayer = (patch: Partial<Layer>): void => {
-        setScene((prev) => ({
-          ...prev,
-          layers: prev.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-        }));
-      };
-      registry.registerAll(defineLayerParameters(id, readLayer, patchLayer));
-
-      // Rule 9: whatever the provider invented is addressable too, or half the
-      // instrument is unreachable when Phase 11 goes looking for it.
-      const layer = readLayer();
-      const specs = providers.get(layer.providerId)?.contentParameters?.(layer.content) ?? [];
-      registry.registerAll(
-        defineContentParameters(id, specs, readLayer, (content) => patchLayer({ content })),
-      );
-
-      // I-4's entity half. Four segments (`entity.<id>.susceptibility.<forceId>`)
-      // so a force id can never collide with a provider's content key — see
-      // `defineSusceptibilityParameters`.
-      registry.registerAll(
-        defineSusceptibilityParameters(id, FORCE_DEFINITIONS, readLayer, (susceptibility) =>
-          patchLayer({ susceptibility }),
-        ),
-      );
-    }
-    // A deleted layer must give its keys back, or re-adding a layer with the
-    // same id collides and the operator sees a crash on an ordinary edit.
-    const live = new Set(ids);
-    for (const key of registry.keys('entity')) {
-      const id = key.split('.')[1];
-      if (id !== undefined && !live.has(id)) registry.unregisterPrefix(`entity.${id}`);
-    }
-  }, [layerIds, registry, setScene]);
+    syncEntityParameters(registry, read, setScene, (layer) =>
+      providers.get(layer.providerId)?.contentParameters?.(layer.content) ?? [],
+    );
+    // `signature` is the dependency; `scene` deliberately is not.
+  }, [signature, registry, read, setScene]);
 
   return registry;
 }

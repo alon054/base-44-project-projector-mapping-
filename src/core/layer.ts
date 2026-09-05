@@ -8,6 +8,12 @@
  * no field in the transform whose legal range extends past 1.
  */
 import { hashString } from './rng';
+// TYPE-ONLY, and it has to be. `motion.ts` imports `clamp01`/`wrapTurn` from
+// this file, so a value import back would be a runtime cycle; a type import is
+// erased. The consequence is that `createLayer` cannot canonicalize a motion
+// record — the scene boundary does that (`canonicalizeScene`), which is where
+// every other untrusted field is judged anyway.
+import type { RouteMotion } from './motion';
 
 /** I-6. The four modes the engine is designed around. Light is additive. */
 export const BLEND_MODES = ['normal', 'add', 'multiply', 'screen'] as const;
@@ -80,6 +86,21 @@ export interface Layer {
    * bus reads it, never writes it.
    */
   susceptibility: Susceptibility;
+  /**
+   * I-18. How this entity travels a route, when it travels one. Phase 5.
+   *
+   * **Optional, and absent is a stated meaning rather than a gap**: no record
+   * means "no motion declared", which `canonicalizeRouteMotion` already reads
+   * as `DEFAULT_ROUTE_MOTION`. Storing the defaults on every layer instead
+   * would put four fields into every scene ever authored to say what the build
+   * would have done anyway, and would make P5-C's "a layer with no motion" case
+   * unrepresentable.
+   *
+   * On the ENTITY, never on the path (I-18, D21) — the route is a shape and
+   * knows nothing about who walks it, which is why two entities can share one
+   * path and differ only by `phaseOffset`.
+   */
+  motion?: RouteMotion;
 }
 
 export const DEFAULT_TRANSFORM: NormalizedTransform = {
@@ -206,6 +227,7 @@ export interface LayerInit {
   visible?: boolean;
   seed?: number;
   susceptibility?: Susceptibility;
+  motion?: RouteMotion;
 }
 
 export function createLayer(init: LayerInit): Layer {
@@ -224,5 +246,9 @@ export function createLayer(init: LayerInit): Layer {
     // still reproducible across sessions (I-12). A caller may override it.
     seed: Number.isFinite(init.seed) ? (init.seed as number) >>> 0 : hashString(init.id),
     susceptibility: canonicalizeSusceptibility(init.susceptibility),
+    // Spread rather than assigned, so a layer with no motion has no `motion`
+    // KEY — `{ motion: undefined }` and `{}` serialize the same but are not
+    // deep-equal, and the round-trip check is on deep equality.
+    ...(init.motion === undefined ? {} : { motion: init.motion }),
   };
 }

@@ -27,6 +27,8 @@ import {
 import { PreviewCanvas } from './PreviewCanvas';
 import { forwardedShortcut } from './outputKeys';
 import { LayerPanel } from './LayerPanel';
+import { EntityPanel } from './EntityPanel';
+import { createPanelUi, selectedLayerId, type PanelUi } from './controls';
 import { useSceneRegistry } from './useSceneRegistry';
 import { useClock } from './useClock';
 import { TransportPanel } from './TransportPanel';
@@ -56,6 +58,15 @@ export function App(): React.JSX.Element {
   const [speed, setSpeed] = useState(1);
   const [scene, setScene] = useState<Scene>(createDefaultScene);
   const [failures, setFailures] = useState<SceneFailure[]>([]);
+  /**
+   * P5-F. The control panel's own state — which layer is selected, which
+   * sections are open. **Held here and nowhere near the scene**: it is not
+   * content, it must not reach a saved file, and there is no function that
+   * copies one into the other (`controls.ts`). The selection is resolved
+   * against the scene on every render rather than stored resolved, so deleting
+   * the selected layer cannot leave the panel pointing at a layer that is gone.
+   */
+  const [panelUi, setPanelUi] = useState<PanelUi>(createPanelUi);
   const registry = useSceneRegistry(scene, setScene);
   // I-2. Operator intent, registered under `clock.*` and sent on `clock:set`.
   // The preview's live clock, for the transport's readout and loop ruler. A
@@ -554,12 +565,25 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
           <ForcePanel scene={scene} registry={registry} />
         </Panel>
 
-        <Panel title="Layers — z-order, opacity, blend (I-1, I-6, I-8)">
+        <Panel title="Layers — z-order, opacity, blend, depth (I-1, I-6, I-8)">
           <LayerPanel
             scene={scene}
             setScene={setScene}
             registry={registry}
             failures={failures}
+            selectedId={selectedLayerId(panelUi, scene)}
+            onSelect={(id) => setPanelUi({ ...panelUi, selectedLayerId: id })}
+          />
+        </Panel>
+
+        <Panel title="Entity — content, parameters, motion (I-8, I-18)">
+          <EntityPanel
+            scene={scene}
+            setScene={setScene}
+            registry={registry}
+            layerId={selectedLayerId(panelUi, scene)}
+            ui={panelUi}
+            setUi={setPanelUi}
           />
         </Panel>
 

@@ -6058,3 +6058,124 @@ fact now: the operator looked at the projection and did not see it, and
 the file it lives in. The import test is what stops a later edit from making the
 grid reachable; the observation is what says the test is asserting the right
 thing.
+
+---
+
+## 2026-09-05 — Phase 5 (block F) — the control panel, as a mechanism
+
+- DID: `editor/controls.ts` (panel logic, no React), `editor/sceneRegistry.ts`
+  (the registry↔scene binding, lifted out of the hook), `ParamControl.tsx` (one
+  control, one key), `EntityPanel.tsx` (content picker, parameters, motion,
+  susceptibility), `assets.ts`. `LayerPanel` now enumerates its four rows from
+  the registry and carries the `[caps]` warning; `App` holds the panel's UI
+  state. In `core/`: `Layer.motion` (optional, canonicalized at the scene
+  boundary) and `sceneCapBreaches` / `capBreachMessage`, which `output/main.ts`
+  now logs through.
+- MEASURED: 825 / 825 green, 35 files. 787 → 825, +38. 43 / 43 goldens
+  unchanged. 14 mutations, every one killing at least one test. `clock-only`
+  boot: both windows up, `[scene] applied "phase1-default"`, no errors.
+- BLOCKER: -
+- NEXT: Gate 5 — the operator, on the table.
+
+### The one thing that made this a mechanism rather than seven careful edits
+
+The bullet says "per-entity params driven through `registry.write`, never by
+mutating a layer". The obvious build is seven controls that each remember to
+call `registry.write`, and it passes review every time until the eighth one does
+not. What is here instead is a component that **takes a key and nothing else** —
+no min, no max, no label, no kind, all of it read from
+`registry.definition(key)` — and panels that get their keys from
+`entityParamGroups(registry, id)`, which enumerates what I-8 actually holds.
+There is no parameter by which `<ParamControl>` could be pointed at a value
+outside the registry, and no list in a panel from which a control could be drawn
+without one. Three source-level tests hold the shape: `ParamControl` and the
+Phase 4 `ForcePanel` are the only editor files that call `registry.write` at
+all, and every `paramKey` in the two panels is the loop variable, never a
+literal.
+
+`depth` is the proof it was worth doing. It has been addressable since Phase 1
+and printed in the layer row as text — a value the registry could reach and the
+operator could not. It became a working control because it is in the
+enumeration, without `LayerPanel.tsx` ever learning its name.
+
+### `SPEC-CHANGE-PROPOSED` — none. But the block did touch `core/`
+
+`CHECKLIST.md`'s Files line for this block reads "editor panels", and three
+`core/` files changed. Both reasons are recorded in the checklist entry; the
+substantive one is that **the motion panel had nothing to write to.** P5-C built
+`RouteMotion`, registered `entity.<id>.motion.*` and — correctly, being a
+pure-logic block — built no UI and gave `Layer` no `motion` field. So the four
+keys existed with no home in scene state, and "a scene edited only through the
+panel round-trips deep-equal" could not have passed: the panel's writes would
+have gone into a field the serializer does not know about.
+
+`Layer.motion` is **optional**, and that is P5-C's own reading rather than a new
+decision: `canonicalizeRouteMotion(undefined)` already meant "no motion
+declared" and returned the defaults. So absent stays absent through a round-trip
+— `{ motion: undefined }` and no key at all serialize identically and are not
+deep-equal, which is a test — and the first write from the panel declares a
+whole four-field record rather than a fragment, for the reason `scene.forces` is
+dense: a scene that reproduces only against the build that wrote it is not a
+unit of truth.
+
+One consequence worth writing down: `motion.ts` imports `clamp01`/`wrapTurn`
+from `layer.ts`, so `layer.ts` cannot import `motion.ts` for a value. The type
+import is erased and costs nothing; the canonicalizer therefore runs at the
+scene boundary, which is where every other untrusted field is already judged.
+That is not a workaround, it is where the refusal belonged anyway — and it is
+why a bad `motion` record is refused as `layers[0].motion: motion.periodSeconds
+must be …`, naming the layer, the field and the value.
+
+### `[caps]` — the same sentence in two places, on purpose
+
+Phase 3 wrote the `[caps]` log line and left a comment saying the
+operator-facing half was Phase 5's. The tempting build is a second string in the
+layer panel. What is here is `sceneCapBreaches` and `capBreachMessage` in
+`core/library.ts`, used by both, because this is exactly CLAUDE.md's "a fix to
+one counter is not a fix to the counter beside it" in its cheap form: two
+wordings of "expect dropped frames; the session continues" would eventually
+promise something the code does not do, and nobody would notice which one the
+operator was reading.
+
+**WARN, never refuse**, and the test that says so is not the message test. A
+message can claim anything. The one that matters asserts that six videos against
+a cap of four leaves **six layers in the scene** — the panel disables nothing,
+rejects nothing, and has no code path that could. Phase 3 measured what the
+breach costs (15 late frames in 3555, one 150 ms hitch, nothing crashed) and
+that measurement is what makes flagging the right trade for performance
+equipment.
+
+### The picker forced a fix to something that predated it
+
+Registering `entity.<id>.*` was keyed on the layer id, which was right while the
+only way to change a layer's content was to delete it and add another. The
+picker breaks that: switching a layer from `water` to `glow` changes which
+content parameters exist (`bands`, `bodyAlpha` → `rings`), and on the id alone
+the effect never re-ran — the old kind's keys stayed registered against a layer
+that is no longer that kind, and the new kind's never appeared. A panel of
+controls writing to values nothing reads, which is the failure I-8 exists to
+prevent, introduced by the feature that needed I-8 most.
+
+The fix is asked **of the registry**: `contentKeysOf(registry, id)` against what
+the provider now declares. The first shape tried was a side map of "what I
+registered last time", and it is worse for a reason that showed up immediately
+in test — it is a second source of truth for something the registry already
+knows, and it goes stale exactly when two registries share a layer id, which a
+test does routinely. Asking the thing being corrected also gets a case right
+that a signature gets wrong: `tree` and `rect` both expose only `tint`, so
+switching between them needs no rebuild, and the derived check says so without
+being told.
+
+### What the suite does not cover, stated plainly
+
+Three of the four Done-when conditions are green and mechanical. The fourth —
+"the five force sliders visibly move the projection" — is left `[ ]` for the
+operator. `npm test` says the sliders write, that the writes reach
+`scene.forces`, and that the scene crosses to the output; it says nothing about
+the wall, and P5-D is four rounds of standing evidence that the distance between
+those two claims is where this project's defects live. The `clock-only` boot is
+the cheap half of P5-E's lesson and it was taken: both windows came up and the
+output applied a scene, which means the whole editor tree — the two new panels
+included — mounted and ran its effects without throwing. A renderer that dies at
+startup is invisible to `vitest` by construction and takes ten seconds to rule
+out.

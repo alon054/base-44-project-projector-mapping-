@@ -1,16 +1,30 @@
 /**
- * The layer list: add / remove / reorder, opacity and blend mode per layer.
+ * The layer list: add / remove / reorder / select, and the four layer-level
+ * parameters — opacity, blend mode, visibility, depth.
  *
  * Every per-layer edit goes through the I-8 registry (`entity.<id>.*`) rather
  * than mutating the layer directly. Structure — which layers exist and in what
  * order — is not a parameter and is edited on the scene itself.
+ *
+ * **P5-F made that a mechanism rather than a habit.** The four parameter rows
+ * were four hand-written `registry.write` calls naming four keys; they are now
+ * `entityParamGroups(registry, id).layer` rendered through `<ParamControl>`,
+ * which is the only component in the editor that writes a parameter at all. A
+ * fifth layer-level parameter registered in `defineLayerParameters` appears
+ * here by existing, and a control for a key that is not registered cannot be
+ * written down. `depth` is the immediate proof: it was addressable from Phase 1
+ * and printed here as text, and it became operable without this file learning
+ * its name.
  */
 import { useState } from 'react';
 import type { SceneFailure } from '@shared/ipc';
-import { BLEND_MODES, type BlendMode } from '../core/layer';
+import type { BlendMode } from '../core/layer';
 import type { ParameterRegistry } from '../core/parameters';
 import { layersInDrawOrder, type Scene } from '../core/scene';
 import { addLayer, moveLayer, removeLayer, reorderLayer } from '../core/sceneEdit';
+import { ParamControl } from './ParamControl';
+import { capWarnings, entityParamGroups } from './controls';
+import { editorLibrary } from './assets';
 import {
   PROCEDURAL_KINDS,
   PROCEDURAL_PROVIDER_ID,
@@ -23,9 +37,19 @@ interface Props {
   registry: ParameterRegistry;
   /** I-13, reported by the output window. */
   failures: SceneFailure[];
+  /** Which layer the per-entity panel is showing. Panel UI state, never scene state. */
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }
 
-export function LayerPanel({ scene, setScene, registry, failures }: Props): React.JSX.Element {
+export function LayerPanel({
+  scene,
+  setScene,
+  registry,
+  failures,
+  selectedId,
+  onSelect,
+}: Props): React.JSX.Element {
   const ordered = layersInDrawOrder(scene);
   const failureFor = (id: string): SceneFailure | undefined =>
     failures.find((f) => f.layerId === id);
@@ -80,6 +104,33 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
         magenta placeholder, never blank the frame.
       </p>
 
+      {/*
+        §10 row 2, in front of the operator — the line Phase 3 deferred to
+        Phase 5. **A warning and never a refusal**: nothing above is disabled,
+        no layer is rejected, and there is no code path here that could do
+        either. Six concurrent videos cost 15 late frames in 3555 and one
+        150 ms hitch, which is a visible stumble and not a failure, and this is
+        performance equipment (I-13) — see `core/library.ts` for the ladder
+        that measured it. The sentence is the output window's own `[caps]`
+        wording, from the same function, so the wall's log and this box cannot
+        come to disagree.
+      */}
+      {capWarnings(scene, editorLibrary).map(({ breach, text }) => (
+        <div
+          key={breach.kind}
+          style={{
+            border: '1px solid #8a6d1f',
+            background: '#2a2410',
+            borderRadius: 5,
+            padding: '7px 9px',
+            fontSize: 12,
+            color: '#f0d68a',
+          }}
+        >
+          <strong>[caps] warning</strong> — {text}
+        </div>
+      ))}
+
       {ordered.length === 0 && (
         <p style={{ margin: 0, color: '#8b939b' }}>No layers. The output is the background only.</p>
       )}
@@ -100,13 +151,16 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
               e.preventDefault();
               dropOn(i);
             }}
+            onClick={() => onSelect(layer.id)}
             style={{
               border: `1px solid ${
                 dropIndex === i && dragId !== null && dragId !== layer.id
                   ? '#7CFFB2'
                   : failure
                     ? '#7a2a72'
-                    : '#2b2f34'
+                    : layer.id === selectedId
+                      ? '#40e0ff'
+                      : '#2b2f34'
               }`,
               borderRadius: 5,
               padding: 8,
@@ -176,57 +230,18 @@ export function LayerPanel({ scene, setScene, registry, failures }: Props): Reac
               </p>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ fontSize: 11, color: '#8b939b', width: 52 }} htmlFor={`o-${layer.id}`}>
-                opacity
-              </label>
-              <input
-                id={`o-${layer.id}`}
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={layer.opacity}
-                style={{ flex: 1 }}
-                onChange={(e) =>
-                  registry.write(`entity.${layer.id}.opacity`, Number(e.currentTarget.value))
-                }
-              />
-              <code style={{ fontSize: 11, color: '#8b939b', width: 34 }}>
-                {layer.opacity.toFixed(2)}
-              </code>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ fontSize: 11, color: '#8b939b', width: 52 }} htmlFor={`b-${layer.id}`}>
-                blend
-              </label>
-              <select
-                id={`b-${layer.id}`}
-                value={layer.blendMode}
-                style={selectStyle}
-                onChange={(e) =>
-                  registry.write(`entity.${layer.id}.blendMode`, e.currentTarget.value as BlendMode)
-                }
-              >
-                {BLEND_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <label style={{ fontSize: 11, color: '#8b939b', display: 'flex', gap: 4 }}>
-                <input
-                  type="checkbox"
-                  checked={layer.visible}
-                  onChange={(e) => registry.write(`entity.${layer.id}.visible`, e.currentTarget.checked)}
-                />
-                visible
-              </label>
-            </div>
+            {/*
+              Enumerated from the registry, not written out. See this file's
+              header: the panel does not know these keys' names, so it cannot
+              have a control that writes to something the registry does not
+              hold, and it cannot miss one that the registry does.
+            */}
+            {entityParamGroups(registry, layer.id).layer.map((key) => (
+              <ParamControl key={key} registry={registry} paramKey={key} />
+            ))}
 
             <code style={{ fontSize: 10, color: '#5c6470' }}>
-              entity.{layer.id}.* · {layer.providerId} · depth {layer.depth.toFixed(2)}
+              entity.{layer.id}.* · {layer.providerId}
             </code>
           </div>
         );
@@ -253,14 +268,4 @@ const iconButtonStyle: React.CSSProperties = {
   color: 'inherit',
   font: '12px/1.2 inherit',
   cursor: 'pointer',
-};
-
-const selectStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '3px 6px',
-  borderRadius: 4,
-  border: '1px solid #2b2f34',
-  background: '#15181b',
-  color: 'inherit',
-  font: '12px/1.2 inherit',
 };

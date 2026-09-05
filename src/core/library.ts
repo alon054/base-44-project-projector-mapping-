@@ -95,17 +95,69 @@ export const CONCURRENCY_CAPS: Readonly<Partial<Record<AssetKind, number>>> = {
  * rather than a boolean because "6 videos against a cap of 4" is the message
  * an operator can act on.
  */
+export interface CapBreach {
+  kind: AssetKind;
+  count: number;
+  cap: number;
+}
+
 export function capBreaches(
   kinds: readonly AssetKind[],
-): { kind: AssetKind; count: number; cap: number }[] {
+): CapBreach[] {
   const counts = new Map<AssetKind, number>();
   for (const k of kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
-  const out: { kind: AssetKind; count: number; cap: number }[] = [];
+  const out: CapBreach[] = [];
   for (const [kind, cap] of Object.entries(CONCURRENCY_CAPS) as [AssetKind, number][]) {
     const count = counts.get(kind) ?? 0;
     if (count > cap) out.push({ kind, count, cap });
   }
   return out.sort((a, b) => a.kind.localeCompare(b.kind));
+}
+
+/**
+ * The caps a SCENE breaches, from its layers and a library to look them up in.
+ *
+ * One function rather than two call sites doing the same join, because there
+ * are two consumers with the same question and no reason for them to disagree:
+ * the output window's `[caps]` log line (Phase 3) and the operator-facing
+ * warning in the editor's layer panel (P5-F, the line Phase 3 deferred). The
+ * pair before this existed is exactly the shape CLAUDE.md's "a fix to one
+ * counter is not a fix to the counter beside it" is about.
+ *
+ * Structurally typed on purpose: `core/library.ts` takes no view of the scene
+ * model, so it asks for the little it reads. Only `content.assetId` selects an
+ * asset (`STRUCTURAL_CONTENT_KEYS`), and a layer naming none — every procedural
+ * layer — contributes nothing to any cap.
+ */
+export function sceneCapBreaches(
+  layers: readonly { content: { [k: string]: unknown } }[],
+  library: { get(id: string): { kind: AssetKind } | undefined },
+): CapBreach[] {
+  return capBreaches(
+    layers
+      .map((l) => {
+        const assetId = l.content['assetId'];
+        return typeof assetId === 'string' ? library.get(assetId) : undefined;
+      })
+      .filter((a): a is { kind: AssetKind } => a !== undefined)
+      .map((a) => a.kind),
+  );
+}
+
+/**
+ * One sentence for one breach, shared by the log line and the operator warning.
+ *
+ * **It says what happens, and what does not.** "Expect dropped frames; the
+ * session continues" is the whole of the WARN-not-refuse decision in the words
+ * an operator reads at the moment it matters — see this file's cap header for
+ * the measurement behind it. A second wording of this sentence somewhere else
+ * would eventually promise something the code does not do.
+ */
+export function capBreachMessage(b: CapBreach): string {
+  return (
+    `${b.count} concurrent ${b.kind} layers, over the cap of ${b.cap} ` +
+    '(§10 row 2). Expect dropped frames; the session continues.'
+  );
 }
 
 /** What kind of layer view a bundled asset produces. */
