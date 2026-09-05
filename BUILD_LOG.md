@@ -5206,3 +5206,146 @@ The prediction assumed the only two options were the two first named, which is
 the failure mode worth keeping: a decision framed as a choice between the
 options already on the table, when reading the subject would have produced a
 third.
+
+---
+
+## 2026-09-05 — Phase 5 (block C) — route motion: declared, derived, on the entity
+
+- DID: `src/core/motion.ts` and `src/test/motion.test.ts` new; four
+  `entity.<id>.motion.*` keys added to `src/core/parameters.ts`. `RouteMotion`
+  as I-18 spells it, `progressAt`/`pointAtMotion`/`headingAtMotion` pure,
+  `segmentAtProgress`/`headingAtProgress` for `orient`, canonicalizer +
+  `assertRouteTraversable` + `canonicalizeRoute` as the validation boundary.
+  No UI, no renderer, `paths.ts` untouched.
+- MEASURED: tests 633 → 684 (30 files), all green. 51 new. Ten mutations run,
+  nine killed, one killed nothing and produced a test — table below.
+- BLOCKER: -
+- NEXT: P5-D, the path tool.
+
+### `phaseOffset` shifts the time, which is what made one line serve three
+
+I-18 gives `hold` as `min(1, t / period + phaseOffset)`. That is
+`min(1, (t + phaseOffset × period) / period)` — the same shift applied a step
+earlier, to the time rather than to the answer. Doing it there means `loop`,
+`pingpong` and `hold` share one line:
+
+```
+const shiftedSeconds = timeSeconds + wrapTurn(motion.phaseOffset) * period;
+```
+
+and each behaviour is then a single expression over it. The alternative —
+shifting the *result* of `progressAlong` — needs a second `% 1` to bring the
+sum back into range, which is the phase arithmetic I-2 says exists once and
+lives in `clock.ts`. So this is not a tidiness choice: shifting the answer
+would have put a wrap operator in this file, and shifting the time keeps the
+count at zero. The suite now asserts that count directly, with comments
+stripped, rather than trusting a one-off grep.
+
+`pingpong`'s offset falls out of the same line meaning a traversal rather than
+a cycle: an entity at `phaseOffset` 0.5 is half a traversal ahead under all
+three behaviours. Had the offset been applied to the 2 × period cycle instead,
+one field would mean two different things depending on a neighbouring field's
+value.
+
+### `DECISION` — clamp is the wrong verb for `phaseOffset`, and wrapping is why
+
+The block asks for `phaseOffset` to "clamp into `[0,1)`". Wrapping is what
+landed, and the reason is arithmetic rather than preference: **a clamp cannot
+put 1.0 inside a half-open interval at all.** It would have to answer 0.999…,
+which is a different position from the 0 that offset 1 actually means on a
+loop. `wrapTurn` — already in `layer.ts`, already commented "a turn past 1 is a
+turn, not an error" — gives `[0,1)` for every finite input and gives the right
+position for 1, for 2, and for −0.25. The checkbox's intent (drift is absorbed,
+not refused) is met; its verb is not the operation.
+
+Mutation M6 exists to hold this: swapping `wrapTurn` for `clamp01` fails.
+
+### `DECISION` — where a route refuses, and where it degrades
+
+Two rules were in tension. The block says a path with fewer than two points is
+refused; I-13 says nothing ends a live session. Both are satisfied by putting
+them in different places, and the split is stated in the file header:
+
+- **Refusal at the validation boundary** — `canonicalizeRouteMotion`,
+  `deserializeRouteMotion`, `assertRouteTraversable`, `canonicalizeRoute`.
+  This is where a scene file, an IPC payload or an editor field arrives.
+- **Degradation on the per-frame path** — `progressAt` on a nonsense time
+  returns 0, `headingAtProgress` with no segment returns 0 turns. An entity
+  parked at the start of its route is a defect an operator can see and report;
+  an exception 60 times a second disables the layer.
+
+`canonicalizeRoute(path, rawMotion)` is the mechanism rather than the comment:
+a caller that validates the record and forgets the path is the gap a note in
+the header would have left reachable, so the two checks are one call.
+
+The one deliberate exception is an unknown `endBehavior` reaching `progressAt`,
+which **throws**. It cannot arrive from a scene file — the canonicalizer
+refused it there — so it means a caller skipped the boundary. That is a
+programming fault, and holding still would dress it up as a content problem.
+
+`paths.ts` keeps its own degrade-gracefully behaviour, untouched: a one-point
+path is a legal *shape* and only an illegal *route*. The same stored object,
+judged by the use it is being put to, which is I-17's claim working as intended
+rather than being worked around.
+
+### The mutation that killed nothing, and the test it produced
+
+**M10 removed the zero-length guard from `segmentAtProgress` and the suite
+stayed at 50 green.** The guard is load-bearing — `headingAtProgress` carries
+no zero-vector check because it relies on that guard — so a guard no test could
+falsify was a comment pretending to be a mechanism.
+
+Finding the input that reaches it took reading the walk rather than guessing.
+`travelled + len >= target` with `len === 0` is true only when
+`travelled === target` exactly, and any zero-length segment in the middle of a
+path is preceded by a real one that already satisfied the inclusive `>=`. The
+single reachable case is a zero-length segment **first**, at progress 0 — which
+is exactly what a freehand stroke that starts with two samples at one
+coordinate produces, so P5-D will generate it next block. Without the guard
+`t` is 0/0.
+
+The test is `skips a zero-length segment rather than landing on one`, on
+`[0.5,0] [0.5,0] [0.5,1]`: `t` is not NaN, and the heading reads 0.25 turns
+(down the run) rather than 0 (a tangent to a point). It fails on M10 and passes
+on the file as shipped. 50 → 51.
+
+### `MEASURED` — mutation checks
+
+Each applied alone to a pristine copy and reverted before the next; counts are
+`src/test/motion.test.ts` only. The first attempt at this table was thrown
+away: `motion.ts` was still untracked, `git checkout --` could not restore it,
+and four mutations stacked into one meaningless run of nines. Restoring from a
+saved copy rather than from git is the fix, and it is written down because the
+same trap sits in front of every new file's first mutation table.
+
+| mutation | tests failed |
+|---|---|
+| M1 `loop`: the `phaseOffset` shift dropped | 5 |
+| M2 `pingpong`: triangle replaced by the raw saw | 3 |
+| M3 `hold`: the ceiling at 1 removed | 2 |
+| M4 `pointAtProgress` walks by point index — equal time per segment, not per unit length | 4 |
+| M5 an unknown `endBehavior` accepted instead of refused | 2 |
+| M6 `phaseOffset` clamped instead of wrapped | 1 |
+| M7 heading returned in radians rather than turns | 3 |
+| M8 the four keys filed under `route.<id>.*` instead of `entity.<id>.motion.*` | 5 |
+| M9 `progressAt` keeps a cursor and accumulates | 10 |
+| M10 the zero-length guard removed from `segmentAtProgress` | **0**, then 1 |
+| *(all reverted; 684 green afterwards, `paths.ts` byte-identical to git)* | 0 of 10 |
+
+M4 and M8 were applied to files this block did not otherwise change —
+`paths.ts` and the registry — because the claim being tested is about them:
+that the constant-speed assertions read arc length rather than index, and that
+the keys hang off the entity rather than the route.
+
+### `IDEAS`
+
+- `MOTION_PERIOD_MIN_SECONDS` (0.1) is a *control* range, not the legality
+  boundary — the canonicalizer refuses only `<= 0`. The two are different
+  questions and conflating them would either give a fader an illegal bottom
+  stop or make a 0.05 s period unloadable. There is a test that a value the
+  fader can reach is a value the canonicalizer accepts; if a third range ever
+  appears, that test is the place to notice.
+- `RouteMotion` is not yet a field on `Layer`, because the block's file list
+  did not include `layer.ts` or `scene.ts` and nothing reads motion yet. P5-F's
+  motion panel is where it has to land, and the round-trip test here is written
+  against the record alone so it will not need rewriting when it does.

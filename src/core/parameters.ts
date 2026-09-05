@@ -18,6 +18,14 @@ import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
 import { BLEND_MODES, isBlendMode, type JsonValue, type Layer, type Susceptibility } from './layer';
 import { CLOCK_MAX_MS, CLOCK_RATE_MAX, CLOCK_RATE_MIN } from './clock';
 import { clampSusceptibility, type ForceDefinition, type ParallaxState } from './forces';
+import {
+  DEFAULT_ROUTE_MOTION,
+  MOTION_PERIOD_MAX_SECONDS,
+  MOTION_PERIOD_MIN_SECONDS,
+  ROUTE_END_BEHAVIORS,
+  isRouteEndBehavior,
+  type RouteMotion,
+} from './motion';
 import type { ContentParamSpec } from '../providers/ContentProvider';
 
 export type ParameterValue = number | boolean | string;
@@ -535,4 +543,79 @@ export function defineParallaxParameters(
     set: (v: number) => write({ ...read(), [key]: v }),
   });
   return [axis('x', 'Parallax X'), axis('y', 'Parallax Y')];
+}
+
+/**
+ * The `entity.<id>.motion.*` keys (I-8, I-18, CLAUDE.md rule 5).
+ *
+ * **On the entity, not the path.** I-18 closes on this and D21 is the reason:
+ * the route, the pace and the boundary come from the engine, and the route is a
+ * shape that knows nothing about who walks it. `route.<id>.periodSeconds` would
+ * mean two entities on one path could not travel it at different speeds, which
+ * is the first thing anyone will ask for. Block A registered no parameter at
+ * all for a path, deliberately, and this block does not add one.
+ *
+ * Four segments rather than three — `entity.<id>.motion.periodSeconds`, not
+ * `entity.<id>.periodSeconds` — for `susceptibility`'s reason: a provider that
+ * ever exposed a content key called `orient` would collide, and I-8 exists so
+ * that names cannot collide across the instrument.
+ *
+ * Bound to scene state through accessors, never copied (I-12); the defaults
+ * reported here are `DEFAULT_ROUTE_MOTION`'s, so a registry read on an entity
+ * that has declared no motion says what it will actually do.
+ */
+export function defineMotionParameters(
+  entityId: string,
+  read: () => RouteMotion,
+  write: (patch: Partial<RouteMotion>) => void,
+): ParameterDef[] {
+  return [
+    {
+      key: `entity.${entityId}.motion.periodSeconds`,
+      label: 'Motion — period (s)',
+      kind: 'number',
+      default: DEFAULT_ROUTE_MOTION.periodSeconds,
+      // The CONTROL range, not the legality boundary — see `motion.ts`. Its
+      // floor is above zero because a fader that can reach a period the
+      // canonicalizer refuses is a control with an illegal bottom stop.
+      min: MOTION_PERIOD_MIN_SECONDS,
+      max: MOTION_PERIOD_MAX_SECONDS,
+      step: 0.1,
+      get: () => read().periodSeconds,
+      set: (v: number) => write({ periodSeconds: v }),
+    },
+    {
+      key: `entity.${entityId}.motion.orient`,
+      label: 'Motion — orient to path',
+      kind: 'boolean',
+      default: DEFAULT_ROUTE_MOTION.orient,
+      get: () => read().orient,
+      set: (v: boolean) => write({ orient: v }),
+    },
+    {
+      key: `entity.${entityId}.motion.endBehavior`,
+      label: 'Motion — end behaviour',
+      kind: 'enum',
+      // The same array the validator uses. A fourth behaviour appears in the
+      // editor's dropdown by being added to `ROUTE_END_BEHAVIORS` and nowhere
+      // else, which is what stops the two lists drifting apart.
+      options: ROUTE_END_BEHAVIORS,
+      default: DEFAULT_ROUTE_MOTION.endBehavior,
+      get: () => read().endBehavior,
+      set: (v: string) => {
+        if (isRouteEndBehavior(v)) write({ endBehavior: v });
+      },
+    },
+    {
+      key: `entity.${entityId}.motion.phaseOffset`,
+      label: 'Motion — phase offset',
+      kind: 'number',
+      default: DEFAULT_ROUTE_MOTION.phaseOffset,
+      min: 0,
+      max: 1,
+      step: 0.001,
+      get: () => read().phaseOffset,
+      set: (v: number) => write({ phaseOffset: v }),
+    },
+  ];
 }
