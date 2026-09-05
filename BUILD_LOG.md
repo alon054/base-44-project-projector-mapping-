@@ -6003,3 +6003,58 @@ anyway. Revisit only if the operator reports a key that seems to do nothing.
   projector's real size. Leave it until Gate 5's table session says otherwise.
 - `POINT_HIT_RADIUS` (carried out of P5-D) is still open and still for that
   session.
+
+---
+
+## 2026-09-05 — Phase 5 (block E) — closed on the operator's pass
+
+- DID: nothing built. P5-E marked `[x]` on the operator's verdict —
+  **"working"** — for both Done-when observations, taken on the table at the
+  first attempt.
+- MEASURED: 787 / 787 green, 33 files. 43 / 43 goldens. 17 mutations, every one
+  killing at least one test. Suite over the block: 753 → 787, +34.
+- BLOCKER: -
+- NEXT: P5-F, the control panel.
+
+### The interesting number is the round count
+
+| block | rounds of operator fixes |
+|---|---|
+| P5-D | 4 |
+| P5-E | 0 |
+
+P5-D's entry said the counter-move to a suite that was "never wrong and never
+useful" is not more tests, it is five minutes of use before a block is called
+done. This block had that written against it and it cost nothing, because the
+thing the use would have caught had already been caught: the `clock-only` boot
+run brought both windows up and would have thrown on a missing preload call,
+which is the exact shape of P5-D round 1 — a path the headless suite cannot
+reach because no test drives a preload.
+
+**One data point is not a method.** The honest reading is narrower than "the
+practice works": P5-E is a smaller block than P5-D, it added no tuned constant,
+and its two observations are binary — the HUD is on the wall or it is not —
+where P5-D's were about feel at a threshold. A block with a number in it should
+still expect rounds. What transfers is the cheaper half: boot the app once
+before claiming a block, because a renderer that dies at startup is invisible to
+`vitest` by construction and takes ten seconds to rule out.
+
+### What the verdict does and does not cover
+
+`h` was the key pressed, with the projector display never focused. `r` and `k`
+were not separately reported. They are recorded as covered anyway, and the
+reason is structural rather than optimistic: all three arrive on one channel,
+resolve through one table, and dispatch through one `runShortcut`. What was
+observed working is the whole of the path they share; what is untested by
+observation is three handler bodies that predate this block and are unchanged
+by it. That is a different claim from "the operator pressed them", and it is
+written here as the weaker one it is.
+
+### `GOLDEN-REBLESSED` — none, and that is the point
+
+The grid draws on the preview and no golden moved. Two readings of the same
+fact now: the operator looked at the projection and did not see it, and
+`sceneEdit.test.ts` says neither `output/main.ts` nor `golden/main.ts` can reach
+the file it lives in. The import test is what stops a later edit from making the
+grid reachable; the observation is what says the test is asserting the right
+thing.
