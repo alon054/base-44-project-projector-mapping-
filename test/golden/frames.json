@@ -220,8 +220,8 @@
   "resilience": {
     "width": 1280,
     "height": 720,
-    "hash": "c8d0e8e7",
-    "coverage": 0.133842,
+    "hash": "61f62fa3",
+    "coverage": 0.129087,
     "failures": [
       {
         "layerId": "broken",
@@ -239,7 +239,24 @@
       0,
       229
     ],
-    "meanLuminance": 0.013142
+    "meanLuminance": 0.012121,
+    "excluded": {
+      "rects": [
+        {
+          "x": 0.378125,
+          "y": 0.105556,
+          "width": 0.25,
+          "height": 0.1
+        },
+        {
+          "x": 0.625391,
+          "y": 0.245833,
+          "width": 0.242969,
+          "height": 0.075
+        }
+      ],
+      "pixels": 41356
+    }
   },
   "warp-disabled": {
     "width": 1280,
@@ -379,7 +396,7 @@
   "phase3-load-preview": {
     "width": 1280,
     "height": 720,
-    "hash": "af59b5a4",
+    "hash": "8bb41cc3",
     "coverage": 1,
     "failures": [],
     "layoutDelta": null,
@@ -389,13 +406,24 @@
       34,
       64
     ],
-    "meanLuminance": 0.190246
+    "meanLuminance": 0.190321,
+    "excluded": {
+      "rects": [
+        {
+          "x": 0.056641,
+          "y": 0.025694,
+          "width": 0.103906,
+          "height": 0.029167
+        }
+      ],
+      "pixels": 3105
+    }
   },
   "bundled-missing-asset": {
     "width": 1280,
     "height": 720,
-    "hash": "9510edbd",
-    "coverage": 0.014715,
+    "hash": "5189cac5",
+    "coverage": 0.012879,
     "failures": [
       {
         "layerId": "gone",
@@ -409,7 +437,18 @@
       0,
       191
     ],
-    "meanLuminance": 0.003135
+    "meanLuminance": 0.002824,
+    "excluded": {
+      "rects": [
+        {
+          "x": 0.260937,
+          "y": 0.233333,
+          "width": 0.215625,
+          "height": 0.05
+        }
+      ],
+      "pixels": 10564
+    }
   },
   "bundled-spritesheets-scrubbed": {
     "width": 1280,

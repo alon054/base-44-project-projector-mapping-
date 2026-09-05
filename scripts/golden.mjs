@@ -92,6 +92,9 @@ app.whenReady().then(async () => {
       // into the committed goldens too — a region hash that changed between
       // runs is as much a regression as a frame hash that did.
       ...(r.regionHash ? { regionHash: r.regionHash } : {}),
+      // Committed, so a hash that silently stopped covering part of the frame
+      // shows up as a diff in the goldens rather than as nothing at all.
+      ...(r.excluded ? { excluded: r.excluded } : {}),
     };
     writeFileSync(
       join(PREVIEW_DIR, `${r.name.replace(/[^\w.@-]/g, '_')}.png`),
@@ -114,6 +117,29 @@ app.whenReady().then(async () => {
           `${r.name}: layout differs from ${r.layoutDelta.against} by ${r.layoutDelta.maxCell} per cell (limit ${MAX_LAYOUT_DELTA}) — a normalized transform is not surviving the resolution change (I-1)`,
         );
       }
+    }
+    // The narrowed hash must still be able to fail. If the control did not
+    // trip, every excluded case's pass means nothing — louder than a mismatch.
+    if (r.excludeControl && !r.excludeControl.tripped) {
+      problems.push(
+        `${r.name}: EXCLUSION NEGATIVE CONTROL DID NOT TRIP. A byte flipped at ` +
+          `${r.excludeControl.at ? `(${r.excludeControl.at.join(', ')})` : 'no pixel'} — outside the excluded rect — ` +
+          `left the hash at ${r.hash}. The narrowed assertion cannot see a change it is supposed to see` +
+          `${r.excludeControl.note ? `: ${r.excludeControl.note}` : ''}`,
+      );
+    }
+    if (r.excluded) {
+      const pct = ((r.excluded.pixels / (r.width * r.height)) * 100).toFixed(3);
+      if (r.excluded.pixels > r.width * r.height * 0.05) {
+        problems.push(
+          `${r.name}: the exclusion covers ${pct}% of the frame, over the 5% ceiling — an exclusion that wide stops being "as small as the text"`,
+        );
+      }
+      process.stdout.write(
+        `exclusion: ${r.name} skips ${r.excluded.pixels} px (${pct}% of frame) ` +
+          `in ${r.excluded.rects.length} rect(s) ${JSON.stringify(r.excluded.rects)} — control tripped at ` +
+          `${r.excludeControl?.at ? `(${r.excludeControl.at.join(', ')})` : 'n/a'}\n`,
+      );
     }
     if (r.coverage < MIN_COVERAGE) {
       problems.push(
@@ -163,6 +189,11 @@ app.whenReady().then(async () => {
     if (JSON.stringify(got.layoutDelta) !== JSON.stringify(exp.layoutDelta)) {
       problems.push(
         `${name}: I-1 layout delta changed\n    got      ${JSON.stringify(got.layoutDelta)}\n    expected ${JSON.stringify(exp.layoutDelta)}`,
+      );
+    }
+    if (JSON.stringify(got.excluded ?? null) !== JSON.stringify(exp.excluded ?? null)) {
+      problems.push(
+        `${name}: the excluded rect changed\n    got      ${JSON.stringify(got.excluded ?? null)}\n    expected ${JSON.stringify(exp.excluded ?? null)}`,
       );
     }
     if (JSON.stringify(got.failures) !== JSON.stringify(exp.failures)) {

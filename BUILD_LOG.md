@@ -4013,3 +4013,261 @@ Gate 4 status lines and does **not** include this one, so it would have been
 propagated around and left standing. Worth one line in whatever revision block
 carries the Gate 4 propagation, and worth a thought about whether a header this
 easy to forget should be asserted by a test rather than by care.
+
+## 2026-09-05 — Phase 4 (session 5) — the goldens settled in pixels, and the OS boundary turned out to be real
+
+- DID: the Part 1 verification block. Proved the golden drift is text-local by
+  experiment rather than by inference, narrowed the three hashes to exclude the
+  label instead of pinning a font, re-measured `p4-gate` and `p4-regression` on
+  macOS 26.6.2, ran the §10 row 11 experiment, and turned B1 from an edit into a
+  test. **`SPEC.md` was edited on one line — the version header — under the
+  operator's explicit instruction (Part 1.5); nothing else in it was touched.**
+- MEASURED: **519 tests / 26 files green** (507 before), **43 of 43 goldens**,
+  typecheck clean. Full numbers below.
+- BLOCKER: none blocking. Three items need the operator's ruling before Phase 5:
+  §4's OS boundary, §10 row 11 (now with a measurement attached), and §10 row 13.
+- NEXT: those three rulings, then Phase 5. Phases 6 and 7 stay queued behind
+  Phase 5 exactly as S8 ratified them.
+
+### 1.1 — the font hypothesis, settled in pixels
+
+**The step as written could not be run, and that is itself the finding.** It
+asked for a diff of the previous preview against the current one. The previous
+previews no longer exist: `.golden-preview` is overwritten by every run, and the
+run that *found* the drift destroyed the evidence of it on its way past.
+`test/golden/frames.json` stores 43 hashes and no reference images. This is the
+`IDEAS` note from session 4 — *"a hash-only golden can say 'different' and never
+'how different'"* — biting one session after it was written. No Time Machine
+snapshot exists either (`tmutil listlocalsnapshots /` is empty).
+
+So the causal variable was changed instead, and what moved was measured.
+`scripts/font-probe.mjs` renders the whole suite twice and reports the count and
+bounding box of every differing pixel. Perturbations are applied at the canvas-2D
+layer through a preload, so **no engine source is touched**.
+
+| perturbation | cases moved (of 43) | `meanLuminance` |
+|---|---|---|
+| **none — the same run twice** | **0** | identical |
+| Chromium `--disable-lcd-text`, `--disable-font-subpixel-positioning` | 0 | no effect |
+| generic `monospace` remapped to Courier New | **3** | **differs, ~4.5%** |
+| glyphs translated one whole pixel | **3** | **identical** |
+| *(observed)* macOS 26.2 → 26.6.2 | **3** | **identical** |
+
+**The instrument control comes first**: two renders with nothing changed are
+identical in all 43 cases, across separate processes. Without that line the rest
+is unreadable, and this project has shipped an assertion that could not fail.
+
+Four things follow, and the third was a surprise:
+
+1. **Only three cases contain text.** Suppressing glyphs entirely moves exactly
+   `resilience`, `phase3-load-preview` and `bundled-missing-asset` — the same
+   three the OS moved — and nothing else. The correlation is not a coincidence
+   of names.
+2. **Alpha is dead as an explanation.** The frame hash is FNV-1a over RGBA while
+   `meanLuminance` and `centrePixel` read RGB only, so an alpha-only change would
+   have produced precisely the observed signature. Measured: alpha is **255 at
+   every pixel of all three frames**, so it cannot be what moved.
+3. **The mechanism is a translation, not a re-rasterization.** A font
+   substitution moves `meanLuminance` by ~4.5%; the OS change moved it by **zero
+   at 6 dp**, and left `coverage` and `centrePixel` bit-identical too. Exact
+   preservation of total light *and* lit-pixel count with a different hash is the
+   signature of a **pure integer shift** of the glyph block, and a 1 px shift
+   reproduces it exactly. Consistent with the font files: **nothing in
+   `/System/Library/Fonts` changed** — every file is dated Aug 13.
+4. **Therefore pinning a font would not have helped at all.** Not merely a
+   partial fix, as Part 1.2 argued: in this instance a zero fix. No font file
+   changed; the glyphs simply landed a pixel over.
+
+**What is still not proven, stated rather than buried.** None of this shows that
+the OS-induced change lay *inside* the label box, because that comparison needs
+pixels that no longer exist. It shows the change correlates perfectly with the
+presence of text across 43 cases, that its statistical signature matches a
+text-local mechanism exactly, and that the one alternative with the same
+signature is ruled out. The residual is that the non-text pixels of those three
+frames are now blessed post-update, never checked against 26.2 — bounded by the
+40 untouched cases, which exercise every renderer feature those three frames use
+and are byte-identical.
+
+### 1.2 — the fix: narrow the hash, do not pin the font
+
+`GoldenCase.exclude` takes a **list** of normalized rects (I-1) — a list, not one
+rect, because `resilience` carries two labels at opposite corners and a single
+box around both covered **11.42% of the frame**, swallowing the placeholder
+outlines that are the actual subject under test. The runner's own 5% ceiling
+caught that on the first run, which is the ceiling working rather than a
+formality. Split per label it is 2.500% + 1.822%.
+
+Every rect is **measured, not guessed** — the glyph-suppression diff gives the
+exact footprint, plus a 4 px margin so a rect is not fitted to today's glyphs:
+
+| case | excluded | share of frame |
+|---|---|---|
+| `bundled-missing-asset` | 1 rect | 1.146% |
+| `phase3-load-preview` | 1 rect | 0.337% |
+| `resilience` | 2 rects | 4.487% |
+
+Deliberate details, each with a reason:
+
+- **The rect is outset by a pixel, the exact opposite of `hashRegion`'s inset.**
+  `region` asks *"are these pixels identical"* so it steps inside the antialiased
+  boundary; an exclusion says *"ignore this"* so it must step outside, or the
+  glyph's own fringe — the part most likely to move — stays in the hash.
+- **The exclusion applies to `meanLuminance` and `coverage`, not only the hash.**
+  Excluding it from the hash alone would leave the other two statistics reading
+  the glyphs, and the next rasteriser change would simply fail the case on a
+  different line. That is a fix that buys one release.
+- **The excluded area is printed every run** with its rects and pixel count
+  (A14). A hash that quietly stopped covering part of the frame is worse than one
+  that fails.
+- **`excluded` is committed into `frames.json`**, so widening a rect later shows
+  up as a diff rather than as nothing at all.
+
+**The negative control, in two places.** Ten unit tests in
+`src/test/goldenHash.test.ts` — a change inside the rect is ignored, a change one
+pixel outside it on every edge is still caught, overlapping rects do not
+double-count, an off-frame rect clamps rather than reading out of bounds. Plus a
+**live control in the runner**: every excluded case flips a byte outside its
+rects and requires the hash to move, reporting where it tripped. If the control
+does not trip, that is reported louder than a mismatch, in the same shape
+`expectLayoutMismatch` already uses.
+
+**And the fix was verified to actually fix the thing.** With the exclusions in
+place, the narrowed hashes of all three cases are **unchanged under both**
+perturbations — the font substitution *and* the 1 px translation that matches the
+observed signature — while remaining sensitive to a byte one pixel outside.
+Durable against the next rasteriser, which pinning a family is not.
+
+### 1.3 — the OS boundary is NOT cosmetic
+
+Both runs on macOS **26.6.2 (25G83)**, projector `T749-fHD720` at 1280×720 @
+60.000003814697266 Hz, scale 1, 1:1 to panel, `disturbed=false`,
+`throttled=false`, 3601 samples over 60.0 s after the discarded 10 s warmup.
+
+| run | OS | M1 late | M2 p99 | `renderMeanMs` |
+|---|---|---|---|---|
+| `p4-gate` | 26.2 | 0.0000% | 0.2000 ms = **1.200% of N** | 0.0649 ms = 0.390% of N |
+| `p4-gate` | **26.6.2** | 0.0000% | 0.5000 ms = **3.000% of N** | **0.2561 ms = 1.537% of N** |
+| `p4-regression` | 26.2 | 0.0000% | 0.1000 ms = **0.600% of N** | 0.0239 ms = 0.143% of N |
+| `p4-regression` | **26.6.2** | 0.0000% | 0.3000 ms = **1.800% of N** | **0.1272 ms = 0.763% of N** |
+
+**Both still pass both metrics, with a wide margin** — 3.000% of N against a 60%
+limit — and M1 is untouched: 0.0000% late, worst run 0, clause 3 empty, worst
+interval slightly *better* at 17.80 / 17.70 ms against 18.80 ms.
+
+But CPU render cost is **3.9× and 5.3×** what it was, in the same direction and
+the same magnitude on two different scenes. That is not noise, and "record the
+boundary" would have missed it. §4's clause fired and was worth firing.
+
+**Attribution is not claimed.** Two runs cannot separate the OS update from the
+state of a fanless machine that had been rendering the golden suite repeatedly
+for the previous hour. What is established is that Phase 5's numbers must be
+compared against **these** figures, not against Gate 4's.
+
+**A `p4-regression` run was discarded first** — `disturbed=true`, focus LOST at
+t=7.0 s inside the window — and re-taken clean rather than reported. Kept as
+`p4-regression-os2662-DISCARDED-focus.log`. Its numbers were within 0.4% of the
+clean re-take, which is exactly why the rule is that a disturbed run is not a
+run, especially when its numbers match.
+
+**Two incidental findings.** The Gate 0 note that *"the `pinned-fingerprint`
+fallback resolved in unit tests but has still never fired in the field"* is now
+out of date: `p4-gate-os2662` resolved `PINNED (pinned-fingerprint)`, macOS
+having changed the display id across the OS update. And **session 3's prediction
+has half come true early** — it recorded, before the fact, that the M2 subject
+might grow past the 100 µs quantum on its own and make the metric self-resolving,
+expecting Phase 6 to do it. The OS did it first: `renderMeanMs` 0.2561 ms is now
+**2.5 quanta** rather than 0.65, and p99 0.5 ms is 5. M2 is a coarse measurement
+today rather than a pure ceiling. That is luck, not a plan, and it does not
+retroactively measure Gates 0–4.
+
+### 1.4 — §10 row 11, measured
+
+The proposal is no longer a proposal with a guess attached. Measured directly, in
+two windows differing only in `sandbox`:
+
+| | `sandbox: true` (today) | `sandbox: false` |
+|---|---|---|
+| `process.hrtime.bigint` | **ABSENT** | **available** |
+| clock resolution | `performance.now()` **100.0 µs** | hrtime **0.041 µs (41 ns)** |
+| call cost | 0.000150–0.000200 ms | **0.000012 ms (12 ns)** |
+
+The diagnosis in session 3's proposal is confirmed exactly, and the shipping log
+line already says it: *"fine clock rejected: fine clock returned a non-number (no
+hrtime in a sandboxed preload?) — COARSER THAN ITS SUBJECT (~0.047 ms)."*
+
+**Option 1 works, and it is ~2,400× finer than the quantum it replaces**, at a
+call cost of 12 ns — 0.00007% of N, comfortably inside `CLOCK_CALL_BUDGET_MS`,
+and `selectClockSource` measures it before committing in any case.
+
+**One caveat the proposal did not know about, and it is load-bearing.** The mixed
+configuration is **order-dependent**, reproducibly, three runs out of three:
+
+- editor (sandboxed) created **first**, then output (unsandboxed) — **works**,
+  and this is the shipping order.
+- output (unsandboxed) first, then editor (sandboxed) — the output window
+  **fails to load** with `ERR_FAILED (-2)`, and the process dies with `SIGTRAP`.
+
+So option 1 is one line *plus an undocumented ordering dependency that crashes
+the app if a later change reorders window creation*. It happens to be satisfied
+today by accident of how `main.ts` is written, not by design. **Recommendation
+unchanged — option 1, output window only — but it should ship with a comment at
+the window-creation site and a guard, not as a bare flag.** The operator rules.
+
+### 1.5 — B1, shipped as a mechanism
+
+`SPEC.md:9` read `v3.3` against §1's `v3.3.1`. Header corrected to `v3.3.1` under
+the operator's explicit instruction, and — the actual point — `src/test/specVersion.test.ts`
+now asserts that the header equals the first version named in §1. It was run
+**before** the fix and failed with both values in the message (`header says v3.3
+and §1's first block says v3.3.1`), which is the only reason it is worth having;
+then it passed. **A fix that shipped as an edit comes back; a fix that shipped as
+a test does not.**
+
+### `SPEC-CHANGE-PROPOSED` — §4 TARGET_MACHINE, now with numbers
+
+Session 4 proposed recording the OS boundary. The re-measurement changes what the
+proposal should say, so it is restated rather than left standing.
+
+| | |
+|---|---|
+| **Proposed** | §4's TARGET_MACHINE reads **macOS 26.6.2 (25G83)**, with a note that Gates 0–4 were measured on **26.2 (25C56)**, that the boundary falls between `p4-regression` (2026-09-04 18:43) and the re-takes of 2026-09-05, and that **CPU render cost measured 3.9–5.3× higher across it on two scenes while both gate metrics continued to pass** |
+| **Reason** | Session 4 argued the boundary should be recorded so a later comparison is not silently made across two machines. That argument was right and is now much stronger: the gap is real and large. A spec that records only the version number would still let someone read Gate 4's 0.390% of N and this phase's 1.537% as a regression in the engine |
+| **Alternative rejected** | **Recording the version and not the numbers.** Tidier, and it loses the one fact that makes the boundary worth recording. The version is the label; the ratio is the content |
+| **Also rejected** | **Re-measuring Gates 0–4 on 26.6.2.** Disproportionate, and §0.1 freezes a passed gate. Gate 4's numbers were honestly taken on the machine §4 described |
+| **Not proposed** | Any change to a passed gate's result, and any claim that the OS *caused* the increase. Two runs cannot separate the update from the thermal state of a fanless machine under an hour of load |
+
+### `SPEC-CHANGE-PROPOSED` — §10 row 13, the memory soak, stated early
+
+Due at Phase 6 and therefore behind Phase 5, but Part 2 asks for it now so it is
+not discovered late. **No new measurement was taken this session**; this is the
+existing evidence given a recommendation.
+
+The harness reports `flat: false` on `Graphics`-heavy scenes while texture memory
+is provably flat — count 2 → 2, bytes 8 → 8, `driftTextureCount 0` over 20
+minutes and 604 rebuilds. The `false` comes from buffers 74 → 454 and geometries
+37 → 227, and `phase1-default` shows the same signature with no Phase 4 content
+at all, settling at the same 110 s, so it is PixiJS `Graphics` pooling and it
+predates Phase 4. After settling, `steadyDriftBufferCount: 0` across 548 rebuilds
+in 1090 s.
+
+| | |
+|---|---|
+| **Recommended** | **Split the verdict.** Report `flatTextures`, `flatBuffers` and `flatGeometries` separately, and gate the rolling check on **textures plus post-settle drift in each**, with the 110 s settle stated as a documented plateau rather than explained away |
+| **Reason** | One `flat` flag folding three subsystems answers a question nobody asked. The check exists to catch a leak; a pool that fills once and then holds steady is not one, and `steadyDriftBufferCount: 0` over 548 rebuilds is the measurement that says so. Splitting makes the instrument report what it actually observed — the A14 principle applied to a boolean |
+| **Alternative rejected** | **Accept the plateau and mark the line `[x]`.** It reaches the same checkbox by argument instead of by measurement, and the instrument would still say `false`. Overruling an instrument in prose is how a green box stops meaning anything |
+| **Also rejected** | **Explain the 110 s plateau first.** Worth knowing, not worth blocking on: the plateau is in PixiJS's pooling, and the check does not need its cause to stop conflating three subsystems |
+| **Bites at** | Phase 6. Surfaces are drawn with `Graphics`, which is exactly the subject |
+
+### `IDEAS` — parked, not built
+
+- **Keep reference PNGs, or per-case region hashes, beside the 43 hashes.** Said
+  last session, and this session paid for it: the pre-update pixels were gone and
+  the central question of 1.1 became permanently unanswerable. `scripts/font-probe.mjs`
+  is now the tool that would have answered it, and it exists — what is missing is
+  a *baseline* for it to diff against.
+- **Record the OS build in each run's conditions block.** Said last session,
+  unbuilt, and it would have made this session's boundary visible without an
+  install receipt.
+- **A pinned font is a Phase 5 product decision, not a test fix** — whether the
+  HUD and placeholder labels should look identical on every machine. Parked
+  there, which is where it belongs now that the goldens no longer depend on it.

@@ -58,6 +58,7 @@ import {
   withEnabled,
   type ViewportCalibration,
 } from '../render/calibration';
+import { firstPixelOutside, hashFrame } from './hash';
 
 /** A8: a literal, decided in Phase 1's setup. Read the block comment above. */
 const GOLDEN_RESOLUTION = { width: 1280, height: 720 } as const;
@@ -125,6 +126,15 @@ function forceField(
   });
 }
 
+/**
+ * The text a placeholder or badge draws, as a normalized rect (I-1), excluded
+ * from this case's hash and statistics.
+ *
+ * Measured, not guessed: `scripts/font-probe.mjs` renders the suite with glyphs
+ * suppressed and reports the exact footprint. Each rect below is that footprint
+ * with a ~4 px margin, and the margin is the point — a rect sized to today's
+ * glyphs would need re-measuring the first time any of them moved.
+ */
 interface GoldenCase {
   name: string;
   scene: Scene;
@@ -145,6 +155,24 @@ interface GoldenCase {
    * Normalized (I-1), so the region means the same thing at any resolution.
    */
   region?: { x: number; y: number; width: number; height: number };
+  /**
+   * Hash and summarise the frame MINUS this normalized rectangle.
+   *
+   * These three cases prove I-13 — that a failed layer draws a visible
+   * placeholder — and I-13 is what they are blessed for. The glyphs inside the
+   * label are not the subject under test, and they are the one thing in the
+   * frame the operating system rasterises rather than this engine: on
+   * 2026-09-05 a macOS update moved them and turned three green cases red with
+   * no engine change behind it.
+   *
+   * Excluding the text is deliberately preferred over pinning a font. Pinning
+   * the family does not pin the raster — and in this instance would not have
+   * helped at all, because no font file changed; the glyphs simply landed a
+   * whole pixel over. An exclusion is durable against every future rasteriser,
+   * metric and hinting change, and it costs only the coverage of pixels this
+   * suite never meant to assert on.
+   */
+  exclude?: { x: number; y: number; width: number; height: number }[];
   /** Rendered at this size instead of GOLDEN_RESOLUTION, for the I-1 cases. */
   size?: { width: number; height: number };
   /**
@@ -324,7 +352,17 @@ function cases(): GoldenCase[] {
     { name: 'glow-normal', scene: glowOverTree('normal') },
     { name: 'glow-add', scene: glowOverTree('add') },
     { name: 'blend-modes', scene: blendScene() },
-    { name: 'resilience', scene: faulty },
+    {
+      name: 'resilience',
+      scene: faulty,
+      // two placeholder labels: measured footprint x[328..951] y[44..199]
+      exclude: [
+        // upper label: measured x[324..643] y[40..111]
+        { x: 0.378125, y: 0.105556, width: 0.25, height: 0.1 },
+        // lower label: measured x[645..955] y[150..203]
+        { x: 0.625391, y: 0.245833, width: 0.242969, height: 0.075 },
+      ],
+    },
 
     // -----------------------------------------------------------------------
     // I-5, Gate 2. Three of these four are about the warp NOT changing things.
@@ -405,6 +443,8 @@ function cases(): GoldenCase[] {
       name: 'phase3-load-preview',
       scene: createPhase3Scene(),
       preload: allBundledUrls,
+      // the video badge "> live in output": measured x[10..134] y[12..24]
+      exclude: [{ x: 0.056641, y: 0.025694, width: 0.103906, height: 0.029167 }],
     },
 
     {
@@ -412,6 +452,8 @@ function cases(): GoldenCase[] {
       // as a flagged placeholder, not as a crash and not as a black rectangle.
       name: 'bundled-missing-asset',
       scene: bundledMissing(),
+      // one placeholder label: measured footprint x[200..467] y[154..181]
+      exclude: [{ x: 0.260937, y: 0.233333, width: 0.215625, height: 0.05 }],
     },
     {
       // -------------------------------------------------------------------
@@ -897,6 +939,10 @@ export interface GoldenResult {
    * `regionHash` over a layer that force cannot reach — see `GoldenCase.region`.
    */
   regionHash: string | null;
+  /** The rect this case's hash and statistics skipped, and how many pixels. */
+  excluded: { rects: { x: number; y: number; width: number; height: number }[]; pixels: number } | null;
+  /** Live proof the narrowed hash can still fail. Null when nothing is excluded. */
+  excludeControl: { tripped: boolean; at: [number, number] | null; note: string | null } | null;
   /** PNG data URL, written to disk by the runner for eyeballing. */
   png: string;
 }
@@ -962,17 +1008,6 @@ function signature(pixels: Uint8ClampedArray, width: number, height: number): Fl
   return cells;
 }
 
-function meanLuminance(pixels: Uint8ClampedArray): number {
-  let sum = 0;
-  const n = pixels.length / 4;
-  for (let i = 0; i < pixels.length; i += 4) {
-    sum +=
-      0.2126 * (pixels[i] as number) +
-      0.7152 * (pixels[i + 1] as number) +
-      0.0722 * (pixels[i + 2] as number);
-  }
-  return sum / n / 255;
-}
 
 /** RGB at the exact centre of the frame. */
 function centreRgb(
@@ -1106,14 +1141,26 @@ async function run(): Promise<GoldenResult[]> {
     // coverage on a 1280x720 frame.)
     const frame = new Rectangle(0, 0, size.width, size.height);
     const pixels = app.renderer.extract.pixels({ target: app.stage, frame });
-    let lit = 0;
-    for (let i = 0; i < pixels.pixels.length; i += 4) {
-      if (
-        (pixels.pixels[i] as number) > 8 ||
-        (pixels.pixels[i + 1] as number) > 8 ||
-        (pixels.pixels[i + 2] as number) > 8
-      ) {
-        lit++;
+    // One pass hashes and summarises the frame, skipping `exclude` if declared.
+    // With no exclusion this is byte-identical to the previous whole-frame
+    // behaviour, which `golden.test.ts` asserts rather than assumes.
+    const stats = hashFrame(pixels.pixels, size.width, size.height, c.exclude);
+
+    // The live negative control. A hash that ignores a rectangle must still see
+    // a change one pixel outside it: flip a byte there and require the hash to
+    // move. `region` shipped with a control for the same reason, and this
+    // project has already shipped an assertion that could not fail.
+    let excludeControl: GoldenResult['excludeControl'] = null;
+    if (c.exclude) {
+      const at = firstPixelOutside(size.width, size.height, c.exclude);
+      if (at === null) {
+        excludeControl = { tripped: false, at: null, note: 'the exclusion covers the whole frame' };
+      } else {
+        const copy = new Uint8ClampedArray(pixels.pixels);
+        const i = (at[1] * size.width + at[0]) * 4;
+        copy[i] = (copy[i] as number) ^ 0xff;
+        const moved = hashFrame(copy, size.width, size.height, c.exclude).hash;
+        excludeControl = { tripped: moved !== stats.hash, at, note: null };
       }
     }
     const canvas = app.renderer.extract.canvas({ target: app.stage, frame }) as HTMLCanvasElement;
@@ -1124,14 +1171,18 @@ async function run(): Promise<GoldenResult[]> {
       name: c.name,
       width: size.width,
       height: size.height,
-      hash: fnv1a(new Uint8Array(pixels.pixels.buffer, pixels.pixels.byteOffset, pixels.pixels.byteLength)),
-      coverage: lit / (size.width * size.height),
+      hash: stats.hash,
+      coverage: stats.lit / stats.counted,
       failures: compositor.failures().map((f) => ({ layerId: f.layerId, reason: f.reason })),
       png: canvas.toDataURL('image/png'),
       layoutDelta: null,
       expectLayoutMismatch: c.expectLayoutMismatch === true,
       centrePixel: centreRgb(pixels.pixels, size.width, size.height),
-      meanLuminance: Number(meanLuminance(pixels.pixels).toFixed(6)),
+      meanLuminance: Number(stats.meanLuminance.toFixed(6)),
+      // A14: the gate line prints the VALUE. A silent exclusion is a hash that
+      // quietly stopped covering part of the frame.
+      excluded: c.exclude ? { rects: c.exclude, pixels: stats.excluded } : null,
+      excludeControl,
       regionHash: c.region
         ? hashRegion(pixels.pixels, size.width, size.height, c.region)
         : null,

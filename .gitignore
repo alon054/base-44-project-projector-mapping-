@@ -17,3 +17,4 @@ measurements/*.log
 # Golden-frame previews: written on every render-test run, for eyeballing a
 # mismatch. The hashes in test/golden/ are the committed artefact, not these.
 .golden-preview/
+.probe/
