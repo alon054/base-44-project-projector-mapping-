@@ -5870,3 +5870,57 @@ refuse what is wrong. The slop clamps drift. The doubled point was not drift.
 | M29 the collapse keeps the last point instead of the one pressed | 1 |
 | M30 stroke length measured as displacement, not along the run | 1 |
 | *(M1–M27 re-run; all 30 kill something, `pathTool.ts` byte-identical after)* | 0 of 30 |
+
+---
+
+## 2026-09-05 — Phase 5 (block D) — closed on the operator's pass
+
+- DID: nothing built. P5-D marked `[x]` on the operator's verdict —
+  **"working now"** — after the fourth fix. The `POINT_HIT_RADIUS` question is
+  carried out of the block as a note rather than an unchecked box, to be looked
+  at during Gate 5's table session.
+- MEASURED: 753 / 753 green, 31 files. 43 / 43 goldens. 30 mutations, every one
+  killing at least one test. Suite over the block: 684 → 753, +69.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid.
+
+### `GATE-PASSED` is not the tag here, and the distinction is deliberate
+
+Gate 5 is the operator's and has not been run. What closed is the block, on the
+operator's use of the tool. The line is recorded at the strength the evidence
+has: a clicked path with a sharp turn, drawn and photographed, one point per
+click; Enter finishing paths; several paths held at once. A freehand drag was
+not reported on either way, and "absent from the output" rests on the import
+graph and 43/43 goldens rather than on someone looking at the projector. P5-B
+set the precedent for writing down a verdict without figures and saying so.
+
+### What this block actually cost, and where
+
+Five sessions of work in one, four of them fixes, every fix from the operator
+using the thing:
+
+| round | what the headless suite said | what the operator found |
+|---|---|---|
+| build | 37 tests, 10 mutations, all green | — |
+| 1 | green | an open path had no way to end |
+| 2 | green | only one path could exist at a time |
+| 3 | green | one click made two points; paths could not be picked up |
+| 4 | green | one click *still* made two points |
+
+**The suite was never wrong and never useful here.** Rounds 1 and 2 were missing
+actions, and a test that drives a tool through the actions it has cannot notice
+the action it does not have. Rounds 3 and 4 were a threshold tuned small enough
+to hide the behaviour underneath it — the tests pinned the behaviour at the
+value that concealed the fault, which is worse than not testing it, because it
+made the wrong value look load-bearing.
+
+The counter-move is not more tests. It is five minutes of use before a block is
+called done. That is now written against P5-E and P6-C.
+
+### `IDEAS`
+
+- The one number left open, `POINT_HIT_RADIUS`, is the same *class* as the two
+  that were wrong: a single constant serving two affordances that want different
+  values. It has not been reported as a fault since `MIN_STROKE_LENGTH` landed.
+  If it bites at the table, the fix is two constants, not a better single one —
+  which is the shape both earlier fixes converged on.
