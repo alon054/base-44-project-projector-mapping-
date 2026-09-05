@@ -19,6 +19,7 @@ import {
   type DisplayInfo,
   type MetricsReport,
   type OutputConfig,
+  type OutputKeyPress,
   type ParamAck,
   type ParamSet,
   type ProvocationKind,
@@ -566,6 +567,23 @@ function wireIpc(): void {
   ipcMain.on(CH.clockSet, (_e: IpcMainEvent, payload: ClockSet) => {
     lastClock = assertJsonOnly(payload);
     send(outputWin, CH.clockSet, lastClock);
+  });
+
+  /**
+   * P5-E. editor -> output, key identity only.
+   *
+   * Not held and not replayed, unlike the scene and the clock: a keystroke is
+   * an event, not state. Replaying `h` to a window that reopened would toggle
+   * the HUD on a window whose HUD state main has no business having an opinion
+   * about — `hud:state` in `config/` is what survives a reopen, and it already
+   * does.
+   *
+   * Main does not interpret the key. The receiving renderer's
+   * `canonicalizeOutputKeyPress` is the validation boundary, exactly as
+   * `canonicalizeScene` and `canonicalizeClockTransport` are on their channels.
+   */
+  ipcMain.on(CH.outputKey, (_e: IpcMainEvent, payload: OutputKeyPress) => {
+    send(outputWin, CH.outputKey, assertJsonOnly(payload));
   });
 
   /**

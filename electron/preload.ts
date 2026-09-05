@@ -14,6 +14,7 @@ import type {
   ParamAck,
   ParamRecv,
   ParamSet,
+  OutputKeyPress,
   ProvocationKind,
   SceneFailure,
   SceneSet,
@@ -101,6 +102,21 @@ const api = {
     const h = (_e: unknown, c: ClockSet) => cb(c);
     ipcRenderer.on(CH.clockSet, h);
     return () => ipcRenderer.off(CH.clockSet, h);
+  },
+  /**
+   * P5-E. editor -> main -> output: one shortcut, by key identity (I-7).
+   *
+   * Additive. The output window keeps its own `keydown` listener and both ends
+   * dispatch through the same `OUTPUT_SHORTCUTS` table, so this is a second way
+   * to press the key, not a second definition of what it means.
+   */
+  sendOutputKey(k: OutputKeyPress): void {
+    ipcRenderer.send(CH.outputKey, assertJsonOnly(k));
+  },
+  onOutputKey(cb: (k: OutputKeyPress) => void): () => void {
+    const h = (_e: unknown, k: OutputKeyPress) => cb(k);
+    ipcRenderer.on(CH.outputKey, h);
+    return () => ipcRenderer.off(CH.outputKey, h);
   },
   // I-5: editor -> main -> output. Main persists it on the way through.
   setCalibration(c: CalibrationSet): void {

@@ -8,6 +8,7 @@
  * measured `renderer.render()` call and would inflate gate metric 2 with the
  * cost of the instrument.
  */
+import { OUTPUT_SHORTCUTS } from '@shared/ipc';
 import type {
   GpuResources,
   KReport,
@@ -613,7 +614,24 @@ export function formatReport(r: MetricsReport, uncapped: boolean): string {
     );
   }
 
+  lines.push(shortcutLegend());
+
   return lines.join('\n');
+}
+
+/**
+ * P5-E. The shortcuts, from the one table that defines them.
+ *
+ * Rendered rather than typed, so the legend cannot describe a key the build no
+ * longer has — and so an operator reading the HUD on the wall learns the keys
+ * that actually work, including the ones the editor window is forwarding.
+ */
+export function shortcutLegend(): string {
+  return (
+    'keys           ' +
+    OUTPUT_SHORTCUTS.map((s) => `${s.key} ${s.label}`).join('  ·  ') +
+    '  (or from the editor window)'
+  );
 }
 
 /** The output-window overlay. Off by default (C4); key-toggled. */

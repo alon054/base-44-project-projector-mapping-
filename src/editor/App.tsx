@@ -25,6 +25,7 @@ import {
   percentile,
 } from '../debug/hud';
 import { PreviewCanvas } from './PreviewCanvas';
+import { forwardedShortcut } from './outputKeys';
 import { LayerPanel } from './LayerPanel';
 import { useSceneRegistry } from './useSceneRegistry';
 import { useClock } from './useClock';
@@ -141,6 +142,35 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => window.engine.onSceneFailures(setFailures), []);
+
+  /**
+   * P5-E. The output window's shortcuts, pressed from here.
+   *
+   * The projector display runs `cursor: none` and is not normally focused, so
+   * reaching `h` on it meant clicking a display where the pointer is invisible
+   * — and a click there steals focus from the window a measurement run is
+   * watching, which is how three runs were lost in three sessions.
+   *
+   * Which keys these are is not decided here: `forwardedShortcut` asks
+   * `OUTPUT_SHORTCUTS`, and the output dispatches from the same table. Only the
+   * key identity crosses (I-7) — this window does not know what `h` means and
+   * has no reason to.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const shortcut = forwardedShortcut({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        target: e.target as { tagName?: string; isContentEditable?: boolean } | null,
+      });
+      if (!shortcut) return;
+      window.engine.sendOutputKey({ key: shortcut.key });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // I-5: read the stored calibration once at launch. A read that fails leaves
   // the identity calibration in place — unwarped is visible and correctable.

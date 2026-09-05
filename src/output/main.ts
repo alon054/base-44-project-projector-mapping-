@@ -6,8 +6,11 @@ import {
   DEV_RESOLUTION,
   PARAM_TEST_PATTERN_SPEED,
   TARGET_RESOLUTION,
+  canonicalizeOutputKeyPress,
+  outputShortcutFor,
   type KReport,
   type OutputConfig,
+  type OutputShortcutAction,
   type ProvocationSpec,
   type ProvocationVerdict,
 } from '@shared/ipc';
@@ -950,21 +953,35 @@ function startMeasurementRun(
   }
 }
 
-// I-11: the HUD stays available. `h` toggles it; it starts hidden so it is never
-// burned into a live projection.
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'h' || e.key === 'H') {
+/**
+ * P5-E. What each shortcut DOES, once — and the only place it is written.
+ *
+ * Typed as `Record<OutputShortcutAction, ...>`, so adding a row to
+ * `OUTPUT_SHORTCUTS` in `electron/ipc.ts` fails to compile here until this
+ * object grows a handler for it. That is what makes "a key added in one path
+ * cannot be missing from the other" a property of the build rather than of
+ * someone remembering.
+ *
+ * Both entry points below funnel through `runShortcut`: the window's own
+ * keydown, and the editor's forwarded key press. They cannot drift because
+ * there is nothing for them to drift between — the dispatch is shared and only
+ * the arrival differs.
+ */
+const SHORTCUT_HANDLERS: Record<OutputShortcutAction, () => void> = {
+  // I-11: the HUD stays available. It starts hidden so it is never burned into
+  // a live projection.
+  hud: () => {
     const v = hud.toggle();
     window.engine.setHudState(v);
     console.log(`[hud] ${v ? 'shown' : 'hidden'}`);
-  }
-  if (e.key === 'r' || e.key === 'R') {
+  },
+  resetMetrics: () => {
     host?.metrics.reset();
     console.log('[hud] metrics window reset — warmup restarts');
-  }
+  },
   // A8: k_dev / k_target. On demand only — the probe saturates the GPU and
   // would corrupt the gate window it sits beside, so it resets that window.
-  if (e.key === 'k' || e.key === 'K') {
+  probeK: () => {
     if (!host) return;
     const k = host.probe();
     console.log(
@@ -973,7 +990,45 @@ window.addEventListener('keydown', (e) => {
         `fill-rate coefficient=${k.ratio.toFixed(3)}  iterations=${k.iterations}  ` +
         '(metrics window reset — probe hitch excluded)',
     );
+  },
+};
+
+function runShortcut(action: OutputShortcutAction): void {
+  SHORTCUT_HANDLERS[action]();
+}
+
+// The output window's own keys. Still here, unchanged in behaviour: P5-E's
+// forwarding is ADDITIVE, and a focused projector display must keep working
+// the way four gates of measurement runs have used it.
+window.addEventListener('keydown', (e) => {
+  const shortcut = outputShortcutFor(e.key);
+  if (!shortcut) return;
+  runShortcut(shortcut.action);
+});
+
+/**
+ * P5-E. The same keys, pressed from the editor window.
+ *
+ * The operator never has to click the projector display, where `cursor: none`
+ * makes the pointer invisible and a stray click can steal focus from the
+ * window a measurement run is watching.
+ *
+ * An unrecognised key is refused and NAMED rather than ignored — see
+ * `canonicalizeOutputKeyPress`. Ignoring it would leave an operator pressing a
+ * key that this build cannot do anything with and no line anywhere saying so.
+ */
+window.engine.onOutputKey((payload) => {
+  let press;
+  try {
+    press = canonicalizeOutputKeyPress(payload);
+  } catch (err) {
+    console.warn(`[key] refused a forwarded key press: ${(err as Error).message}`);
+    return;
   }
+  // Non-null by construction: canonicalize refuses anything not in the table.
+  const shortcut = outputShortcutFor(press.key)!;
+  console.log(`[key] '${press.key}' forwarded from the editor — ${shortcut.label}`);
+  runShortcut(shortcut.action);
 });
 
 // A8 diagnostic: the probe reported k_target CHEAPER than k_dev, which is

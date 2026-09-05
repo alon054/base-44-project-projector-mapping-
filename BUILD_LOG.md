@@ -5924,3 +5924,82 @@ called done. That is now written against P5-E and P6-C.
   values. It has not been reported as a fault since `MIN_STROKE_LENGTH` landed.
   If it bites at the table, the fix is two constants, not a better single one —
   which is the shape both earlier fixes converged on.
+
+---
+
+## 2026-09-05 — Phase 5 (block E) — key forwarding and the scene-space grid
+
+- DID: `CH.outputKey` — editor → main → output, `{ key }` and nothing else.
+  `OUTPUT_SHORTCUTS` in `electron/ipc.ts` is now the one shortcut table; the
+  output dispatches through `Record<OutputShortcutAction, () => void>`, the
+  editor forwards whatever the table holds, the HUD legend is rendered from it.
+  New `editor/outputKeys.ts` (what the editor forwards) and `editor/grid.ts`
+  (D11's normalized grid), a `SceneGrid` SVG sibling on the preview with a
+  toggle, on by default.
+- MEASURED: 753 → 787 tests (+34), 31 → 33 files. 43/43 goldens unchanged. 17
+  mutations, every one killing at least one test — two survived the first pass
+  and both were real. `npm run typecheck` clean.
+- BLOCKER: -
+- NEXT: P5-F, the control panel.
+
+### The mechanism, stated precisely
+
+The block asked for "one source consumed by both paths". A shared array alone
+would not have been that — both paths could still read it and then do their own
+thing with what they read. What makes the drift unreachable is the dispatch
+type: `SHORTCUT_HANDLERS` in `src/output/main.ts` is a
+`Record<OutputShortcutAction, () => void>`, so adding a row to
+`OUTPUT_SHORTCUTS` **stops the build** until the output grows a handler for it.
+The editor never needs a corresponding change, because it asks the table which
+keys exist rather than listing them. The three source-level tests
+(`outputKeys.test.ts`, "one table, and no second list to drift from it") are the
+belt to that brace: they fail if either file starts comparing a key against a
+hardcoded letter again.
+
+Key identity crosses, never an action id. The editor does not know what `h`
+does and has no reason to — the output decides what a key means at exactly one
+place, whether the key arrived from its own window or from the other one.
+
+### Two mutations survived, and both were telling the truth
+
+`M9` replaced the grid's `Math.abs(quarters / 4 - at) < 1e-9` with `===` and
+killed nothing. The tolerance was there because `i / divisions` is a float and
+"5/20 is not exactly 0.25" — which is simply false. A quarter line exists only
+when `divisions` is `4m`, and `m / 4m` is the correctly-rounded form of an
+exactly-representable quotient, so it lands on 0.25 for every `m`. The test
+written to justify the tolerance (`gridLines(20)`) was passing on a premise that
+does not hold, which is the "test that cannot fail" the working rules warn
+about, wearing a comment that made it look load-bearing. The tolerance is gone
+and the test now sweeps `[4, 8, 12, 20, 100]` against exact comparison.
+
+`M16` typed the HUD legend out by hand instead of rendering it from the table
+and killed nothing, because the test asserted `hud.ts` *contains the string*
+`OUTPUT_SHORTCUTS` — which the import line satisfies on its own. A source test
+that a mutation walks through is worse than no test: it reads as coverage of the
+exact property being broken. Replaced with a behavioural check that the legend
+equals what the table produces.
+
+Same shape as P5-D's threshold faults, in a different costume: a value or a
+check that looks load-bearing, pinned by a test that cannot tell whether it is.
+The mutation pass is what found both, and it found them in ten minutes.
+
+### `SHORTCUT` — what was not built
+
+The forwarded key is not acknowledged. The editor sends and does not learn
+whether the output acted, so an operator pressing `h` with the output window
+closed gets silence rather than a message. `param:set` has `param:recv` for
+exactly this and the pattern was right there, but the ack exists to measure
+transport latency and a shortcut has no latency question — adding one would be a
+second round-trip protocol carrying nothing anybody reads. The output logs
+`[key] 'h' forwarded from the editor`, which is where a diagnosis would start
+anyway. Revisit only if the operator reports a key that seems to do nothing.
+
+### `IDEAS`
+
+- The grid is fixed at eight divisions. `GRID_DIVISIONS` is one constant and
+  `gridLines` already takes the count as an argument, so an operator-facing
+  choice is a dropdown and no new logic — but nobody has asked for one, and
+  P5-D's lesson is that a number gets tuned once someone uses it at the
+  projector's real size. Leave it until Gate 5's table session says otherwise.
+- `POINT_HIT_RADIUS` (carried out of P5-D) is still open and still for that
+  session.

@@ -104,10 +104,116 @@ export const CH = {
    * because it owns the post-warmup clock every other timestamp is on.
    */
   provoke: 'run:provoke',
+  /**
+   * P5-E. editor -> main -> output: one output-window shortcut, by key identity.
+   *
+   * The projector display runs `cursor: none` and is usually not the focused
+   * window, so the operator cannot press `h` at it without first clicking a
+   * display where the pointer is invisible. This channel is the way the editor
+   * presses it for them.
+   *
+   * **Key identity and nothing else** (I-7). The payload is `{ key }` — one
+   * character out of `OUTPUT_SHORTCUTS`. It is not a command, not an action id
+   * and not a state: the output decides what a key means, exactly as it does
+   * when the key is pressed at its own window, so the two paths cannot come to
+   * disagree about what `h` does.
+   */
+  outputKey: 'output:key',
 } as const;
 
 /** SPEC.md I-8: hierarchical key. Registered in `parameters.ts` in Phase 1 (§0.2). */
 export const PARAM_TEST_PATTERN_SPEED = 'debug.testPattern.speed';
+
+/**
+ * P5-E. The output window's shortcuts, as ONE table.
+ *
+ * Two paths can fire one of these — the output window's own `keydown`
+ * listener, and the editor forwarding over `CH.outputKey` — and this array is
+ * the only place either one learns what the keys are. The editor forwards
+ * whatever is in it; the output dispatches through a
+ * `Record<OutputShortcutAction, () => void>`, so a row added here fails to
+ * compile until the output has a handler for it.
+ *
+ * That is the mechanism the block asked for rather than a guard: there is no
+ * state in which one path knows a key the other does not, because neither path
+ * holds a list of its own to fall out of step with.
+ *
+ * Keys are lowercase; matching is case-insensitive, so shift-h works at either
+ * window as it always has.
+ */
+export const OUTPUT_SHORTCUTS = [
+  { key: 'h', action: 'hud', label: 'HUD' },
+  { key: 'r', action: 'resetMetrics', label: 'reset metrics window' },
+  { key: 'k', action: 'probeK', label: 'k probe' },
+] as const;
+
+export type OutputShortcut = (typeof OUTPUT_SHORTCUTS)[number];
+export type OutputShortcutKey = OutputShortcut['key'];
+/** What the output DOES. Never crosses IPC — the wire carries the key (I-7). */
+export type OutputShortcutAction = OutputShortcut['action'];
+
+/**
+ * The shortcut a keystroke names, or null.
+ *
+ * Case-insensitive, so shift-H works. Named keys fall out on their own — no
+ * `length` guard, because `'Enter'.toLowerCase()` is in the table exactly as
+ * often as `'q'` is, and a guard that can never be the reason for a `null` is
+ * a branch nothing can test.
+ */
+export function outputShortcutFor(key: string): OutputShortcut | null {
+  const lower = key.toLowerCase();
+  return OUTPUT_SHORTCUTS.find((s) => s.key === lower) ?? null;
+}
+
+/** Key identity, and deliberately nothing else. */
+export interface OutputKeyPress {
+  key: OutputShortcutKey;
+}
+
+/** A payload that did not come from a build this one understands. */
+export class OutputKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OutputKeyError';
+  }
+}
+
+/**
+ * The validation boundary for `CH.outputKey`, on the receiving side.
+ *
+ * Returns a FRESH object carrying `key` alone. Anything else the sender
+ * attached — including something that would fail the I-7 guard — is not
+ * copied, so "the channel carries key identity only" is a property of this
+ * function rather than a promise made by the sender.
+ *
+ * An unrecognised key is REFUSED and named, not ignored: a key this build has
+ * no handler for means the message came from one that does, and the project
+ * settled at P5-A that an unknown enum value is refused while float drift is
+ * clamped.
+ */
+export function canonicalizeOutputKeyPress(v: unknown): OutputKeyPress {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new OutputKeyError(`output key press: expected an object, got ${describe(v)}`);
+  }
+  const key = (v as { key?: unknown }).key;
+  if (typeof key !== 'string') {
+    throw new OutputKeyError(`output key press: key must be a string, got ${describe(key)}`);
+  }
+  const shortcut = outputShortcutFor(key);
+  if (!shortcut) {
+    throw new OutputKeyError(
+      `output key press: unknown shortcut "${key}" — this build knows ` +
+        OUTPUT_SHORTCUTS.map((s) => s.key).join(', '),
+    );
+  }
+  return { key: shortcut.key };
+}
+
+function describe(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'an array';
+  return typeof v;
+}
 
 /**
  * The scene, unvalidated. Typed as `unknown` on purpose: this module is

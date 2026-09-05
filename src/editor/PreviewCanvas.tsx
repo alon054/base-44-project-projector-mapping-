@@ -64,6 +64,7 @@ import {
   type NormalizedPoint,
 } from './interaction';
 import type { BlendMode } from '../core/layer';
+import { gridLines, type GridWeight } from './grid';
 
 export const PREVIEW_SIZE = { width: 480, height: 270 } as const;
 
@@ -218,6 +219,14 @@ function RegionSurface({
   const [placeKind, setPlaceKind] = useState<ProceduralKind>('rect');
   /** P5-D. The paths drawn so far plus the one being drawn, and the pointer. */
   const [tool, setTool] = useState<'region' | 'path'>('region');
+  /**
+   * D11. On by default: the mental model is meant to be right from the start,
+   * not corrected after the first placement lands somewhere surprising. It is
+   * `useState` here for the same reason selection is — there is no field on
+   * `Scene` for it, so it cannot be serialized, cannot cross IPC and cannot
+   * reach the output.
+   */
+  const [showGrid, setShowGrid] = useState(true);
   const [session, setSession] = useState<PathSession>(emptyPathSession());
   const [hover, setHover] = useState<NormalizedPoint | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
@@ -397,6 +406,8 @@ function RegionSurface({
           style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           aria-hidden
         >
+          {/* First child, so everything else draws over it. */}
+          {showGrid && <SceneGrid px={px} py={py} />}
           {tool === 'region' && outline && (
             <g
               transform={
@@ -471,6 +482,14 @@ function RegionSurface({
           <option value="region">region</option>
           <option value="path">path</option>
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#8b939b' }}>
+          <input
+            type="checkbox"
+            checked={showGrid}
+            onChange={(e) => setShowGrid(e.currentTarget.checked)}
+          />
+          grid
+        </label>
         <label htmlFor="place-kind" style={{ color: '#8b939b' }}>
           draw
         </label>
@@ -550,6 +569,77 @@ const SELECT_STYLE: React.CSSProperties = {
   background: '#15181b',
   color: 'inherit',
   font: '11px/1.2 inherit',
+};
+
+/**
+ * D11's scene-space grid, drawn under everything else.
+ *
+ * Structurally unreachable from the projector: this is an SVG sibling of the
+ * preview canvas, in a file `src/output/main.ts` and `src/golden/main.ts` do not
+ * import — the same shape that keeps the selection overlay off the wall, and
+ * asserted by the import-graph test in `sceneEdit.test.ts`. There is no flag
+ * anywhere saying the grid should not be composited, because there is no path
+ * along which it could be.
+ *
+ * Every coordinate comes from `gridLines`, normalized; `px`/`py` are the only
+ * multiplication by a pixel size in the whole overlay (I-1).
+ */
+function SceneGrid({
+  px,
+  py,
+}: {
+  px: (v: number) => number;
+  py: (v: number) => number;
+}): React.JSX.Element {
+  return (
+    <g>
+      {/* The frame edge itself — the boundary the normalized coordinates mean.
+          Inset by half a stroke so it is not clipped by the canvas edge. */}
+      <rect
+        x={0.5}
+        y={0.5}
+        width={px(1) - 1}
+        height={py(1) - 1}
+        fill="none"
+        stroke={GRID_STROKE.major}
+        strokeWidth={1}
+      />
+      {gridLines().map((l) =>
+        l.axis === 'x' ? (
+          <line
+            key={`x${l.at}`}
+            x1={px(l.at)}
+            y1={0}
+            x2={px(l.at)}
+            y2={py(1)}
+            stroke={GRID_STROKE[l.weight]}
+            strokeWidth={1}
+          />
+        ) : (
+          <line
+            key={`y${l.at}`}
+            x1={0}
+            y1={py(l.at)}
+            x2={px(1)}
+            y2={py(l.at)}
+            stroke={GRID_STROKE[l.weight]}
+            strokeWidth={1}
+          />
+        ),
+      )}
+    </g>
+  );
+}
+
+/**
+ * Faint on purpose. The grid is a reference the operator reads when they look
+ * for it; content and the selection outline have to stay the brightest things
+ * on the preview or the overlay has made the tool harder to use.
+ */
+const GRID_STROKE: Record<GridWeight | 'major', string> = {
+  centre: 'rgba(64,224,255,0.26)',
+  major: 'rgba(255,255,255,0.16)',
+  minor: 'rgba(255,255,255,0.07)',
 };
 
 /**
