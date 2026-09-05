@@ -5031,3 +5031,60 @@ properties, rather than loosened into one that says less.
 - **The transform in the registry** — the question above, filed not answered.
 - **A live-follow drag**, which needs a diffing compositor. Named here so that if
   the demo rehearsal says the snap reads badly, the cost is already known.
+
+## 2026-09-05 — Phase 5 (block B) — the operator's table pass on P5-B
+
+- DID: No code. Operator ran the four hand checks on P5-B and reports all four
+  pass. `CHECKLIST.md` updated: the three gesture/projector lines and the
+  outline line are `[x]`, and the two task lines that were waiting on a mouse
+  are closed.
+- MEASURED: nothing new. **631 tests / 29 files, 630 pass; 43/43 goldens**,
+  carried from the block entry above. **The texture count's two numbers were
+  not captured** — see below.
+- BLOCKER: **P5-B is still `[~]`, not `[x]`.** Its fourth Done-when line —
+  "`npm test` green with the count recorded" — is not green. The failure is
+  `specVersion.test.ts` and it predates the block, but the line is the line.
+- NEXT: resolve `specVersion.test.ts`, which flips P5-B to `[x]`. Then P5-C.
+
+### `MEASURED` — the texture count is a verdict, not a figure, and is labelled so
+
+The condition reads "HUD texture count returns to its pre-add value after a
+delete — **record both numbers**". What came back is that it returned. That is
+the verdict the condition asks about and it is not the evidence the condition
+asks for.
+
+Recorded this way rather than as a clean pass because Gate 4 set the precedent
+in this log three entries ago: the sixth condition's reaction was "recorded as a
+**summary**, labelled weaker than the quote the condition asked for". Same
+species, same treatment. The numbers are two readings of the `gpu tex N` line in
+the editor's metrics mirror and cost nothing to take on the next launch; until
+they are taken, this row says what it actually knows.
+
+### `INVARIANT-TENSION` — a block cannot be `[x]` while one of its own gate lines is `[!]`
+
+Three of P5-B's four Done-when lines are now checked on the table. The fourth is
+`npm test` green, and the suite is 630/631 for a reason that has nothing to do
+with pointer interaction: session 3's v4 rewrite renamed `## 1. Revision
+history` to `## 1. What it is` and dropped the revision section, so
+`specVersion.test.ts` slices an empty string and finds no version block.
+
+The tempting move is to mark P5-B `[x]` on the grounds that the red test is not
+the block's. It is refused here, because `CLAUDE.md`'s one tracker rule is
+"never mark `[x]` before the check actually passed" and the check is `npm test`,
+not `npm test excluding the parts another session broke`. A block that closes
+over a red suite teaches the next block that the suite is advisory.
+
+Two ways out, and they are not equivalent:
+
+1. **Re-point `specVersion.test.ts`.** A code change, inside this session's
+   reach. But v4 has *no* revision history anywhere, so the test's second
+   assertion — header agrees with §1 — has no subject left. Re-pointing it means
+   reducing it to "the header states a version", which is the drift check B1
+   built as a mechanism, weakened back into the shape that let the drift happen.
+2. **Restore a revision block to `SPEC.md`.** The spec is read-only to this
+   session, so this route is a `SPEC-CHANGE-PROPOSED` entry and a stop. It keeps
+   the check at full strength and it costs the operator an edit.
+
+Route 2 preserves a mechanism that has already caught one real drift; route 1
+spends it to turn a checkbox green. Stated rather than chosen, because the spec
+is the operator's document.
