@@ -234,7 +234,16 @@ function send(win: BrowserWindow | null, channel: string, payload: unknown): voi
 // ---------------------------------------------------------------------------
 // Windows
 // ---------------------------------------------------------------------------
-function createEditorWindow(): void {
+/**
+ * Idempotent: returns the live editor window, creating it if there is none.
+ *
+ * This is `ensure`, not `create`, because `openOutputWindow` calls it as its
+ * own precondition — see the note there. A second call on a live editor must
+ * be a no-op, or the precondition would close the operator's window every time
+ * the output display changed.
+ */
+function ensureEditorWindow(): BrowserWindow {
+  if (editorWin && !editorWin.isDestroyed()) return editorWin;
   const saved = loadSettings().editorBounds;
   editorWin = new BrowserWindow({
     width: saved?.width ?? 1180,
@@ -265,9 +274,37 @@ function createEditorWindow(): void {
 
   forwardConsole(editorWin, 'editor');
   void editorWin.loadURL(rendererUrl('editor'));
+  return editorWin;
+}
+
+/**
+ * The only path that brings up a fresh pair of windows.
+ *
+ * ORDER IS LOAD-BEARING, AND IT IS NOT ENFORCED HERE. The output window runs
+ * unsandboxed (see `openOutputWindow`) and the editor sandboxed, and a mixed
+ * configuration is order-dependent on this build — measured 2026-09-05, three
+ * runs out of three: sandboxed editor first then unsandboxed output works;
+ * unsandboxed output first makes the output window fail to load with
+ * `ERR_FAILED (-2)` and kills the process with `SIGTRAP`.
+ *
+ * A comment and a guard would leave the wrong order reachable and dying six
+ * months from now under someone reordering these two lines for an unrelated
+ * reason. So the dependency is expressed as a CALL rather than as a
+ * convention: `openOutputWindow` establishes its own precondition by calling
+ * `ensureEditorWindow` first. Swapping the two lines below changes nothing,
+ * and there is no ordering left to get wrong. A fix that ships as an edit
+ * comes back; a fix that ships as a mechanism does not.
+ */
+function createWindows(why: string): void {
+  ensureEditorWindow();
+  openOutputWindow(why);
 }
 
 function openOutputWindow(why: string): void {
+  // The precondition, not a courtesy: this window is unsandboxed and must
+  // never be the first window the process creates. Idempotent, so a reopen
+  // under a live editor costs one destroyed-check. See `createWindows`.
+  ensureEditorWindow();
   console.log(`[trace] openOutputWindow(${why}) windows=${BrowserWindow.getAllWindows().length}`);
   if (outputWin && !outputWin.isDestroyed()) {
     outputWin.destroy();
@@ -320,7 +357,26 @@ function openOutputWindow(why: string): void {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // §10 row 11. `performance.now()` is coarsened to 100 us in a renderer,
+      // and §4's metric 2 times a render duration of tens of microseconds — so
+      // every M2 p99 this project has recorded, at four gates and across six
+      // load steps, is a ceiling reported in whole quanta rather than a
+      // measurement. A sandboxed preload gets a stripped `process` with no
+      // `hrtime`; an unsandboxed one has it. Measured 2026-09-05:
+      // **41 ns resolution against 100 us, ~2,400x finer, at 12 ns per call**
+      // — 0.00007% of N, and `selectClockSource` measures it again at startup
+      // before committing to it (A14).
+      //
+      // Dropped on the OUTPUT window only. `contextIsolation` stays on and
+      // `nodeIntegration` stays off, so the renderer still has no direct Node
+      // access and still reaches main only through the preload's explicit
+      // bridge; what changes is that the preload itself runs with a real
+      // `process`. This window loads local application content and nothing
+      // else. The editor keeps its sandbox.
+      //
+      // This flag is why `openOutputWindow` calls `ensureEditorWindow` — see
+      // `createWindows`.
+      sandbox: false,
       backgroundThrottling: false,
     },
   });
@@ -774,14 +830,12 @@ function logMetricsPeriodically(m: MetricsReport): void {
 app.whenReady().then(() => {
   wireIpc();
   watchDisplays();
-  createEditorWindow();
-  openOutputWindow('whenReady');
+  createWindows('whenReady');
 
   app.on('activate', () => {
     console.log(`[trace] activate windows=${BrowserWindow.getAllWindows().length}`);
     if (BrowserWindow.getAllWindows().length === 0) {
-      createEditorWindow();
-      openOutputWindow('activate');
+      createWindows('activate');
     }
   });
 });

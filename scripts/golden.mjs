@@ -12,7 +12,8 @@
  *                                  that says why — SPEC.md §8.1)
  */
 import { app, BrowserWindow } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +21,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = join(ROOT, 'dist', 'golden', 'index.html');
 const GOLDENS = join(ROOT, 'test', 'golden', 'frames.json');
 const PREVIEW_DIR = join(ROOT, '.golden-preview');
+const PREV_DIR = join(PREVIEW_DIR, 'prev');
+const MANIFEST = 'manifest.json';
 
 const BLESS = process.argv.includes('--bless');
 
@@ -46,6 +49,94 @@ const MAX_LAYOUT_DELTA = 0.08;
 function fail(msg) {
   process.stderr.write(`${msg}\n`);
   app.exit(1);
+}
+
+/**
+ * Keep the previous run's previews beside the current ones.
+ *
+ * `.golden-preview` is overwritten by every run, so the run that *finds* a
+ * drift destroys the evidence of it on its way past: 2026-09-05's font
+ * investigation could establish only that three frames differed, never how,
+ * because the pre-update pixels no longer existed anywhere. Rotating one
+ * generation costs a directory rename and turns the next drift from an
+ * inference into a diff:
+ *
+ *   npx electron scripts/font-probe.mjs --diff .golden-preview/prev .golden-preview
+ *
+ * The manifest records which run produced the baseline — case count, OS build,
+ * and whether the run that wrote it finished. A partial baseline is announced
+ * rather than passed off as a good one (A9/A14: the instrument reports on
+ * itself), and an interrupted run never overwrites a complete generation with
+ * its fragments.
+ */
+function rotatePreviews() {
+  const pngs = existsSync(PREVIEW_DIR) ? readdirSync(PREVIEW_DIR).filter((f) => f.endsWith('.png')) : [];
+  if (pngs.length === 0) {
+    mkdirSync(PREVIEW_DIR, { recursive: true });
+    process.stdout.write('previews: nothing to rotate — this run writes the first baseline\n');
+    return;
+  }
+
+  const priorFile = join(PREVIEW_DIR, MANIFEST);
+  let prior = null;
+  if (existsSync(priorFile)) {
+    try {
+      prior = JSON.parse(readFileSync(priorFile, 'utf8'));
+    } catch {
+      prior = null;
+    }
+  }
+
+  // An interrupted run leaves a partial set with no manifest. Keeping the older
+  // complete generation is strictly more useful than replacing it with
+  // fragments, so that case declines to rotate and says so.
+  if (!prior?.complete && existsSync(join(PREV_DIR, MANIFEST))) {
+    process.stdout.write(
+      `previews: NOT rotated — the ${pngs.length} png(s) in ${PREVIEW_DIR} carry no complete manifest ` +
+        '(an interrupted run?), so the existing prev/ generation is kept rather than overwritten with fragments\n',
+    );
+    for (const f of pngs) rmSync(join(PREVIEW_DIR, f));
+    rmSync(priorFile, { force: true });
+    return;
+  }
+
+  rmSync(PREV_DIR, { recursive: true, force: true });
+  mkdirSync(PREV_DIR, { recursive: true });
+  for (const f of pngs) renameSync(join(PREVIEW_DIR, f), join(PREV_DIR, f));
+  if (existsSync(priorFile)) renameSync(priorFile, join(PREV_DIR, MANIFEST));
+
+  process.stdout.write(
+    `previews rotated: ${pngs.length} png(s) -> ${PREV_DIR}` +
+      (prior
+        ? `  [from ${prior.at}, ${prior.platform} ${prior.osRelease}]`
+        : '  [no manifest — the provenance of that baseline is unknown]') +
+      '\n',
+  );
+}
+
+/**
+ * Written only after every preview has landed, so its presence is what marks a
+ * generation complete. Records the OS build, which is the fact the 26.2 →
+ * 26.6.2 boundary needed and did not have.
+ */
+function writePreviewManifest(names) {
+  writeFileSync(
+    join(PREVIEW_DIR, MANIFEST),
+    `${JSON.stringify(
+      {
+        at: new Date().toISOString(),
+        cases: names.length,
+        complete: true,
+        platform: process.platform,
+        osRelease: release(),
+        electron: process.versions.electron,
+        chrome: process.versions.chrome,
+        names,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 app.whenReady().then(async () => {
@@ -75,7 +166,7 @@ app.whenReady().then(async () => {
     return;
   }
 
-  mkdirSync(PREVIEW_DIR, { recursive: true });
+  rotatePreviews();
   const observed = {};
   for (const r of results) {
     observed[r.name] = {
@@ -101,6 +192,7 @@ app.whenReady().then(async () => {
       Buffer.from(r.png.split(',')[1], 'base64'),
     );
   }
+  writePreviewManifest(results.map((r) => r.name));
 
   const problems = [];
   for (const r of results) {
@@ -176,7 +268,13 @@ app.whenReady().then(async () => {
       );
     }
     if (got.hash !== exp.hash) {
-      problems.push(`${name}: hash ${got.hash} != golden ${exp.hash} (preview: ${PREVIEW_DIR}/${name}.png)`);
+      problems.push(
+        `${name}: hash ${got.hash} != golden ${exp.hash} (preview: ${PREVIEW_DIR}/${name}.png)` +
+          (existsSync(join(PREV_DIR, `${name.replace(/[^\w.@-]/g, '_')}.png`))
+            ? `\n    the previous run's pixels are in ${PREV_DIR} — diff them with:\n` +
+              '      npx electron scripts/font-probe.mjs --diff .golden-preview/prev .golden-preview'
+            : `\n    no previous generation in ${PREV_DIR}, so this drift can be seen but not localised`),
+      );
     }
     if (got.meanLuminance !== exp.meanLuminance) {
       problems.push(`${name}: mean luminance ${got.meanLuminance} != golden ${exp.meanLuminance}`);
@@ -332,7 +430,11 @@ app.whenReady().then(async () => {
   }
 
   process.stdout.write(
-    `${Object.keys(expected).length} golden frames match. previews in ${PREVIEW_DIR}\n`,
+    `${Object.keys(expected).length} golden frames match. previews in ${PREVIEW_DIR}\n` +
+      (existsSync(join(PREV_DIR, MANIFEST))
+        ? '  previous run retained in .golden-preview/prev — diff with:\n' +
+          '    npx electron scripts/font-probe.mjs --diff .golden-preview/prev .golden-preview\n'
+        : ''),
   );
   app.exit(0);
 });
