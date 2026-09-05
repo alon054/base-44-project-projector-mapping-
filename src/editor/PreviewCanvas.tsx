@@ -330,7 +330,7 @@ function RegionSurface({
     // mark the next.
     if (tool === 'path' && e.key === 'Enter') {
       e.preventDefault();
-      setSession(commitActivePath);
+      setSession((prev) => commitActivePath(prev, aspect));
       return;
     }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;

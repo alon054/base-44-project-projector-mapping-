@@ -80,6 +80,31 @@ export const POINT_HIT_RADIUS = 0.02;
 export const FREEHAND_MIN_STEP = 0.0015;
 
 /**
+ * How long the run a press drew must be, in square space, before it counts as a
+ * stroke rather than as a click with a slip in it.
+ *
+ * **`CLICK_SLOP` cannot answer this on its own, and raising it further is a
+ * losing game.** The slop is spent mid-press, on the first sample that leaves
+ * it, with no knowledge of what the press will go on to do — so any press that
+ * clears it produces at least two points. Push it to 8 px and a 9 px slip still
+ * doubles the point; push it to 20 px and a deliberate short stroke stops
+ * working. The threshold is being asked a question it does not have the
+ * information to answer.
+ *
+ * At release the whole run is in hand, so the question becomes easy: did the
+ * pointer travel far enough to have drawn something. 0.05 is 24 px on the
+ * 480-wide preview, and it is set from what the tool is FOR rather than from
+ * hand physiology: corners are clicked and long runs are dragged, so nobody
+ * draws a 24 px freehand stroke on purpose — they click twice, which is less
+ * work. The cost of being wrong in that direction is one extra click; the cost
+ * of being wrong in the other is the fault the operator photographed.
+ *
+ * **Length along the run, not displacement**, so a stroke that doubles back to
+ * where it started still counts as one.
+ */
+export const MIN_STROKE_LENGTH = 0.05;
+
+/**
  * The tolerance a freehand run is simplified with on release, in normalized
  * units (D19: "simplified to tens of points on release").
  *
@@ -366,7 +391,7 @@ export function pathToolUp(
 ): PathToolState {
   if (!state.press) return state;
   const moved = p ? pathToolMove(state, p, aspect, shift) : state;
-  return endPress(moved);
+  return endPress(moved, aspect);
 }
 
 /**
@@ -377,12 +402,26 @@ export function pathToolUp(
  * of it is one copy too many — Enter pressed with the pointer still down has to
  * take the same path a normal release does or it would commit a raw stroke.
  */
-function endPress(state: PathToolState): PathToolState {
+function endPress(state: PathToolState, aspect: number): PathToolState {
   const settled = state.press?.kind === 'draw' ? state.press : null;
   if (!settled || !settled.freehand) return { ...state, press: null };
 
   const head = state.points.slice(0, settled.startIndex);
   const run = state.points.slice(settled.startIndex);
+
+  // The press latched, but the run is too short to have been drawn on purpose:
+  // it was a click with a slip in it. Keep the point where the pointer went
+  // down and drop the rest — one click, one point.
+  //
+  // This is the decision `CLICK_SLOP` could not make. The latch happens on the
+  // first sample past the slop, knowing nothing about what follows; this runs
+  // at release with the whole run available, which is strictly more
+  // information. The slop still exists, and now does the only job it can do
+  // honestly — deciding when to START recording samples.
+  if (runLength(run, aspect) < MIN_STROKE_LENGTH) {
+    return { ...state, points: [...head, run[0]!], press: null };
+  }
+
   const simplified = simplifyPoints(run, FREEHAND_TOLERANCE);
   return {
     ...state,
@@ -390,6 +429,13 @@ function endPress(state: PathToolState): PathToolState {
     press: null,
     lastSimplification: { before: run.length, after: simplified.length },
   };
+}
+
+/** Length along a run, in square space. Not displacement — see MIN_STROKE_LENGTH. */
+function runLength(run: readonly PathPoint[], aspect: number): number {
+  let total = 0;
+  for (let i = 1; i < run.length; i++) total += squareDistance(run[i - 1]!, run[i]!, aspect);
+  return total;
 }
 
 /**
@@ -406,9 +452,9 @@ function endPress(state: PathToolState): PathToolState {
  * stray click means "never mind", not "commit this". The press still ends, so
  * the key is never inert.
  */
-export function finishPath(state: PathToolState): PathToolState {
+export function finishPath(state: PathToolState, aspect: number): PathToolState {
   if (state.finished) return state;
-  const ended = state.press ? endPress(state) : state;
+  const ended = state.press ? endPress(state, aspect) : state;
   if (ended.points.length < 2) return ended;
   return { ...ended, finished: true };
 }
@@ -657,8 +703,8 @@ export function nextPathId(paths: readonly Path[]): string {
  * its press ended and its points intact — `finishPath` decides that, so "what
  * counts as a path" is answered in exactly one place.
  */
-export function commitActivePath(session: PathSession): PathSession {
-  const finished = finishPath(session.active);
+export function commitActivePath(session: PathSession, aspect: number): PathSession {
+  const finished = finishPath(session.active, aspect);
   if (!finished.finished) return { ...session, active: finished };
   const paths = [...session.paths, pathToolPath(finished, nextPathId(session.paths))];
   return { ...session, paths, active: emptyPathTool() };

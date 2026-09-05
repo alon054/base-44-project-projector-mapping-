@@ -18,6 +18,7 @@ import { aspectOf } from '../editor/interaction';
 import {
   CLICK_SLOP,
   CLOSE_MIN_POINTS,
+  MIN_STROKE_LENGTH,
   FREEHAND_MIN_STEP,
   FREEHAND_TOLERANCE,
   POINT_HIT_RADIUS,
@@ -164,20 +165,58 @@ describe('D19 — one tool, no mode switch', () => {
 
   it('a press past CLICK_SLOP latches into a stroke and stays one', () => {
     let s = pathToolDown(emptyPathTool(), { x: 0.4, y: 0.4 }, WIDE);
-    s = pathToolMove(s, { x: 0.4 + CLICK_SLOP * 2, y: 0.4 }, WIDE);
-    // Back to where it started. A stroke that returns home is still a stroke.
+    s = pathToolMove(s, { x: 0.4 + MIN_STROKE_LENGTH, y: 0.4 }, WIDE);
+    // Back to where it started. A stroke that returns home is still a stroke —
+    // which is why MIN_STROKE_LENGTH measures length ALONG the run and not
+    // displacement, since this one ends where it began.
     s = pathToolMove(s, { x: 0.4, y: 0.4 }, WIDE);
     s = pathToolUp(s, { x: 0.4, y: 0.4 }, WIDE);
     expect(s.points.length).toBeGreaterThan(1);
     expect(s.lastSimplification).not.toBeNull();
   });
 
+  it('a click that SLIPS past the slop is still one point — the fault from the wall', () => {
+    // The operator's screenshot: one click at a corner, two points on screen.
+    // A press that clears CLICK_SLOP produces at least two points no matter
+    // where the slop is set, so the release decides instead, with the whole run
+    // in hand. Every one of these is a slip, not a stroke.
+    for (const px of [8, 12, 18, 23]) {
+      let s = click(emptyPathTool(), 0.2, 0.5);
+      const corner = { x: 0.6, y: 0.5 };
+      s = pathToolDown(s, corner, WIDE);
+      // Several samples, the way a real pointer stream delivers a slip.
+      for (let i = 1; i <= 4; i++) {
+        s = pathToolMove(s, { x: corner.x + (px * i) / 4 / 480, y: corner.y }, WIDE);
+      }
+      s = pathToolUp(s, { x: corner.x + px / 480, y: corner.y }, WIDE);
+      expect(s.points).toHaveLength(2);
+      expect(s.points[1]).toEqual(corner);
+      expect(s.lastSimplification).toBeNull();
+    }
+  });
+
+  it('a stroke just over the minimum is still a stroke', () => {
+    let s = pathToolDown(emptyPathTool(), { x: 0.3, y: 0.5 }, WIDE);
+    for (let i = 1; i <= 8; i++) {
+      s = pathToolMove(s, { x: 0.3 + (MIN_STROKE_LENGTH * 1.5 * i) / 8, y: 0.5 }, WIDE);
+    }
+    s = pathToolUp(s, { x: 0.3 + MIN_STROKE_LENGTH * 1.5, y: 0.5 }, WIDE);
+    expect(s.points.length).toBeGreaterThan(1);
+    expect(s.lastSimplification).not.toBeNull();
+  });
+
   it('a stroke that pauses mid-drag does not finish as a click', () => {
     let s = pathToolDown(emptyPathTool(), { x: 0.4, y: 0.4 }, WIDE);
-    s = pathToolMove(s, { x: 0.4 + CLICK_SLOP * 2, y: 0.4 }, WIDE);
+    // Long enough to be a real stroke, so this tests the latch and not the
+    // release-time length rule.
+    s = pathToolMove(s, { x: 0.4 + MIN_STROKE_LENGTH * 2, y: 0.4 }, WIDE);
     // A sample under FREEHAND_MIN_STEP from the last one: dropped as a point,
     // but the latch it would otherwise clear is what this asserts.
-    s = pathToolMove(s, { x: 0.4 + CLICK_SLOP * 2 + FREEHAND_MIN_STEP / 2, y: 0.4 }, WIDE);
+    s = pathToolMove(
+      s,
+      { x: 0.4 + MIN_STROKE_LENGTH * 2 + FREEHAND_MIN_STEP / 2, y: 0.4 },
+      WIDE,
+    );
     expect((s.press as { freehand: boolean }).freehand).toBe(true);
     expect(pathToolUp(s, null, WIDE).lastSimplification).not.toBeNull();
   });
@@ -265,7 +304,7 @@ describe('Enter finishes an open path at the last point marked', () => {
 
   it('ends the path where it stands, without joining it into a loop', () => {
     const open = run();
-    const done = finishPath(open);
+    const done = finishPath(open, WIDE);
     expect(done.finished).toBe(true);
     // The three assertions that matter to the operator who asked for this: the
     // points are the ones they marked, the last one is still the last one, and
@@ -277,7 +316,7 @@ describe('Enter finishes an open path at the last point marked', () => {
   });
 
   it('a finished path takes no more points', () => {
-    const done = finishPath(run());
+    const done = finishPath(run(), WIDE);
     expect(click(done, 0.9, 0.9)).toEqual(done);
     expect(pathToolDown(done, { x: 0.2, y: 0.3 }, WIDE)).toBe(done);
     // Including the one press that is not an append: it cannot be closed either.
@@ -288,7 +327,7 @@ describe('Enter finishes an open path at the last point marked', () => {
     const stroke = corneredStroke();
     let s = pathToolDown(emptyPathTool(), stroke[0]!, WIDE);
     for (let i = 1; i < stroke.length; i++) s = pathToolMove(s, stroke[i]!, WIDE);
-    const done = finishPath(s);
+    const done = finishPath(s, WIDE);
     expect(done.press).toBeNull();
     expect(done.finished).toBe(true);
     // The same counts a normal release produces — one rule, not two.
@@ -298,15 +337,15 @@ describe('Enter finishes an open path at the last point marked', () => {
 
   it('a single stray click cannot be finished — one point is not a path', () => {
     const one = click(emptyPathTool(), 0.4, 0.4);
-    const after = finishPath(one);
+    const after = finishPath(one, WIDE);
     expect(after.finished).toBe(false);
     expect(after.points).toHaveLength(1);
-    expect(finishPath(emptyPathTool()).finished).toBe(false);
+    expect(finishPath(emptyPathTool(), WIDE).finished).toBe(false);
   });
 
   it('finishing twice is the same as finishing once', () => {
-    const done = finishPath(run());
-    expect(finishPath(done)).toBe(done);
+    const done = finishPath(run(), WIDE);
+    expect(finishPath(done, WIDE)).toBe(done);
   });
 
   it('a closed path is not automatically finished, and vice versa', () => {
@@ -317,11 +356,11 @@ describe('Enter finishes an open path at the last point marked', () => {
     tri = click(tri, 0.8, 0.2);
     tri = click(tri, 0.5, 0.8);
     expect(pathToolDown(tri, { x: 0.2, y: 0.2 }, WIDE).finished).toBe(false);
-    expect(finishPath(tri).closed).toBe(false);
+    expect(finishPath(tri, WIDE).closed).toBe(false);
   });
 
   it('the preview stops offering a next point once the path is finished', () => {
-    const done = finishPath(run());
+    const done = finishPath(run(), WIDE);
     expect(previewPoints(done, { x: 0.95, y: 0.95 }, WIDE)).toEqual(done.points);
   });
 });
@@ -593,12 +632,12 @@ describe('more than one path', () => {
   };
 
   it('banks the finished path and hands back an empty one to draw into', () => {
-    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    const one = commitActivePath(draw(emptyPathSession(), 0.1), WIDE);
     expect(one.paths).toHaveLength(1);
     expect(one.active).toEqual(emptyPathTool());
 
     // The point of the whole exercise: a second path, without losing the first.
-    const two = commitActivePath(draw(one, 0.5));
+    const two = commitActivePath(draw(one, 0.5), WIDE);
     expect(two.paths).toHaveLength(2);
     expect(two.paths.map((q) => q.id)).toEqual(['path-1', 'path-2']);
     expect(two.paths[0]!.points[0]).toEqual({ x: 0.1, y: 0.3 });
@@ -607,16 +646,16 @@ describe('more than one path', () => {
 
   it('a banked path is open unless it was closed, and keeps its own flag', () => {
     let s = draw(emptyPathSession(), 0.1);
-    s = commitActivePath(s);
+    s = commitActivePath(s, WIDE);
     let closed = draw(s, 0.5);
     closed = { ...closed, active: pathToolDown(closed.active, { x: 0.5, y: 0.3 }, WIDE) };
-    const both = commitActivePath(closed);
+    const both = commitActivePath(closed, WIDE);
     expect(both.paths.map((q) => q.closed)).toEqual([false, true]);
   });
 
   it('banks a path a face at a time — three of them, which is a box', () => {
     let s = emptyPathSession();
-    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x));
+    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x), WIDE);
     expect(s.paths).toHaveLength(3);
     expect(s.paths.map((q) => q.id)).toEqual(['path-1', 'path-2', 'path-3']);
     // Every one of them a real path as far as `core/paths.ts` is concerned.
@@ -625,7 +664,7 @@ describe('more than one path', () => {
 
   it('an unfinishable path is not banked, and is not lost either', () => {
     const stray = { ...emptyPathSession(), active: click(emptyPathTool(), 0.4, 0.4) };
-    const after = commitActivePath(stray);
+    const after = commitActivePath(stray, WIDE);
     expect(after.paths).toEqual([]);
     expect(after.active.points).toHaveLength(1);
     expect(after.active.finished).toBe(false);
@@ -633,16 +672,16 @@ describe('more than one path', () => {
 
   it('ids fill the first free slot, so a delete and a redraw cannot collide', () => {
     let s = emptyPathSession();
-    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x));
+    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x), WIDE);
     const gap = removePath(s, 'path-2');
     expect(gap.paths.map((q) => q.id)).toEqual(['path-1', 'path-3']);
     expect(nextPathId(gap.paths)).toBe('path-2');
-    const refilled = commitActivePath(draw(gap, 0.2));
+    const refilled = commitActivePath(draw(gap, 0.2), WIDE);
     expect(refilled.paths.map((q) => q.id).sort()).toEqual(['path-1', 'path-2', 'path-3']);
   });
 
   it('discarding the active path leaves the banked ones alone', () => {
-    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    const one = commitActivePath(draw(emptyPathSession(), 0.1), WIDE);
     const mid = draw(one, 0.5);
     const after = discardActivePath(mid);
     expect(after.paths).toEqual(one.paths);
@@ -650,14 +689,14 @@ describe('more than one path', () => {
   });
 
   it('removing an id nothing has is a no-op, not a throw', () => {
-    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    const one = commitActivePath(draw(emptyPathSession(), 0.1), WIDE);
     expect(removePath(one, 'path-9')).toBe(one);
   });
 
   it('banking does not mutate the session it was given', () => {
     const before = draw(emptyPathSession(), 0.1);
     const copy = JSON.parse(JSON.stringify(before)) as PathSession;
-    commitActivePath(before);
+    commitActivePath(before, WIDE);
     discardActivePath(before);
     removePath(before, 'path-1');
     expect(before).toEqual(copy);
@@ -672,7 +711,7 @@ describe('picking and moving a whole path, the way a region is picked and moved'
     a = click(a, x + 0.2, y + 0.2);
     a = click(a, x, y + 0.2);
     a = pathToolDown(a, { x, y }, WIDE); // the first point closes it
-    return commitActivePath({ ...session, active: a });
+    return commitActivePath({ ...session, active: a }, WIDE);
   };
 
   const two = (): PathSession => face(face(emptyPathSession(), 0.1, 0.1), 0.5, 0.5);
@@ -696,7 +735,7 @@ describe('picking and moving a whole path, the way a region is picked and moved'
     let a = click(emptyPathTool(), 0.2, 0.2);
     a = click(a, 0.8, 0.2);
     a = click(a, 0.8, 0.8);
-    const s = commitActivePath({ ...emptyPathSession(), active: a });
+    const s = commitActivePath({ ...emptyPathSession(), active: a }, WIDE);
     expect(pathContains(s.paths[0]!, { x: 0.6, y: 0.4 })).toBe(false);
     expect(pathHitTest(s.paths, { x: 0.6, y: 0.4 }, WIDE)).toBeNull();
     expect(pathHitTest(s.paths, { x: 0.6, y: 0.2 }, WIDE)).toBe('path-1');
@@ -811,7 +850,7 @@ describe('picking and moving a whole path, the way a region is picked and moved'
 
   it('banking a path does not disturb the selection or a move', () => {
     const s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
-    const banked = commitActivePath({ ...s, active: emptyPathTool() });
+    const banked = commitActivePath({ ...s, active: emptyPathTool() }, WIDE);
     expect(banked.selectedId).toBe('path-2');
     expect(banked.move?.id).toBe('path-2');
   });

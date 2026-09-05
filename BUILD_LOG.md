@@ -5796,3 +5796,77 @@ rather than done silently.
   right, and says nothing about which actions should exist.** For P5-E and P6-C,
   five minutes of use before the block is called done is worth more than the
   next ten tests.
+
+---
+
+## 2026-09-05 — Phase 5 (block D, follow-up 4) — one click is one point, decided at release
+
+- DID: `MIN_STROKE_LENGTH` added to `src/editor/pathTool.ts`. A press whose run
+  is shorter than it collapses back to the single point the pointer went down
+  on. `endPress` and `finishPath` and `commitActivePath` take `aspect` so the
+  measure is square-space like every other threshold in the file.
+- MEASURED: tests 751 → 753, all green. Goldens 43/43. Mutations 27 → 30, every
+  one kills at least one test.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid.
+
+### `MEASURED` — raising the threshold was the wrong shape of fix
+
+The operator sent a screenshot: one click at a turn, two points on the wall.
+This is the **second** report of the same fault, after `CLICK_SLOP` was raised
+from 0.006 to 0.015 an hour earlier. The first fix made it rarer and could not
+make it go away, and the reason is structural rather than a matter of degree:
+
+| slip | vs CLICK_SLOP 0.015 | points produced |
+|---|---|---|
+| 3 px | under | 1 |
+| 6 px | under | 1 |
+| **8 px** | **over** | **2** |
+| 12 px | over | 2 |
+| 40 px | over | 2+ |
+
+**Any press that clears the slop produces at least two points, wherever the slop
+is set.** Push it to 8 px and a 9 px slip doubles the point; push it to 20 px
+and a deliberate short stroke stops working. The slop is spent mid-press, on the
+first sample that leaves it, knowing nothing about what the press will go on to
+do. It was being asked a question it does not have the information to answer.
+
+At release the whole run is in hand and the question is easy: did the pointer
+travel far enough to have drawn something. A run under `MIN_STROKE_LENGTH`
+collapses to the point the pointer went **down** on — one click, one point. The
+slop still exists and now does the only job it can do honestly: deciding when to
+start recording samples.
+
+### `DECISION` — 0.05 is set from what the tool is for, not from the hand
+
+24 px on the 480-wide preview, which is large for a threshold of this kind. The
+reasoning is not physiological. This tool clicks corners and drags long runs;
+**nobody draws a 24 px freehand stroke on purpose**, because clicking twice is
+less work. Being wrong in that direction costs one extra click. Being wrong in
+the other direction is the fault the operator has now photographed.
+
+Length is measured **along the run**, not as displacement, so a stroke that
+doubles back to where it began still counts as one. M30 measures displacement
+instead and the out-and-back test fails.
+
+### The general lesson, stated because it has now cost four rounds
+
+Both fixes to this fault were tuning until the third. **A threshold that is
+being asked to decide something it cannot see is not fixed by moving it**, and
+the tell is that the first adjustment made the symptom rarer rather than absent.
+Raising 0.006 to 0.015 was not wasted — the old value was independently wrong,
+and it uncovered the point-follows-pointer behaviour it had been hiding — but it
+was a smaller fix than the report deserved, and the operator had to file the same
+bug twice to get the right one.
+
+`SPEC.md` §3's own phrasing is the pattern that applies: clamp what drifts,
+refuse what is wrong. The slop clamps drift. The doubled point was not drift.
+
+### `MEASURED` — mutation checks, the three new ones
+
+| mutation | tests failed |
+|---|---|
+| M28 the release-time collapse removed — the slop decides alone again | 1 |
+| M29 the collapse keeps the last point instead of the one pressed | 1 |
+| M30 stroke length measured as displacement, not along the run | 1 |
+| *(M1–M27 re-run; all 30 kill something, `pathTool.ts` byte-identical after)* | 0 of 30 |
