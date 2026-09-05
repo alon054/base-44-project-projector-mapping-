@@ -268,8 +268,15 @@ export function pointAtTime(path: Path, timeMs: number, periodSeconds: number): 
  * determinism claim rests on the exact order of these floating-point
  * operations: the same input and tolerance must produce the same output on
  * every run, and "same" here means bit-identical, not visually alike.
+ *
+ * Exported for the editor's hit test (P5-D), which asks the same question of
+ * the same segments and would otherwise carry a second copy of this arithmetic.
+ * One implementation, two callers: the simplifier decides what to drop and the
+ * hit test decides what the pointer is over, and neither can drift from the
+ * other's idea of where a segment is. The caller handles anisotropy by scaling
+ * its inputs — this stays a pure normalized-space measure.
  */
-function perpendicularDistance(p: PathPoint, a: PathPoint, b: PathPoint): number {
+export function perpendicularDistance(p: PathPoint, a: PathPoint, b: PathPoint): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   if (dx === 0 && dy === 0) return distance(p, a);

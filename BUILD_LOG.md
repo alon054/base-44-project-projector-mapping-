@@ -5672,3 +5672,127 @@ test fails.
   specific one wants the path to be selectable, which wants a hit test against a
   polyline — that is P6-C's job and it needs the surface tree behind it, so it
   is not built here.
+
+---
+
+## 2026-09-05 — Phase 5 (block D, follow-up 3) — the click slop, and paths that pick up
+
+- DID: `CLICK_SLOP` 0.006 → 0.015, and a click now lands where the pointer went
+  **down** rather than where it lifted. `pathHitTest` / `pathContains` /
+  `distanceToPath` / `pathBounds` / `translatePath` added, with
+  `pathSessionDown` / `Move` / `Up` / `deleteFromPathSession` as the ordering
+  layer; `PathSession` gained `selectedId` and `move`. `perpendicularDistance`
+  exported from `core/paths.ts` — one word, no behaviour change. `PreviewCanvas`
+  delegates its pointer handlers to the session and draws the selected path in
+  amber with its points.
+- MEASURED: tests 736 → 751, all green. Goldens 43/43. Mutations 18 → 27, every
+  one kills at least one test. `CLICK_SLOP` in pixels: 2.9 px → 7.2 px on the
+  480-wide preview.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid.
+
+### `MEASURED` — the doubled point was a threshold below the noise floor
+
+The operator: "when i the first turn in the path if its a strong turn it add to
+points at onces even if i clicked once."
+
+`CLICK_SLOP` was 0.006 of the frame. On the 480-wide preview that is **2.9 px**.
+Every desktop platform separates a click from a drag at four to five pixels,
+because that is roughly how far a hand moves while pressing a button. So a
+perfectly ordinary click travelled past the threshold, the press latched into a
+stroke, and a second point was appended at the pointer.
+
+"At a sharp turn" is the diagnosis, not a coincidence. The hand is already
+moving toward the next point as the button comes up, and a direction change is
+where the release sits furthest from the press. The bug was reachable
+everywhere and *reliable* there.
+
+| CLICK_SLOP | px on the 480 preview | px at 1280 |
+|---|---|---|
+| 0.006 (shipped) | 2.9 | 7.7 |
+| **0.015 (now)** | **7.2** | **19.2** |
+
+### `DECISION` — and then the click had to stop moving
+
+Raising the threshold broke two pinned counts, and the reason was worth more
+than the fix. Below the slop the appended point *followed the pointer*, on the
+theory that a click should land where the finger lifted. At 2.9 px that was
+invisible. At 7.2 px it is the difference between aiming at a corner and getting
+it, and aiming at a corner and getting a point seven pixels away.
+
+It was also silently costing every freehand stroke its first seven pixels: the
+origin point was dragged along to wherever the press finally latched, so the
+stroke started at the latch rather than at the press.
+
+Now the pre-latch branch does nothing at all. It is simpler, it is correct in
+both cases, and **it is the second time this block that a threshold and a
+behaviour that were tuned against each other both turned out wrong** — the
+first was `CLICK_SLOP` measured from the placed point. A number chosen small
+enough to hide a behaviour is not evidence the behaviour is right.
+
+### `DECISION` — draw-versus-select needs no mode either
+
+Both drawing and selecting want the same button, which is the conflict D19's
+"no mode switch" does not cover. Resolved by ordering, in `pathSessionDown`,
+the way `beginGesture` resolves handle-versus-body:
+
+1. a path is in progress → every press goes to it;
+2. a banked path under the pointer → select and move it, one press;
+3. empty space → deselect, start a new path.
+
+What decides is whether a path is in progress — a fact about the session, not a
+switch the operator sets — and Enter, which banks the active path, is the same
+key that ends rule 1. So the operator's hands already know how to get from
+drawing to selecting: finish the path.
+
+A closed path is hit **anywhere inside it**, not only on its outline. A marked
+face of a box is a region on the wall; asking the operator to click its
+one-pixel edge would be an affordance that exists on paper.
+
+### `DECISION` — the offset is clamped, never the points
+
+`translatePath` clamps the *offset* by the path's bounding box. Clamping each
+point on its own deforms the shape the instant it touches an edge: the leading
+points stop while the trailing ones keep coming, and a square dragged off the
+frame comes back a trapezoid. A region survives that because it has a width and
+a height to be restored from; a path is only its points, so a deformation is
+permanent. M22 clamps per point and two tests fail.
+
+### `MEASURED` — mutation checks, the nine new ones
+
+| mutation | tests failed |
+|---|---|
+| M19 `CLICK_SLOP` back to its sub-pixel value | 3 |
+| M20 a click below the slop follows the pointer again | 6 |
+| M21 `pathSessionDown` lets a click select while a path is being drawn | 1 |
+| M22 `translatePath` clamps each point instead of the offset | 2 |
+| M23 the move accumulates from the last pointer rather than the grab | 1 |
+| M24 `pathHitTest` walks forwards, so the oldest path wins an overlap | 1 |
+| M25 an open path is treated as having an inside | 1 |
+| M26 the hit test measures distance without aspect | 1 |
+| M27 `removePath` leaves a dangling selection behind | 2 |
+| *(M1–M18 re-run; all 27 kill something, `pathTool.ts` byte-identical after)* | 0 of 27 |
+
+### `DECISION` — `perpendicularDistance` exported rather than copied
+
+The hit test asks the same question of the same segments the simplifier does.
+A second copy of point-to-segment distance in the editor would be exactly the
+class of fault this project has been bitten by — two implementations of one
+rule, drifting apart quietly. The export is one word and changes no behaviour;
+`core/paths.ts` stays a pure normalized-space measure and the caller pre-scales
+its inputs into square space, so anisotropy remains the editor's problem.
+
+This is an edit to a passed phase's file. It is additive and it is logged here
+rather than done silently.
+
+### `IDEAS`
+
+- Selecting a path shows its points but does not yet let them be dragged — the
+  point-level edit still belongs to the path being drawn. Re-opening a banked
+  path for editing is one call (`selectedId` → back into `active`) and is not
+  built because nothing has asked for it yet.
+- Four follow-ups now, all from the operator using the thing. The pattern is
+  stable enough to name: **the headless suite proves the actions that exist are
+  right, and says nothing about which actions should exist.** For P5-E and P6-C,
+  five minutes of use before the block is called done is worth more than the
+  next ten tests.

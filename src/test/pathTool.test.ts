@@ -25,10 +25,19 @@ import {
   constrainToRightAngle,
   deletePointAt,
   discardActivePath,
+  deleteFromPathSession,
+  distanceToPath,
   emptyPathSession,
   finishPath,
   nextPathId,
+  pathBounds,
+  pathContains,
+  pathHitTest,
+  pathSessionDown,
+  pathSessionMove,
+  pathSessionUp,
   removePath,
+  translatePath,
   emptyPathTool,
   pathToolDown,
   pathToolMove,
@@ -131,9 +140,26 @@ describe('D19 — one tool, no mode switch', () => {
     s = pathToolMove(s, { x: start.x + CLICK_SLOP / 2, y: start.y }, WIDE);
     s = pathToolUp(s, { x: start.x + CLICK_SLOP / 2, y: start.y }, WIDE);
     expect(s.points).toHaveLength(1);
-    // It lands where the finger LIFTED, which is where the operator was looking.
-    expect(s.points[0]!.x).toBeCloseTo(start.x + CLICK_SLOP / 2, 12);
+    // It lands where the finger FELL. The operator aimed at that spot before
+    // pressing; the drift between press and release is the hand, not intent.
+    expect(s.points[0]).toEqual(start);
     expect(s.lastSimplification).toBeNull();
+  });
+
+  it('the slop is a real drag threshold, not a sub-pixel one', () => {
+    // The bug the operator hit: one click at a sharp corner produced two
+    // points, because the hand is already moving toward the next point as the
+    // button comes up and the old 0.006 slop was 2.9 px on the preview.
+    // Asserted in pixels, because that is the only frame this can be judged in.
+    expect(CLICK_SLOP * 480).toBeGreaterThan(5);
+    const corner = { x: 0.5, y: 0.5 };
+    let s = click(emptyPathTool(), 0.2, 0.5);
+    // A click that drifts 4 px while the button is down — normal hand noise.
+    s = pathToolDown(s, corner, WIDE);
+    s = pathToolMove(s, { x: corner.x + 4 / 480, y: corner.y + 3 / 270 }, WIDE);
+    s = pathToolUp(s, { x: corner.x + 4 / 480, y: corner.y + 3 / 270 }, WIDE);
+    expect(s.points).toHaveLength(2);
+    expect(s.points[1]).toEqual(corner);
   });
 
   it('a press past CLICK_SLOP latches into a stroke and stays one', () => {
@@ -398,14 +424,21 @@ describe('freehand simplification on release', () => {
     // FREEHAND_MIN_STEP and was never recorded, which is the tool declining to
     // hand the simplifier a zero-length segment to think about.
     expect(samples).toHaveLength(401);
-    expect({ before, after }).toEqual({ before: 400, after: 17 });
+    expect({ before, after }).toEqual({ before: 398, after: 19 });
   });
 
   it('reports the counts of the run it simplified, not of the whole path', () => {
     let s = click(emptyPathTool(), 0.05, 0.05);
     s = click(s, 0.1, 0.05);
     const after = drag(s, corneredStroke());
-    expect(after.lastSimplification!.before).toBe(corneredStroke().length);
+    // The same run drawn alone reports the same `before` — so the number is the
+    // run's, not the path's, which would be two larger. Asserted against the
+    // tool rather than against the fixture length, because the tool
+    // legitimately records fewer samples than were delivered: the ones under
+    // CLICK_SLOP and the ones under FREEHAND_MIN_STEP never become points.
+    const alone = drag(emptyPathTool(), corneredStroke());
+    expect(after.lastSimplification!.before).toBe(alone.lastSimplification!.before);
+    expect(after.lastSimplification!.before).toBeLessThan(corneredStroke().length);
     expect(after.points).toHaveLength(2 + after.lastSimplification!.after);
   });
 
@@ -628,5 +661,158 @@ describe('more than one path', () => {
     discardActivePath(before);
     removePath(before, 'path-1');
     expect(before).toEqual(copy);
+  });
+});
+
+describe('picking and moving a whole path, the way a region is picked and moved', () => {
+  /** A closed square face, banked. */
+  const face = (session: PathSession, x: number, y: number): PathSession => {
+    let a = click(session.active, x, y);
+    a = click(a, x + 0.2, y);
+    a = click(a, x + 0.2, y + 0.2);
+    a = click(a, x, y + 0.2);
+    a = pathToolDown(a, { x, y }, WIDE); // the first point closes it
+    return commitActivePath({ ...session, active: a });
+  };
+
+  const two = (): PathSession => face(face(emptyPathSession(), 0.1, 0.1), 0.5, 0.5);
+
+  it('a click on a banked path selects it and starts moving it in one press', () => {
+    const s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    expect(s.selectedId).toBe('path-2');
+    expect(s.move?.id).toBe('path-2');
+  });
+
+  it('a closed path is hit anywhere inside it, not only on its edge', () => {
+    const s = two();
+    expect(pathHitTest(s.paths, { x: 0.6, y: 0.6 }, WIDE)).toBe('path-2'); // inside
+    expect(pathHitTest(s.paths, { x: 0.5, y: 0.6 }, WIDE)).toBe('path-2'); // on the edge
+    expect(pathHitTest(s.paths, { x: 0.85, y: 0.6 }, WIDE)).toBeNull(); // outside
+    expect(pathContains(s.paths[1]!, { x: 0.6, y: 0.6 })).toBe(true);
+    expect(pathContains(s.paths[1]!, { x: 0.85, y: 0.6 })).toBe(false);
+  });
+
+  it('an open path has no inside — it is hit on its line only', () => {
+    let a = click(emptyPathTool(), 0.2, 0.2);
+    a = click(a, 0.8, 0.2);
+    a = click(a, 0.8, 0.8);
+    const s = commitActivePath({ ...emptyPathSession(), active: a });
+    expect(pathContains(s.paths[0]!, { x: 0.6, y: 0.4 })).toBe(false);
+    expect(pathHitTest(s.paths, { x: 0.6, y: 0.4 }, WIDE)).toBeNull();
+    expect(pathHitTest(s.paths, { x: 0.6, y: 0.2 }, WIDE)).toBe('path-1');
+  });
+
+  it('the most recently drawn path wins an overlap', () => {
+    const stacked = face(face(emptyPathSession(), 0.3, 0.3), 0.3, 0.3);
+    expect(pathHitTest(stacked.paths, { x: 0.4, y: 0.4 }, WIDE)).toBe('path-2');
+  });
+
+  it('dragging moves every point by the same offset and keeps the shape', () => {
+    let s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    const before = s.paths[1]!.points.map((q) => ({ ...q }));
+    s = pathSessionMove(s, { x: 0.7, y: 0.65 }, WIDE);
+    const after = s.paths[1]!.points;
+    for (let i = 0; i < after.length; i++) {
+      expect(after[i]!.x).toBeCloseTo(before[i]!.x + 0.1, 12);
+      expect(after[i]!.y).toBeCloseTo(before[i]!.y + 0.05, 12);
+    }
+    // The other path did not move.
+    expect(s.paths[0]!.points).toEqual(two().paths[0]!.points);
+    s = pathSessionUp(s, { x: 0.7, y: 0.65 }, WIDE);
+    expect(s.move).toBeNull();
+    expect(s.selectedId).toBe('path-2');
+  });
+
+  it('a move is derived from the grab, so it does not accumulate or drift', () => {
+    const start = two();
+    let wandering = pathSessionDown(start, { x: 0.6, y: 0.6 }, WIDE);
+    for (const q of [0.62, 0.7, 0.55, 0.9, 0.66]) {
+      wandering = pathSessionMove(wandering, { x: q, y: 0.6 }, WIDE);
+    }
+    wandering = pathSessionMove(wandering, { x: 0.66, y: 0.62 }, WIDE);
+
+    let direct = pathSessionDown(start, { x: 0.6, y: 0.6 }, WIDE);
+    direct = pathSessionMove(direct, { x: 0.66, y: 0.62 }, WIDE);
+    expect(wandering.paths[1]!.points).toEqual(direct.paths[1]!.points);
+  });
+
+  it('a path dragged off the frame stops whole, and is not deformed', () => {
+    let s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    s = pathSessionMove(s, { x: 2, y: 2 }, WIDE);
+    const b = pathBounds(s.paths[1]!)!;
+    expect(b.maxX).toBeCloseTo(1, 12);
+    expect(b.maxY).toBeCloseTo(1, 12);
+    // Still a 0.2 square: the offset was clamped, not the points.
+    expect(b.maxX - b.minX).toBeCloseTo(0.2, 12);
+    expect(b.maxY - b.minY).toBeCloseTo(0.2, 12);
+  });
+
+  it('translatePath clamps the offset rather than each point', () => {
+    const square4 = two().paths[0]!;
+    const shoved = translatePath(square4, -5, 0);
+    expect(pathBounds(shoved)!.minX).toBeCloseTo(0, 12);
+    expect(pathBounds(shoved)!.maxX - pathBounds(shoved)!.minX).toBeCloseTo(0.2, 12);
+  });
+
+  it('a path removed mid-move ends the move instead of resurrecting itself', () => {
+    let s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    s = removePath(s, 'path-2');
+    expect(s.move).toBeNull();
+    expect(s.selectedId).toBeNull();
+    // And a move arriving late finds nothing rather than throwing.
+    expect(pathSessionMove(s, { x: 0.7, y: 0.7 }, WIDE).paths).toHaveLength(1);
+  });
+
+  it('a path in progress owns the pointer — a click cannot select out from under it', () => {
+    let s = two();
+    s = { ...s, active: click(s.active, 0.9, 0.9) };
+    // 0.6,0.6 is inside path-2, but a path is being drawn, so it is a point.
+    const next = pathSessionDown(s, { x: 0.6, y: 0.6 }, WIDE);
+    expect(next.selectedId).toBeNull();
+    expect(next.active.points).toHaveLength(2);
+    expect(next.active.points[1]).toEqual({ x: 0.6, y: 0.6 });
+  });
+
+  it('a click on empty space deselects and starts a new path', () => {
+    let s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    s = pathSessionUp(s, { x: 0.6, y: 0.6 }, WIDE);
+    expect(s.selectedId).toBe('path-2');
+    const away = pathSessionDown(s, { x: 0.9, y: 0.2 }, WIDE);
+    expect(away.selectedId).toBeNull();
+    expect(away.active.points).toEqual([{ x: 0.9, y: 0.2 }]);
+  });
+
+  it('Delete removes the selected path only when nothing is being drawn', () => {
+    let s = pathSessionUp(pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE), null, WIDE);
+    expect(s.selectedId).toBe('path-2');
+    // A path in progress owns the key: the point goes, the selection stays.
+    const drawing = { ...s, active: click(emptyPathTool(), 0.9, 0.9) };
+    const afterPoint = deleteFromPathSession(drawing, null, WIDE);
+    expect(afterPoint.paths).toHaveLength(2);
+    expect(afterPoint.active.points).toHaveLength(0);
+    // Nothing in progress: the selected path goes.
+    s = deleteFromPathSession(s, null, WIDE);
+    expect(s.paths.map((q) => q.id)).toEqual(['path-1']);
+    expect(s.selectedId).toBeNull();
+    // And with nothing selected it is a no-op rather than a surprise.
+    expect(deleteFromPathSession(s, null, WIDE)).toBe(s);
+  });
+
+  it('distance is measured on the canvas, not in raw normalized units', () => {
+    const s = two();
+    const path = s.paths[0]!; // a square with its top edge at y = 0.1
+    // The same pixel distance above the edge in each axis: 0.01 of the width,
+    // and 0.01 * aspect of the height. Both must read as the same distance.
+    const across = distanceToPath(path, { x: 0.05, y: 0.1 }, WIDE);
+    const above = distanceToPath(path, { x: 0.2, y: 0.1 - 0.05 * WIDE }, WIDE);
+    expect(across).toBeCloseTo(0.05, 12);
+    expect(above).toBeCloseTo(0.05, 12);
+  });
+
+  it('banking a path does not disturb the selection or a move', () => {
+    const s = pathSessionDown(two(), { x: 0.6, y: 0.6 }, WIDE);
+    const banked = commitActivePath({ ...s, active: emptyPathTool() });
+    expect(banked.selectedId).toBe('path-2');
+    expect(banked.move?.id).toBe('path-2');
   });
 });

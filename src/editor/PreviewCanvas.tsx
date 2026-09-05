@@ -39,13 +39,12 @@ import {
 import {
   CLOSE_MIN_POINTS,
   commitActivePath,
-  deletePointAt,
+  deleteFromPathSession,
   discardActivePath,
   emptyPathSession,
-  pathToolDown,
-  pathToolMove,
-  pathToolUp,
-  pointIndexAt,
+  pathSessionDown,
+  pathSessionMove,
+  pathSessionUp,
   previewPoints,
   removePath,
   wouldClose,
@@ -249,7 +248,7 @@ function RegionSurface({
     surface.current?.focus();
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
-      setSession((prev) => ({ ...prev, active: pathToolDown(prev.active, p, aspect, e.shiftKey) }));
+      setSession((prev) => pathSessionDown(prev, p, aspect, e.shiftKey));
       return;
     }
     const start = beginGesture(scene, selectedId, p, aspect);
@@ -263,12 +262,7 @@ function RegionSurface({
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
       setHover(p);
-      if (p) {
-        setSession((prev) => ({
-          ...prev,
-          active: pathToolMove(prev.active, p, aspect, e.shiftKey),
-        }));
-      }
+      if (p) setSession((prev) => pathSessionMove(prev, p, aspect, e.shiftKey));
       return;
     }
     if (!gesture || !p) return;
@@ -295,7 +289,7 @@ function RegionSurface({
     if (tool === 'path') {
       const p = pointOf(e);
       // Simplification happens inside this call, once, on release (D19).
-      setSession((prev) => ({ ...prev, active: pathToolUp(prev.active, p, aspect, e.shiftKey) }));
+      setSession((prev) => pathSessionUp(prev, p, aspect, e.shiftKey));
       return;
     }
     const g = gesture;
@@ -344,10 +338,7 @@ function RegionSurface({
       e.preventDefault();
       // The point under the pointer, or the last one placed when the pointer is
       // nowhere near a point — which is what "undo that click" means here.
-      setSession((prev) => {
-        const at = hover ? pointIndexAt(prev.active, hover, aspect) : null;
-        return { ...prev, active: deletePointAt(prev.active, at ?? prev.active.points.length - 1) };
-      });
+      setSession((prev) => deleteFromPathSession(prev, hover, aspect));
       return;
     }
     if (selectedId === null || !setScene) return;
@@ -429,7 +420,13 @@ function RegionSurface({
           {tool === 'path' && (
             <>
               {session.paths.map((q) => (
-                <BankedPath key={q.id} path={q} px={px} py={py} />
+                <BankedPath
+                  key={q.id}
+                  path={q}
+                  selected={q.id === session.selectedId}
+                  px={px}
+                  py={py}
+                />
               ))}
               <PathOverlay
                 state={session.active}
@@ -503,15 +500,17 @@ function RegionSurface({
               type="button"
               onClick={() =>
                 setSession((prev) =>
-                  prev.paths.length === 0
-                    ? prev
-                    : removePath(prev, prev.paths[prev.paths.length - 1]!.id),
+                  prev.selectedId !== null
+                    ? removePath(prev, prev.selectedId)
+                    : prev.paths.length === 0
+                      ? prev
+                      : removePath(prev, prev.paths[prev.paths.length - 1]!.id),
                 )
               }
               disabled={session.paths.length === 0}
               style={SELECT_STYLE}
             >
-              undo last
+              {session.selectedId === null ? 'undo last' : `delete ${session.selectedId}`}
             </button>
             <span>
               {`${session.paths.length} path${session.paths.length === 1 ? '' : 's'} · ` +
@@ -522,7 +521,9 @@ function RegionSurface({
                 (session.active.lastSimplification
                   ? ` · last stroke ${session.active.lastSimplification.before} → ${session.active.lastSimplification.after}`
                   : '') +
-                ' — click adds, drag draws, shift squares, Delete removes' +
+                (session.selectedId !== null && session.active.points.length === 0
+                  ? ` · ${session.selectedId} selected — drag to move it, Delete removes it`
+                  : ' — click adds, drag draws, shift squares, Delete removes') +
                 (session.active.points.length >= 2 ? ', Enter finishes and starts the next' : '') +
                 (session.active.points.length >= CLOSE_MIN_POINTS && !session.active.closed
                   ? ', first point closes it into a loop'
@@ -558,19 +559,46 @@ const SELECT_STYLE: React.CSSProperties = {
  */
 function BankedPath({
   path,
+  selected,
   px,
   py,
 }: {
   path: Path;
+  selected: boolean;
   px: (v: number) => number;
   py: (v: number) => number;
 }): React.JSX.Element | null {
   if (path.points.length < 2) return null;
   const d = path.points.map((q) => `${px(q.x)},${py(q.y)}`).join(' ');
-  return path.closed ? (
-    <polygon points={d} fill="rgba(64,224,255,0.06)" stroke="#2f7f92" strokeWidth={1} />
-  ) : (
-    <polyline points={d} fill="none" stroke="#2f7f92" strokeWidth={1} />
+  const stroke = selected ? '#ffd166' : '#2f7f92';
+  return (
+    <g>
+      {path.closed ? (
+        <polygon
+          points={d}
+          fill={selected ? 'rgba(255,209,102,0.12)' : 'rgba(64,224,255,0.06)'}
+          stroke={stroke}
+          strokeWidth={selected ? 1.5 : 1}
+        />
+      ) : (
+        <polyline points={d} fill="none" stroke={stroke} strokeWidth={selected ? 1.5 : 1} />
+      )}
+      {/* Points shown on the selected path only, so "this is the one that will
+          move" is visible without every banked path sprouting handles. */}
+      {selected &&
+        path.points.map((q, i) => (
+          <rect
+            key={i}
+            x={px(q.x) - 2.5}
+            y={py(q.y) - 2.5}
+            width={5}
+            height={5}
+            fill={stroke}
+            stroke="#2a1f06"
+            strokeWidth={1}
+          />
+        ))}
+    </g>
   );
 }
 

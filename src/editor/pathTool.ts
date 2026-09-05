@@ -32,7 +32,14 @@
  * bug the mouse reports as "it feels wrong".
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { createPath, simplifyPoints, type Path, type PathPoint } from '../core/paths';
+import {
+  createPath,
+  pathSegments,
+  perpendicularDistance,
+  simplifyPoints,
+  type Path,
+  type PathPoint,
+} from '../core/paths';
 import type { NormalizedPoint } from './interaction';
 
 /**
@@ -40,12 +47,23 @@ import type { NormalizedPoint } from './interaction';
  * measured in the square space.
  *
  * This is the whole of "no mode switch": above it the press is a stroke, below
- * it a click, and nothing else in the file asks the question. It is generous on
- * purpose — a hand on a trackpad moves a few thousandths of the frame while
- * clicking, and a click that silently became a two-point stroke would leave a
- * duplicate point the operator has to find and delete.
+ * it a click, and nothing else in the file asks the question.
+ *
+ * **It shipped at 0.006 and that was wrong.** 0.006 of the frame is 2.9 px on
+ * the 480-wide preview — below the noise floor of a human click, and well below
+ * the ~5 px every desktop platform uses to separate a click from a drag. The
+ * operator reported one click producing two points at a sharp corner, which is
+ * exactly the shape of this fault: the hand is already moving toward the next
+ * point as the button comes up, so a direction change is where the release
+ * travels furthest from the press. The press then latched into a stroke and
+ * appended a second point at the pointer.
+ *
+ * 0.015 is 7.2 px on the preview — above anything a hand does by accident,
+ * below anything it does on purpose. The number is in normalized units for
+ * I-1's reason and is stated in pixels here because that is the only frame in
+ * which it can be judged.
  */
-export const CLICK_SLOP = 0.006;
+export const CLICK_SLOP = 0.015;
 
 /** Grab-and-close radius for an existing point. Square space, as `handleAt`. */
 export const POINT_HIT_RADIUS = 0.02;
@@ -281,10 +299,9 @@ export function pathToolDown(
  *   ignores `shift`: the constraint is about the angle a point is *placed* at
  *   relative to the one before it, and applying it to a drag would silently
  *   re-anchor a mid-path point to its predecessor.
- * - **Draw** — below `CLICK_SLOP` the appended point simply follows the pointer
- *   (so a click that wobbles lands where the finger lifted, not where it fell);
- *   above it, the press has latched into a stroke and every sample far enough
- *   from the last one is appended.
+ * - **Draw** — below `CLICK_SLOP` nothing happens at all: the point stays where
+ *   it fell. Above it, the press has latched into a stroke and every sample far
+ *   enough from the last one is appended.
  */
 export function pathToolMove(
   state: PathToolState,
@@ -301,17 +318,18 @@ export function pathToolMove(
     return { ...state, points };
   }
 
+  // Below the slop the press is still a click, and **the point does not move**.
+  // It stays where the pointer went down.
+  //
+  // It used to follow the pointer, on the theory that a click lands where the
+  // finger lifted. At a 2.9 px slop that was invisible either way. At a real
+  // 7.2 px slop it is the difference between aiming at a corner and getting it,
+  // and aiming at a corner and getting a point up to seven pixels away — and it
+  // also cost a freehand stroke its first seven pixels, because the origin
+  // point was dragged along to wherever the press finally latched. Doing
+  // nothing here is both the simpler branch and the correct one.
   const freehand = press.freehand || squareDistance(press.origin, p, aspect) > CLICK_SLOP;
-  if (!freehand) {
-    const points = state.points.slice();
-    points[press.startIndex] = placedPoint(
-      { ...state, points: points.slice(0, press.startIndex) },
-      p,
-      aspect,
-      shift,
-    );
-    return { ...state, points };
-  }
+  if (!freehand) return state;
 
   const last = state.points[state.points.length - 1]!;
   if (squareDistance(last, p, aspect) < FREEHAND_MIN_STEP) {
@@ -478,10 +496,139 @@ export interface PathSession {
   paths: Path[];
   /** The one taking pointer input. */
   active: PathToolState;
+  /** The banked path under selection, or null. Editor state, as P5-B's is. */
+  selectedId: string | null;
+  /**
+   * A move in flight. Holds an id and the grab offset — **never a copy of the
+   * path**, which is `interaction.ts`'s ruling and is what makes the move a
+   * function of the current session rather than of a snapshot: a path removed
+   * mid-drag ends the move instead of resurrecting itself.
+   */
+  move: { id: string; grab: NormalizedPoint } | null;
 }
 
 export function emptyPathSession(): PathSession {
-  return { paths: [], active: emptyPathTool() };
+  return { paths: [], active: emptyPathTool(), selectedId: null, move: null };
+}
+
+/** How near a banked path's outline the pointer must be to hit it. Square space. */
+export const PATH_HIT_TOLERANCE = 0.012;
+
+/** A point with y scaled so distances measure what the canvas shows (`handleAt`). */
+function square(p: NormalizedPoint, aspect: number): PathPoint {
+  return { x: p.x, y: p.y / aspect };
+}
+
+/**
+ * Distance from `p` to the nearest point of the path's outline.
+ *
+ * `pathSegments` supplies the segments, so a closed path's closing segment is
+ * hit-testable and an open one's is not — the one place `closed` changes
+ * behaviour stays the one place. `perpendicularDistance` comes from
+ * `core/paths.ts`, the same function the simplifier uses, with both inputs
+ * pre-scaled into square space here: anisotropy is the editor's problem, and
+ * `core/` stays a pure normalized-space measure.
+ */
+export function distanceToPath(path: Path, p: NormalizedPoint, aspect: number): number {
+  const segments = pathSegments(path);
+  if (segments.length === 0) {
+    const only = path.points[0];
+    if (!only) return Infinity;
+    const q = square(only, aspect);
+    const s = square(p, aspect);
+    return Math.hypot(s.x - q.x, s.y - q.y);
+  }
+  let best = Infinity;
+  const s = square(p, aspect);
+  for (const seg of segments) {
+    const d = perpendicularDistance(s, square(seg.a, aspect), square(seg.b, aspect));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Whether `p` falls inside a closed path. Ray casting, half-open on `y` so a
+ * vertex is counted once rather than twice.
+ *
+ * No `aspect`, and that is not an oversight: containment is unchanged by
+ * scaling one axis, so the square-space correction that distance needs would be
+ * arithmetic with no effect. Open paths contain nothing — an outline along one
+ * edge of a box has no inside.
+ */
+export function pathContains(path: Path, p: NormalizedPoint): boolean {
+  if (!path.closed || path.points.length < 3) return false;
+  let inside = false;
+  const pts = path.points;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i]!;
+    const b = pts[j]!;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * The banked path under the pointer, or null.
+ *
+ * Walks backwards, so the most recently drawn path wins an overlap — the same
+ * rule `pointIndexAt` uses, for the same reason. A closed path is hit anywhere
+ * inside it, not only on its outline: a marked face of a box is a region on the
+ * wall, and requiring the operator to click its one-pixel edge would be an
+ * affordance that exists on paper.
+ */
+export function pathHitTest(
+  paths: readonly Path[],
+  p: NormalizedPoint,
+  aspect: number,
+  tolerance: number = PATH_HIT_TOLERANCE,
+): string | null {
+  for (let i = paths.length - 1; i >= 0; i--) {
+    const path = paths[i]!;
+    if (pathContains(path, p) || distanceToPath(path, p, aspect) <= tolerance) return path.id;
+  }
+  return null;
+}
+
+/** The path's bounding box in normalized space, or null when it has no points. */
+export function pathBounds(
+  path: Path,
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const first = path.points[0];
+  if (!first) return null;
+  let minX = first.x;
+  let maxX = first.x;
+  let minY = first.y;
+  let maxY = first.y;
+  for (const q of path.points) {
+    if (q.x < minX) minX = q.x;
+    if (q.x > maxX) maxX = q.x;
+    if (q.y < minY) minY = q.y;
+    if (q.y > maxY) maxY = q.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Move every point of a path by the same offset.
+ *
+ * **The offset is clamped, not the points.** Clamping each point on its own
+ * would deform the shape the moment it touched an edge — the leading points
+ * would stop while the trailing ones kept coming, and a square dragged off the
+ * frame would come back a trapezoid. Clamping the offset by the bounding box
+ * slides the path until it touches the edge and then stops it, whole. This is
+ * the same ruling `setLayerRect` makes for a region and it matters more here,
+ * because a path has no width and height to restore it from.
+ */
+export function translatePath(path: Path, dx: number, dy: number): Path {
+  const b = pathBounds(path);
+  if (!b) return path;
+  const cdx = Math.min(Math.max(dx, -b.minX), 1 - b.maxX);
+  const cdy = Math.min(Math.max(dy, -b.minY), 1 - b.maxY);
+  if (cdx === 0 && cdy === 0) return path;
+  return { ...path, points: path.points.map((q) => ({ x: q.x + cdx, y: q.y + cdy })) };
 }
 
 /**
@@ -514,7 +661,7 @@ export function commitActivePath(session: PathSession): PathSession {
   const finished = finishPath(session.active);
   if (!finished.finished) return { ...session, active: finished };
   const paths = [...session.paths, pathToolPath(finished, nextPathId(session.paths))];
-  return { paths, active: emptyPathTool() };
+  return { ...session, paths, active: emptyPathTool() };
 }
 
 /** Throw away the path being drawn. The banked ones are untouched. */
@@ -529,5 +676,115 @@ export function discardActivePath(session: PathSession): PathSession {
  */
 export function removePath(session: PathSession, id: string): PathSession {
   if (!session.paths.some((q) => q.id === id)) return session;
-  return { ...session, paths: session.paths.filter((q) => q.id !== id) };
+  return {
+    ...session,
+    paths: session.paths.filter((q) => q.id !== id),
+    // A selection and a move that name a path no longer in the list are
+    // dangling references, cleared here rather than checked for at every read.
+    selectedId: session.selectedId === id ? null : session.selectedId,
+    move: session.move?.id === id ? null : session.move,
+  };
+}
+
+/**
+ * Pointer-down on the session. The ordering IS the decision, the way
+ * `beginGesture` and `pathToolDown` are, and it resolves the one real conflict
+ * in having both drawing and selecting on the same button:
+ *
+ *  1. **A path is being drawn** — every press goes to it. Mid-path, a click is
+ *     always the next point, so a stroke that happens to cross a banked path
+ *     cannot select it out from under the operator.
+ *  2. **A banked path under the pointer** — select it and move it, in one
+ *     press. P5-B's ruling, for its reason: two gestures to move an unselected
+ *     thing is the affordance nobody finds.
+ *  3. **Empty space** — deselect and start a new path.
+ *
+ * There is no mode here either. What decides is whether a path is in progress,
+ * which is a fact about the session rather than a switch the operator sets —
+ * and Enter, which banks the active path, is the same key that ends rule 1.
+ */
+export function pathSessionDown(
+  session: PathSession,
+  p: NormalizedPoint,
+  aspect: number,
+  shift = false,
+): PathSession {
+  if (session.active.points.length > 0) {
+    return { ...session, active: pathToolDown(session.active, p, aspect, shift) };
+  }
+  const hit = pathHitTest(session.paths, p, aspect);
+  if (hit !== null) {
+    const path = session.paths.find((q) => q.id === hit)!;
+    const anchor = path.points[0]!;
+    return {
+      ...session,
+      selectedId: hit,
+      move: { id: hit, grab: { x: p.x - anchor.x, y: p.y - anchor.y } },
+    };
+  }
+  return {
+    ...session,
+    selectedId: null,
+    active: pathToolDown(session.active, p, aspect, shift),
+  };
+}
+
+/**
+ * Pointer-move on the session.
+ *
+ * A move in flight translates the whole path; anything else goes to the active
+ * path. The offset is computed from the path's CURRENT first point against the
+ * grab, so nothing accumulates and a move interrupted and resumed lands in the
+ * same place as one that was not.
+ */
+export function pathSessionMove(
+  session: PathSession,
+  p: NormalizedPoint,
+  aspect: number,
+  shift = false,
+): PathSession {
+  const move = session.move;
+  if (move) {
+    const path = session.paths.find((q) => q.id === move.id);
+    if (!path) return { ...session, move: null };
+    const anchor = path.points[0]!;
+    const moved = translatePath(path, p.x - move.grab.x - anchor.x, p.y - move.grab.y - anchor.y);
+    if (moved === path) return session;
+    return { ...session, paths: session.paths.map((q) => (q.id === move.id ? moved : q)) };
+  }
+  return { ...session, active: pathToolMove(session.active, p, aspect, shift) };
+}
+
+/** Pointer-up on the session. Ends a move, or releases the active path's press. */
+export function pathSessionUp(
+  session: PathSession,
+  p: NormalizedPoint | null,
+  aspect: number,
+  shift = false,
+): PathSession {
+  if (session.move) return { ...session, move: null };
+  return { ...session, active: pathToolUp(session.active, p, aspect, shift) };
+}
+
+/**
+ * The Delete key, in the same order pointer-down uses: a path in progress owns
+ * the key and loses a point; otherwise the selected banked path is removed.
+ *
+ * `hover` picks which point goes when a path is in progress — the one under the
+ * pointer, or the last one placed, which is what "undo that click" means.
+ */
+export function deleteFromPathSession(
+  session: PathSession,
+  hover: NormalizedPoint | null,
+  aspect: number,
+): PathSession {
+  if (session.active.points.length > 0) {
+    const at = hover ? pointIndexAt(session.active, hover, aspect) : null;
+    return {
+      ...session,
+      active: deletePointAt(session.active, at ?? session.active.points.length - 1),
+    };
+  }
+  if (session.selectedId === null) return session;
+  return removePath(session, session.selectedId);
 }
