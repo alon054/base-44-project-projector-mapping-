@@ -4689,3 +4689,68 @@ on the belief that the counters were a legitimate high-water mark.
   records focus events with timestamps; what is missing is naming the process
   that took focus, which would have turned a session of guessing into one line.
 
+
+## 2026-09-05 — Phase 5 (session 2, part 2) — Block A: the path primitive, headless
+
+Appended to the same session as the entry above, which ended `NEXT: Block A`.
+Recorded separately rather than by editing that entry, because the log is
+append-only and a `NEXT` line that quietly became a `DID` is a rewritten record.
+
+- DID: **Part 3 Block A complete.** `src/core/paths.ts` (I-17) and its test
+  group, written before any UI.
+- MEASURED: **581 tests / 28 files green** (537 / 27 before; +44). Typecheck
+  clean. Two mutation checks below.
+- BLOCKER: none. **Block B needs a plan confirmed before it starts** — it
+  touches more than three files, which `CLAUDE.md`'s working-style rule puts
+  behind a confirmation.
+- NEXT: **Part 3 Block B — pointer interaction on the preview.** Plan stated to
+  the operator, awaiting confirmation.
+
+**What Block A settled, and the two decisions inside it.**
+
+*Clamped versus refused.* Coordinates are clamped with `clamp01`, which is what
+`layer.ts`'s transform and `scene.ts`'s parallax already do — a point half a
+pixel outside the frame after float drift is not a corrupt scene, and refusing a
+show over it would be I-13 failing at the worst moment. `interpolation` is
+refused unless `linear` (S5), because an unknown value means the file came from
+a build this one does not understand and rendering a curve silently as a
+polyline is a plausible wrong answer (A9). A non-numeric coordinate is refused
+as well: that is not a number out of range, and a point silently at the origin
+is a shape wrong in a way nobody can see. Every refusal names the path, the
+point index and the offending value.
+
+*One flag apart, demonstrated.* Gate 5 asks for this to be shown rather than
+asserted in prose, so the test diffs every field of an open and a closed path
+built from the same points and requires the difference set to be exactly
+`['closed']`, then requires the two JSON strings to be equal after substituting
+the flag. `closed` changes only derived geometry and does so in exactly one
+function, `pathSegments`, so there is one place for the claim to be true.
+
+*No accumulated position anywhere.* `progressAlong` is `phaseAt` re-exported
+rather than reimplemented (I-2, I-16) — two functions turning clock time into a
+normalized position would be two things to keep in agreement. A test walks 90 s
+forward and then asks for an earlier time again, requiring the exact earlier
+answer.
+
+**Mutation checks**, because a new test that cannot fail is not a test:
+
+| mutation | tests failed |
+|---|---|
+| S5's refusal replaced by a silent fallback to `linear` | 2 |
+| a second stored field made to vary with `closed` | 3 |
+| *(both reverted)* | 0 of 44 |
+
+**One test assertion was wrong and the test was fixed, not the code.** The
+stroke fixture's corner sits at (0.5, 0.5005), not (0.5, 0.5): the last point of
+the horizontal run carries the jitter like every other point in it. The
+tolerance is now the jitter amplitude and the reason is written in the test.
+Worth recording because the failure looked at first like a simplifier dropping a
+corner, which is the defect that test exists to catch — the instrument was
+right and the expectation was wrong, which is the opposite of this project's
+usual finding and took a minute to believe.
+
+**Not built, deliberately.** No parameter is introduced, so none is registered
+(I-8) — a route's period arrives with the layer binding that owns it, not with
+the shape. Nothing in `paths.ts` knows about surfaces (§11's order note, §0.2);
+it is the shape primitive alone.
+
