@@ -4376,3 +4376,316 @@ window opens and is unaffected by focus.
 **Two runs discarded for lost focus in two sessions is a pattern**, and this one
 died 1.1 seconds from the end. Carried into the next session as block 1.8.
 
+
+## 2026-09-05 — Phase 5 (session 2) — the OS boundary and the derate measured, hrtime reconciled, row 13's counter fixed
+
+- DID: Part 1 finished — 1.3, 1.6, 1.7, 1.8, 1.9, 1.10. Appended the owed entry
+  for commit `6051526`. Diagnosed three sessions of focus theft as
+  environmental. Four proposals below.
+- MEASURED: **537 tests / 27 files green** (was 524 / 27), **43 of 43 goldens**
+  with all three exclusion controls tripping, typecheck clean. Four §4 runs,
+  all `disturbed=false` / `throttled=false`. Full numbers below.
+- BLOCKER: none blocking Part 3. Four rulings owed before Gate 5's latency
+  numbers are recorded — §4's OS boundary, §10 rows 12 and 13, and A14's count.
+- NEXT: **Part 3 Block A — `core/paths.ts`, the path primitive, headless.**
+
+### 1.3 — the OS boundary AND the thermal derate, both real
+
+macOS **26.6.2 (25G83)**, projector `T749-fHD720` 1280×720 @ 60.000003814697266 Hz,
+scale 1, 1:1 to panel, 3601 samples over 60.0 s after a discarded 10 s warmup,
+instrument clock `hrtime` on every run.
+
+| run | scene | state | M1 late | worst interval | M2 mean | of N | M2 p99 | of N | instrument |
+|---|---|---|---|---|---|---|---|---|---|
+| `p5-cold-gate` | `phase4-forces` | COLD | 0.0000% | 17.80 ms | 0.28129 ms | 1.688% | 0.53033 ms | 3.182% | 0.2745% |
+| `p5-warm-gate` | `phase4-forces` | WARM | 0.0000% | 17.80 ms | 0.51118 ms | 3.067% | 0.68863 ms | 4.132% | 0.4735% |
+| `p5-regression` | `phase3-load` | COOL | 0.0000% | 17.80 ms | 0.12637 ms | 0.758% | 0.28963 ms | 1.738% | 0.6225% |
+| `p5-warm-regression` | `phase3-load` | WARM | 0.0000% | 17.80 ms | 0.19546 ms | 1.173% | 0.28112 ms | 1.687% | 0.3820% |
+
+Against the 26.2 (25C56) baselines — `p4-gate` 0.0649 ms, `p4-regression`
+0.0239 ms — and clause 3 is empty on all four runs.
+
+**Two findings, and neither displaces the other.**
+
+1. **The OS moved the baseline.** Cold on 26.6.2 is **4.33×** and **5.29×** the
+   26.2 figures. A thermal explanation predicts cold returns to near the 26.2
+   numbers. It does not.
+2. **The thermal derate is real and is now measured.** A matched within-session
+   pair: **+81.7%** on the gate scene (0.28129 → 0.51118) and **+54.7%** on the
+   regression scene (0.12637 → 0.19546). It is large, and it is nowhere near
+   large enough to account for a 4–5× gap.
+
+**A wrong reading was made in-session and is recorded rather than quietly
+dropped.** Partway through, on the strength of the cold gate run against
+*session 5's* warm run, this session stated that cold and warm were
+indistinguishable. That comparison spanned two sessions, two clocks and two sets
+of conditions — precisely the cross-machine comparison §4's boundary clause
+exists to prevent, made by the session arguing for that clause. A matched pair
+taken an hour later says the opposite. **The error was in the method, not the
+arithmetic**, which is why it is worth an entry: the numbers were right and the
+pairing was wrong.
+
+**M2 is a measurement for the first time in this project.** p99 reads 0.53033,
+0.68863, 0.28963, 0.28112 — none of them a multiple of 0.1. Every M2 at Gates
+0–4 was quantised to whole 100 µs steps. Session 5 recorded this regression's
+p99 as exactly **0.3000 ms**; the true value is **0.28963 ms**, so the coarse
+clock was rounding *up* and the old ceilings were not merely conservative in
+principle but inflated in fact.
+
+**A1's derate finally has a number, from M2 rather than from `k`.** `k` reported
+`meaningful: false` on both gate runs again today, as it has since Phase 3. The
+cold/warm delta on M2 is the quantity A1 asks for, measured on two scenes in one
+session. See the row 12 proposal below.
+
+**Three sessions of focus theft, diagnosed.** `p5-cold-regression` was discarded
+at focus LOST t=23.58 s with the operator's hands off the machine, so the cause
+was not the operator. The Adobe Creative Cloud helper stack was running (Desktop
+Service, Creative Cloud Helper, Core Sync, UI Helper, crash processor) along
+with OneDrive's updater daemon. Quit the Adobe stack, operator enabled Do Not
+Disturb, and **four consecutive runs since have come back clean**. The two
+survivors (`com.adobe.acc.installer.v2`, `StandaloneUpdaterDaemon`) are launchd
+daemons with no UI and were deliberately left alone.
+
+### 1.6 — 12 ns or 188 ns: 188, and 12 is below the floor
+
+Measured with `scripts/clock-probe.mjs`, every candidate path in **one process**
+with **one shared calibration algorithm** (`scripts/clock-probe-calibrate.js`
+holds it as source text, rebuilt with `new Function` on both sides of the
+bridge) so that the clock is the only thing that differs.
+
+| clock | crosses bridge | resolution | call cost |
+|---|---|---|---|
+| hardware quantum (mach timebase) | — | **41 ns** | — |
+| raw counter read, no wrapper, no loop | — | — | **24.7 ns** |
+| `bigint-bare`, preload scope | no | 41 ns | 32.0 ns |
+| `nowMs-in-preload` (shipping wrapper body) | no | 41 ns | 28.6 ns |
+| **`nowMs-over-bridge` — the in-app path** | **YES** | **83 ns** | **112.5 ns** |
+| `performance.now()` in the renderer | no | 100 000 ns | 100.0 ns |
+
+**188 ns is right. 12 ns is not a real number.** It is faster than a bare
+`hrtime.bigint()` read measured with no wrapper and no calibration loop around
+it at all (24.7 ns), and faster than the most favourable path it could have been
+measuring (28.6–32 ns). It is below the floor, not a kinder measurement of the
+same thing, and it is **retired rather than averaged in**.
+
+**Why they differ:** they time different paths. The in-app instrument calls
+`window.projection.nowMs()` from the renderer, so every read crosses the context
+bridge — **80.5 ns per call, 3.5× the bare counter**.
+
+**The resolution move 41 → 84 ns was never variance.** It is forced: a bridged
+read costs ~112 ns, which exceeds one 41 ns quantum, so two consecutive bridged
+reads land **two quanta apart — 2 × 41.5 = 83 ns**. Both figures are correct for
+their own path and the relation between them is derived. Confirmed from the raw
+dump: **129,663 of 199,999** consecutive *unbridged* reads return the identical
+value, because a raw read (24.7 ns) is faster than the quantum.
+
+**Recorded figure for the instrument: 181 ns median, 164–188 ns across the
+day's runs, at 83 ns effective resolution — 6.5% of `CLOCK_CALL_BUDGET_MS` and
+~553× finer than the 100 µs it replaced.** `selectClockSource` re-measures it
+against the budget at every startup regardless (A14).
+
+### 1.7 — row 13: the counter was reading the wrong set
+
+**The mechanism filed last session was the wrong class.** The handoff recorded
+the finding as PixiJS's `Pool` — `_count` only increments, `return()` pushes
+back, no eviction, so the counters are a high-water mark. Applying that same
+lesson one layer further down says otherwise: `readGpuResources` reads
+`buffer._managedBuffers`, and in PixiJS 8.20.1 that is constructed as
+`new GCManagedHash({...})` (`GlBufferSystem.mjs:19`), not a `Pool`. Its
+`remove()` is
+
+    remove(item) { ...; this.items[item.uid] = null; }
+
+— **a tombstone, not a delete**. `countManaged` counted `Object.keys(...).length`,
+graves included.
+
+**This is the same fault the same function already fixed for its sibling.** The
+texture path skips null slots and carries a long comment ending *"The instrument
+was counting graves."* It has done so since Phase 3. The buffer and geometry
+paths, twelve lines below it, never got the same treatment. **A fix to one
+counter was not a fix to the counter beside it, and nobody checked.**
+
+Shipped:
+
+- `countManagedHash` returns **both** `live` and `slots`. `bufferCount` and
+  `geometryCount` are live; `bufferSlots` and `geometrySlots` are reported and
+  **never gated** — a slot count is monotone non-decreasing by construction, so
+  gating it would be asking a flatness question of a quantity that cannot be
+  flat.
+- The verdict is **split**: `flatTextures`, `flatBuffers`, `flatGeometries`, with
+  `flat` kept as their AND so nothing loosens by splitting it.
+- `describeSoak` prints **both terms of every pair**, never a ratio, and states
+  *why* a run did not settle rather than only that it did not.
+
+**The 1.20 buffers-per-geometry anomaly does not exist.** Every soak on record
+reads **exactly 2.0000** at both ends, on every scene:
+
+| soak | scene | buffers first→last | geometries first→last | buf/geo first | buf/geo last |
+|---|---|---|---|---|---|
+| `p4-soak-p1` | `phase1-default` | 46 → 274 | 23 → 137 | 2.0000 | 2.0000 |
+| `p4-soak` | `phase4-forces` | 74 → 454 | 37 → 227 | 2.0000 | 2.0000 |
+| `p4-soak-p3load` | Phase 3 load | 4 → 4 | 2 → 2 | 2.0000 | 2.0000 |
+| `p4-soak-p3load-2` | Phase 3 load | 4 → 4 | 2 → 2 | 2.0000 | 2.0000 |
+
+**1.20 is 274 / 227** — `phase1-default`'s buffer count over `phase4-forces`'
+geometry count. A numerator from one scene over a denominator from another. The
+instruction *"a ratio hides its sample size, which is the one thing an
+instrument must not do"* describes what happened in the filing of the anomaly
+itself; printing both terms makes it unwriteable. The guessed explanation for
+2.00 — each geometry allocating position + index — stands, and it is universal
+rather than a coincidence on one scene.
+
+**K = 64, justified before it was run.** Mechanism: `GCManagedHash.add()` is a
+no-op for a uid already present, so live growth is bounded by peak concurrent
+demand and a repeatedly-rebuilt scene reaches that peak and stops. Measurement,
+from `p4-soak` and `p4-soak-p1`, both `disturbed=false`: increases land at 20.3,
+50.3, 80.3 and 110.3 s and never again, on two scenes — a warm-up of **≈55
+rebuilds with no quiet interval inside it**, then quiet tails of **548** and
+**188** rebuilds. So 55 < K < 188, and 64 sits above the whole warm-up at about
+a third of the shorter tail.
+
+**Wrong K fails in both directions and passes in neither**, which is the
+asymmetry A9 asks for: too small settles early, later growth lands inside the
+post-settle window and post-settle drift is non-zero — FAIL; too large never
+reaches the threshold — NOT SETTLED, FAIL. **Stated limit:** the soak samples
+every 30 s against ~0.5 rebuilds/s, so K is expressed in rebuilds but evaluated
+at ~15-rebuild resolution. That is the sampling rate's property, not K's, and it
+is recorded rather than smoothed.
+
+**The fix does not make it green.** 5-minute soak, `phase4-forces`,
+`disturbed=false`:
+
+    [soak] live  textures 2->2  buffers 74->312  geometries 37->156
+    [soak] slots textures 4->4  buffers 74->454  geometries 37->227
+    [soak] buffers per geometry, both terms: first 74/37  last 312/156
+    [soak] flat textures=true buffers=false geometries=false (AND=false)
+    [soak] settled=false K=64 lastIncrease=300.1s quietRebuilds=0
+           — NOT SETTLED: only 0 rebuilds passed after the last increase at 300.1s
+
+Tombstones are real — **142 buffer graves, 71 geometry graves** — and filtering
+them **did not** make it flat: live buffers still grew 74 → 312. The hypothesis
+that the tombstone fix would dissolve row 13 was stated in-session as *"a
+measurement, not an argument"*, and the measurement came back against it. What
+the fix bought is a sharper question: **does LIVE growth plateau?** The old logs
+cannot answer it — they recorded slot counts under the name `bufferCount` — so
+it needs a 20-minute soak with the corrected counter, which is Phase 6's, where
+row 13 is due. **K refused a run this session wanted to pass**, which is the
+instrument working.
+
+### 1.8 — a focus-free path for the clock smoke run
+
+Reserved label `clock-only`, following `probe-only`'s precedent rather than
+adding a second mechanism for reserved labels. Prints the clock's values and a
+verdict, opens no measurement window, exits:
+
+    [clock] source=hrtime  resolution=0.000083ms  callCost=0.000188ms
+            budget=0.0028ms (6.7% of it)  coarserThanSubject=false
+    [clock] VERDICT PASS — focus-independent, no measurement window opened
+
+**2.29 seconds**, against the 70 s run it replaces — a run that died at
+t = 58.87 s of 60 having already printed, at startup, the only line it was taken
+for. `[timer]` is emitted by `createRenderHost` before any window opens and is a
+property of the preload, not of which window is frontmost.
+
+**The real §4 runs are deliberately untouched.** Discarding on focus loss stays
+correct there: session 5's discarded run landed within 0.4% of its clean
+re-take and today's within 6.8%, which is the argument *for* the rule — a run
+that agrees with expectation is the one that gets waved through.
+
+**1.8 and Block E are NOT one mechanism, and building them as one would make
+things worse.** Block E forwards `h`/`r`/`k` from the editor to the output over
+IPC so the operator never clicks the projector display. But pressing a key in
+the *editor* takes focus *away from the output window*, which is exactly what
+discards a §4 run. Block E therefore increases focus-loss frequency during runs
+unless the disturbance rule is considered alongside it. Checked before building,
+as asked; they stay separate.
+
+### 1.9 — A14's count is seven, and the seventh is NOT different in kind
+
+The handoff proposed the seventh as a **category error** — an instrument asking
+a flatness question of a quantity that cannot be flat — and asked for a clause
+saying *before trusting a derived quantity, read what produces it*.
+
+**Reading what produces it is what showed the premise was wrong.** The quantity
+is produced by `GCManagedHash`, not `Pool`; it is not a high-water mark; and the
+defect is an ordinary miscount with a one-line fix. So the seventh is **the same
+kind as the first six — a fault, not a category error** — and it is more
+uncomfortable for it: the identical fault had already been found, fixed and
+commented at length for the sibling quantity **in the same function, twelve
+lines away, two phases earlier**.
+
+The lesson worth adding is therefore not only the handoff's. Both are true:
+
+- **Read what produces a derived quantity before trusting it.** The pool's — the
+  hash's — source answered in one sitting a question four gates of measurement
+  could not.
+- **A fix to one counter is not a fix to the counter beside it.** The texture
+  tombstone fix landed in Phase 3 with a comment explaining the mechanism in
+  full. The identical buffer fault survived to Phase 5 because fixing one
+  instance was mistaken for fixing the class.
+
+### `SPEC-CHANGE-PROPOSED` — §4 TARGET_MACHINE, the OS boundary with numbers
+
+Restates session 5's proposal, which was made before the matched cold/warm pair
+existed.
+
+| | |
+|---|---|
+| **Proposed** | §4's TARGET_MACHINE reads **macOS 26.6.2 (25G83)**, noting that Gates 0–4 were measured on **26.2 (25C56)**, that the boundary falls between `p4-regression` (2026-09-04 18:43) and the re-takes of 2026-09-05, that **cold CPU render cost measured 4.33× and 5.29× higher across it on two scenes**, and that **the measured cold→warm derate on this machine is +82% / +55%, which does not account for that gap** |
+| **Reason** | Session 5 proposed recording the boundary so a later comparison is not silently made across two machines. A matched pair now separates the two effects that were confounded in that proposal: an OS-level baseline shift and a thermal derate. Recording the version alone would let a reader take Gate 4's 0.390% of N and this phase's 1.688% for an engine regression, and recording a single ratio would let them attribute all of it to heat |
+| **Alternative rejected** | **Recording the version and not the numbers.** Tidier, and it loses the content. The version is the label; the ratio is the finding |
+| **Also rejected** | **Reporting one combined ratio.** It was what session 5 could offer and it is now known to fold two independent effects into one number — the same defect as a single `flat` flag over three subsystems (row 13). Two effects, two numbers |
+| **Also rejected** | **Re-measuring Gates 0–4 on 26.6.2.** Disproportionate, and §0.1 freezes a passed gate. Gate 4's numbers were honestly taken on the machine §4 described |
+| **Not proposed** | Any change to a passed gate's result, and any claim that the OS *caused* the shift. Attribution between the update and the machine's state is still not established, and is not claimed |
+
+### `SPEC-CHANGE-PROPOSED` — §10 row 12, pulled forward, and `k` replaced not repaired
+
+| | |
+|---|---|
+| **Proposed** | Move row 12 from **Phase 11** to **Phase 6**, alongside rows 11 and 13, and change its question from *"fix, replace, or formally retire k"* to a recommendation: **replace `k`'s role in A1 with the cold/warm delta on M2**, keeping `k_dev`/`k_target` only for A8's fill-rate coefficient, which is a different question |
+| **Reason** | 1.3 needed A1's thermal derate and `k` could not supply it — `meaningful: false` on both gate runs today, as at every gate since Phase 3. M2 on the fine clock supplied it directly: **+82% and +55%, two scenes, one session, both runs clean**. A1's derate is defined as a delta between minute 1 and minute 20 of *both* §4 metrics *and* `k`; the §4-metric half now works and the `k` half still does not. Row 12 was due at Phase 11 on the reasoning that nothing before then depends on it — that stopped being true this session, when a §4 finding turned on a quantity `k` was supposed to provide |
+| **Alternative rejected** | **Leave row 12 at Phase 11.** It was right while `k` was merely unfixed and unused. It is wrong now that a Phase 5 measurement had to route around it, and Phase 11 judges its gate on minute-20 `k` — arriving there with the instrument still broken is the situation the row exists to prevent |
+| **Also rejected** | **Retire `k` outright.** `k_target` against an offscreen 1080p `RenderTexture` is the only thing in the project that sees fill-rate work at TARGET_RESOLUTION, and A8 is explicit that metric 2 is structurally blind to it. Retiring `k` would take the fill-rate probe down with the derate probe; only the derate role is being reassigned |
+| **Also rejected** | **Repair `k` first, then decide.** Three runs at Gate 3 gave ratios 0.379…5.000 on an unchanged scene with the sign of the derate inconsistent between them. Repair is unbounded work with no evidence it converges, against a replacement that is already measured |
+| **Depends on** | The §4 boundary proposal above. If the operator declines to record the OS boundary, the evidence for this one is weaker but not void — the derate figures stand on their own |
+
+### `SPEC-CHANGE-PROPOSED` — §10 row 13, the criterion, with K justified and the ratio split
+
+Supersedes session 5's row 13 proposal, which recommended splitting the verdict
+on the belief that the counters were a legitimate high-water mark.
+
+| | |
+|---|---|
+| **Proposed** | Row 13's verdict is **split** into `flatTextures`/`flatBuffers`/`flatGeometries` over **live** counts, with slot counts reported and never gated; the rolling check gates on **textures flat AND settled**, where `settled` = **K = 64 rebuilds with no increase, and zero post-settle drift**; and every soak line prints **numerator and denominator, never a ratio** |
+| **Reason** | The `false` was an instrument fault, not a property of PixiJS: `_managedBuffers` is a `GCManagedHash` that tombstones on remove, and the census counted graves — the same fault already fixed for textures in the same function. Splitting is still right, but for a stronger reason than session 5 had: one flag over three subsystems answers a question nobody asked, *and* two of the three were reading the wrong set. K's threshold is derived from the pool's behaviour and from two clean soaks rather than chosen |
+| **Alternative rejected** | **Accept the plateau and mark the line `[x]`.** It reaches the checkbox by argument rather than measurement, and — as this session proved — the argument would have been wrong. The 5-minute soak with the corrected counter still reports `flatBuffers: false` |
+| **Also rejected** | **Gate on slot counts as well.** They are monotone non-decreasing by construction; a gate on them can only ever fail. Reported as information, never gated |
+| **Also rejected** | **Declare row 13 closed on the strength of the fix.** The fix is shipped and mutation-checked, but the measurement it enables has not been taken: live buffers grew 74 → 312 in five minutes and the run did not settle. Closing it now would be a green box over a question still open |
+| **Still owed** | A **20-minute soak on `phase4-forces` with the corrected counter**, at Phase 6 where row 13 is due. The existing 20-minute soaks cannot be reinterpreted — they recorded slot counts under the name `bufferCount` |
+
+### `SPEC-CHANGE-PROPOSED` — §4's A14 clause, the seventh count
+
+| | |
+|---|---|
+| **Proposed** | A14's count goes from **six** to **seven**, the seventh being *the GPU census counting tombstones for buffers and geometries, reporting a false leak that survived four gates*; and the clause gains **two** sentences rather than one: **"Before trusting a derived quantity, read what produces it"** and **"A fix to one counter is not a fix to the counter beside it."** |
+| **Reason** | The seventh is not a new kind of failure, which is the uncomfortable part and the reason the second sentence is needed. The identical tombstone fault was found, fixed and commented at length for `managedTextures` in Phase 3; the buffer and geometry paths sat twelve lines below it, unfixed, for two more phases. Recording only the first lesson would file this as "we inferred instead of reading", which is true of last session and not of the fix |
+| **Alternative rejected** | **The handoff's single sentence, and calling the seventh different in kind.** It was the right reading of the evidence available when it was written. Reading `GCManagedHash` showed the premise was wrong — the quantity is not a high-water mark and the defect is an ordinary miscount — so filing it as a category error would put a wrong mechanism into the spec |
+| **Also rejected** | **Counting it as two** (buffers and geometries). One function, one fault, one commit |
+
+### `IDEAS` — parked, not built
+
+- **Record the OS build in each run's conditions block.** Said in session 4,
+  said again in session 5, still unbuilt, and this session again had to pair runs
+  by hand from file timestamps and an install receipt. The `conditions` block
+  already captures nine fields; this is a tenth.
+- **A `[soak]`-style human-readable line for every structured verdict.** Adding
+  `describeSoak` took ten minutes and immediately made a four-gate-old defect
+  legible. The SUMMARY JSON has carried these numbers all along and nobody read
+  them out of it. `k`'s report is the obvious next candidate — row 12's
+  `meaningful: false` has been in every gate log since Phase 3 and has never
+  once been quoted in an entry.
+- **A focus-theft canary.** Three §4 runs lost in three sessions, diagnosed only
+  when the operator's hands were provably off the keyboard. The run already
+  records focus events with timestamps; what is missing is naming the process
+  that took focus, which would have turned a session of guessing into one line.
+
