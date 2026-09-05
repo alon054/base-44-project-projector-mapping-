@@ -5088,3 +5088,43 @@ Two ways out, and they are not equivalent:
 Route 2 preserves a mechanism that has already caught one real drift; route 1
 spends it to turn a checkbox green. Stated rather than chosen, because the spec
 is the operator's document.
+
+## 2026-09-05 — Phase 5 (block B) — P5-B closed by operator decision, over a red suite
+
+- DID: No code. P5-B marked `[x]`. The `npm test` Done-when line stays `[!]` and
+  the failure is carried into **Rolling checks** as a standing red with a
+  deadline of Gate 5, so closing the block does not bury it.
+- MEASURED: unchanged — **631 tests / 29 files, 630 pass; 43/43 goldens**.
+- BLOCKER: none for P5-C. `specVersion.test.ts` is red and now tracked at the
+  phase gate rather than at the block.
+- NEXT: **P5-C — route motion.** Fresh session, `/compact` first.
+
+### `DECISION` — the block closed over a failing suite, and who decided
+
+I put four options to the operator and recommended against this one. The
+operator chose to close P5-B and carry the red test. That is their call and it
+is recorded as theirs, with the reasoning on both sides above in the
+`INVARIANT-TENSION` entry, so a later reader sees a decision rather than an
+oversight.
+
+Two things were done to keep the cost bounded rather than to soften the call:
+
+- **The Done-when line is still `[!]`, not `[x]`.** The block is closed; the
+  check did not pass. Marking the line green would have been the actual damage —
+  a tracker that records a check as passed when it failed is worth nothing
+  afterwards, and P5-B's own work is full of tests written on exactly that
+  principle.
+- **The failure moved up, not away.** It is now a standing item in Rolling
+  checks with "Gate 5 cannot be judged on a red suite" attached. A block-level
+  `[!]` is read once, by the next session; a rolling check is read at every
+  phase gate.
+
+The prediction, recorded so it can be checked: the cheap fix is route 1
+(re-point the test), it will be taken under time pressure at the gate, and B1's
+drift mechanism will end up weaker than it was on 2026-09-04. If instead §1
+regains a revision block, this paragraph is wrong and that is the better outcome.
+
+### `IDEAS` — still parked
+
+- The two texture-count numbers, unrecorded from the table pass. Two readings of
+  the editor's `gpu tex N` line on the next launch.
