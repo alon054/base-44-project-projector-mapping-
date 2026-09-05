@@ -5128,3 +5128,81 @@ regains a revision block, this paragraph is wrong and that is the better outcome
 
 - The two texture-count numbers, unrecorded from the table pass. Two readings of
   the editor's `gpu tex N` line on the next launch.
+
+## 2026-09-05 — Phase 5 (post-block B) — the version check re-pointed at the pair that can drift
+
+- DID: `src/test/specVersion.test.ts` rewritten. It compared `SPEC.md`'s header
+  against §1's revision history; v4 deleted that section, so it compared against
+  nothing. It now compares `SPEC.md`'s header against `CHECKLIST.md`'s
+  *Tracking* line, asserts `SPEC.md` states its version exactly once, and fails
+  loudly when either marker is missing. No spec edit; the read-only rule held.
+- MEASURED: **633 tests / 29 files, all green** (631 / 29 with one failing
+  before; the file went 2 tests → 4). Typecheck clean. Five mutation checks
+  below. `SPEC.md` and `CHECKLIST.md` verified byte-identical after the
+  mutation run.
+- BLOCKER: none. The standing red carried out of P5-B is cleared.
+- NEXT: **P5-C — route motion.** Fresh session.
+
+### `DECISION` — the check moved rather than the spec, and the earlier advice was wrong
+
+Four options were put to the operator when P5-B closed and I recommended
+restoring §1's revision history, arguing that re-pointing the test would weaken
+B1's mechanism. **That recommendation was aimed at the wrong pair**, and reading
+where the version is actually stated is what showed it:
+
+- `SPEC.md` states its version **once**, at line 7. A file cannot disagree with
+  itself, so B1's original defect — header versus §1 — is structurally
+  impossible in v4 and restoring §1 would have re-created the hazard in order
+  to keep guarding it.
+- The version is nonetheless stated **twice**, in two files: `SPEC.md:7` and
+  `CHECKLIST.md:12`'s *Tracking* line. That is B1's defect with one document's
+  distance added, and **nothing checked it** — `specVersion.test.ts` is the only
+  test that reads `SPEC.md` as data and no test read `CHECKLIST.md` at all.
+
+So the test was not guarding a ghost and was not guarding the live hazard
+either. Re-pointing it is not a weakening; it is the same mechanism aimed at the
+surface that exists. This is recorded as a correction rather than folded in
+silently, because the earlier reasoning is on the record two entries above.
+
+### The latent bug the rewrite removed
+
+`text.slice(text.indexOf('## 1. Revision history'))` — `indexOf` returns -1 when
+the heading is absent and `slice(-1)` quietly takes **the last character of the
+file** rather than erroring. The test did fail, and it failed for the right
+reason, but by accident: a one-character haystack happened to match nothing. Had
+the file ended differently it could have passed while checking nothing.
+
+Every lookup in the rewrite is asserted non-null with a message naming the file
+and the line it expected. **A cross-check that vacuously passes when its subject
+is deleted is worse than no cross-check**, because it reports green. Mutation M2
+below exists precisely to prove that deleting the subject now fails.
+
+**Mutation checks:**
+
+| mutation | tests failed |
+|---|---|
+| `CHECKLIST.md` tracks v4.1 while `SPEC.md` says v4.0 — the live drift | 1 |
+| `CHECKLIST.md`'s *Tracking* line deleted — the vacuous-pass case | 2 |
+| `SPEC.md` bumped to v5.0, `CHECKLIST.md` left behind | 1 |
+| a **second** `**Spec version:**` added to `SPEC.md` — B1's original defect | 1 |
+| `SPEC.md`'s version header removed entirely | 3 |
+| *(all reverted; both documents byte-identical to git afterwards)* | 0 of 4 |
+
+### `NOTE` — `CHECKLIST.md` line 12 is now load-bearing
+
+`**Tracking `SPEC.md` v4.0.**` is one half of the check. Rewording it fails the
+suite by design, with a message that says so rather than a null complaint. Said
+here and in `CHECKLIST.md` itself, because the next person to tidy that header
+will not read this file first.
+
+### The prediction from two entries ago, resolved
+
+That entry predicted the cheap fix would be taken under time pressure at Gate 5
+and B1's mechanism would end up weaker than on 2026-09-04. **Half right and the
+better half wrong**: the cheap fix was taken, immediately rather than at the
+gate, and the mechanism came out stronger — it now guards a real pair, catches
+the single-file case B1 was originally about, and no longer passes vacuously.
+The prediction assumed the only two options were the two first named, which is
+the failure mode worth keeping: a decision framed as a choice between the
+options already on the table, when reading the subject would have produced a
+third.
