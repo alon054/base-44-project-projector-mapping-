@@ -37,6 +37,18 @@ import {
   type ProceduralKind,
 } from '../providers/procedural/ProceduralProvider';
 import {
+  CLOSE_MIN_POINTS,
+  emptyPathTool,
+  pathToolDown,
+  pathToolMove,
+  pathToolUp,
+  pointIndexAt,
+  previewPoints,
+  wouldClose,
+  deletePointAt,
+  type PathToolState,
+} from './pathTool';
+import {
   HANDLES,
   aspectOf,
   beginGesture,
@@ -172,6 +184,18 @@ export function PreviewCanvas({
  * exactly once and this re-renders on every pointer move — merging them would
  * put a render loop's worth of React work in the same component as a `useEffect`
  * whose entire contract is that it never runs twice.
+ *
+ * P5-D adds the path tool alongside the region gestures. It is a second *tool*,
+ * not a second mode inside one: D19's "no mode switch" is about click-versus-
+ * drag within the path tool, and that decision lives in `pathTool.ts` where it
+ * has a test. Which tool the pointer feeds is the operator's choice, the way
+ * the `draw` kind already is.
+ *
+ * The path the tool produces stays here, in `useState`, and is not written into
+ * the scene — there is nowhere for it to go. Paths belong to the surface tree,
+ * which is calibration and is Phase 6 (I-15). The overlay draws it for the same
+ * reason it draws the selection outline: an SVG sibling of the canvas cannot
+ * reach the projector or a golden frame, because neither loads this file.
  */
 function RegionSurface({
   scene,
@@ -188,6 +212,11 @@ function RegionSurface({
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [draft, setDraft] = useState<NormalizedRect | null>(null);
   const [placeKind, setPlaceKind] = useState<ProceduralKind>('rect');
+  /** P5-D. The path tool's whole state, and the pointer it has not pressed. */
+  const [tool, setTool] = useState<'region' | 'path'>('region');
+  const [path, setPath] = useState<PathToolState>(emptyPathTool());
+  const [hover, setHover] = useState<NormalizedPoint | null>(null);
+  const [shiftHeld, setShiftHeld] = useState(false);
 
   const aspect = aspectOf(PREVIEW_SIZE.width, PREVIEW_SIZE.height);
 
@@ -213,6 +242,11 @@ function RegionSurface({
     e.currentTarget.setPointerCapture(e.pointerId);
     // Focus, so the Delete key below reaches this element rather than the page.
     surface.current?.focus();
+    if (tool === 'path') {
+      setShiftHeld(e.shiftKey);
+      setPath((prev) => pathToolDown(prev, p, aspect, e.shiftKey));
+      return;
+    }
     const start = beginGesture(scene, selectedId, p, aspect);
     setSelectedId(start.selectedId);
     setGesture(start.gesture);
@@ -220,9 +254,14 @@ function RegionSurface({
   };
 
   const onPointerMove = (e: React.PointerEvent): void => {
-    if (!gesture) return;
     const p = pointOf(e);
-    if (!p) return;
+    if (tool === 'path') {
+      setShiftHeld(e.shiftKey);
+      setHover(p);
+      if (p) setPath((prev) => pathToolMove(prev, p, aspect, e.shiftKey));
+      return;
+    }
+    if (!gesture || !p) return;
     setDraft(gestureRect(scene, gesture, p, aspect));
   };
 
@@ -243,6 +282,12 @@ function RegionSurface({
    * which is a different block than this one and is not on the ship list.
    */
   const onPointerUp = (e: React.PointerEvent): void => {
+    if (tool === 'path') {
+      const p = pointOf(e);
+      // Simplification happens inside this call, once, on release (D19).
+      setPath((prev) => pathToolUp(prev, p, aspect, e.shiftKey));
+      return;
+    }
     const g = gesture;
     setGesture(null);
     setDraft(null);
@@ -275,6 +320,16 @@ function RegionSurface({
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    if (tool === 'path') {
+      e.preventDefault();
+      // The point under the pointer, or the last one placed when the pointer is
+      // nowhere near a point — which is what "undo that click" means here.
+      setPath((prev) => {
+        const at = hover ? pointIndexAt(prev, hover, aspect) : null;
+        return deletePointAt(prev, at ?? prev.points.length - 1);
+      });
+      return;
+    }
     if (selectedId === null || !setScene) return;
     e.preventDefault();
     const id = selectedId;
@@ -331,7 +386,7 @@ function RegionSurface({
           style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           aria-hidden
         >
-          {outline && (
+          {tool === 'region' && outline && (
             <g
               transform={
                 rotationDeg === 0
@@ -351,9 +406,19 @@ function RegionSurface({
               />
             </g>
           )}
+          {tool === 'path' && (
+            <PathOverlay
+              state={path}
+              hover={hover}
+              aspect={aspect}
+              shift={shiftHeld}
+              px={px}
+              py={py}
+            />
+          )}
           {/* Handles only on a settled selection: mid-gesture they would be
               drawn at the corners of a box that is still moving under them. */}
-          {selected && !draft &&
+          {tool === 'region' && selected && !draft &&
             HANDLES.map((h) => {
               const c = handlePoint(selected.transform, h, aspect);
               return (
@@ -372,6 +437,18 @@ function RegionSurface({
         </svg>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#6f767d' }}>
+        <label htmlFor="edit-tool" style={{ color: '#8b939b' }}>
+          tool
+        </label>
+        <select
+          id="edit-tool"
+          value={tool}
+          onChange={(e) => setTool(e.currentTarget.value as 'region' | 'path')}
+          style={SELECT_STYLE}
+        >
+          <option value="region">region</option>
+          <option value="path">path</option>
+        </select>
         <label htmlFor="place-kind" style={{ color: '#8b939b' }}>
           draw
         </label>
@@ -379,14 +456,8 @@ function RegionSurface({
           id="place-kind"
           value={placeKind}
           onChange={(e) => setPlaceKind(e.currentTarget.value as ProceduralKind)}
-          style={{
-            padding: '2px 5px',
-            borderRadius: 4,
-            border: '1px solid #2b2f34',
-            background: '#15181b',
-            color: 'inherit',
-            font: '11px/1.2 inherit',
-          }}
+          disabled={tool === 'path'}
+          style={SELECT_STYLE}
         >
           {PROCEDURAL_KINDS.map((k) => (
             <option key={k} value={k}>
@@ -394,13 +465,94 @@ function RegionSurface({
             </option>
           ))}
         </select>
-        <span>
-          {selected
-            ? `${selected.name} · ${selected.transform.x.toFixed(3)}, ${selected.transform.y.toFixed(3)} · ` +
-              `${selected.transform.width.toFixed(3)}×${selected.transform.height.toFixed(3)} — Delete removes it`
-            : 'drag empty space to place · click a region to select'}
-        </span>
+        {tool === 'path' ? (
+          <>
+            <button type="button" onClick={() => setPath(emptyPathTool())} style={SELECT_STYLE}>
+              new path
+            </button>
+            <span>
+              {`${path.points.length} point${path.points.length === 1 ? '' : 's'}` +
+                (path.closed ? ' · closed' : '') +
+                (path.lastSimplification
+                  ? ` · last stroke ${path.lastSimplification.before} → ${path.lastSimplification.after}`
+                  : '') +
+                ' — click adds, drag draws, shift squares, Delete removes' +
+                (path.points.length >= CLOSE_MIN_POINTS && !path.closed
+                  ? ', first point closes'
+                  : '')}
+            </span>
+          </>
+        ) : (
+          <span>
+            {selected
+              ? `${selected.name} · ${selected.transform.x.toFixed(3)}, ${selected.transform.y.toFixed(3)} · ` +
+                `${selected.transform.width.toFixed(3)}×${selected.transform.height.toFixed(3)} — Delete removes it`
+              : 'drag empty space to place · click a region to select'}
+          </span>
+        )}
       </div>
     </div>
+  );
+}
+
+const SELECT_STYLE: React.CSSProperties = {
+  padding: '2px 5px',
+  borderRadius: 4,
+  border: '1px solid #2b2f34',
+  background: '#15181b',
+  color: 'inherit',
+  font: '11px/1.2 inherit',
+};
+
+/**
+ * The path being drawn, live.
+ *
+ * Every coordinate it draws comes from `previewPoints` — the same array the
+ * commit is built from — so the line the operator watches is the path they get
+ * rather than a second drawing of the same idea. The rubber band to an
+ * unpressed pointer is part of that array, not a segment added here.
+ */
+function PathOverlay({
+  state,
+  hover,
+  aspect,
+  shift,
+  px,
+  py,
+}: {
+  state: PathToolState;
+  hover: NormalizedPoint | null;
+  aspect: number;
+  shift: boolean;
+  px: (v: number) => number;
+  py: (v: number) => number;
+}): React.JSX.Element | null {
+  const points = previewPoints(state, hover, aspect, shift);
+  if (points.length === 0) return null;
+  const d = points.map((q) => `${px(q.x)},${py(q.y)}`).join(' ');
+  const closing = hover !== null && wouldClose(state, hover, aspect);
+  return (
+    <g>
+      {points.length > 1 &&
+        (state.closed ? (
+          <polygon points={d} fill="rgba(64,224,255,0.10)" stroke="#40e0ff" strokeWidth={1} />
+        ) : (
+          <polyline points={d} fill="none" stroke="#40e0ff" strokeWidth={1} />
+        ))}
+      {state.points.map((q, i) => (
+        <rect
+          key={i}
+          x={px(q.x) - 2.5}
+          y={py(q.y) - 2.5}
+          width={5}
+          height={5}
+          // The first point wears the close affordance while the pointer is
+          // over it, so "click here to close" is visible before the click.
+          fill={i === 0 && closing ? '#ffd166' : '#40e0ff'}
+          stroke="#06202a"
+          strokeWidth={1}
+        />
+      ))}
+    </g>
   );
 }

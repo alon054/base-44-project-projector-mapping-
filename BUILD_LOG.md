@@ -5349,3 +5349,154 @@ the keys hang off the entity rather than the route.
   did not include `layer.ts` or `scene.ts` and nothing reads motion yet. P5-F's
   motion panel is where it has to land, and the round-trip test here is written
   against the record alone so it will not need rewriting when it does.
+
+---
+
+## 2026-09-05 — Phase 5 (block D) — the path tool: one tool, no mode switch
+
+- DID: `src/editor/pathTool.ts` and `src/test/pathTool.test.ts` new — the tool
+  as pure state, driven by `pathToolDown` / `pathToolMove` / `pathToolUp`, with
+  `pointIndexAt`, `wouldClose`, `constrainToRightAngle`, `deletePointAt`,
+  `previewPoints` and `pathToolPath` around them. `src/editor/PreviewCanvas.tsx`
+  gained a `tool` select, the pointer branch that feeds the tool and a
+  `PathOverlay` that draws the live path. **`src/core/paths.ts` untouched** —
+  see below.
+- MEASURED: tests 684 → 721 (31 files), all green; 37 new. Goldens 43/43,
+  nothing re-blessed. Freehand simplification: a 401-sample jittered stroke
+  records **400** points and releases at **17**; the cornered fixture is
+  **41 → 3**. Ten mutations run, ten killed.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid.
+
+### `DECISION` — the block's simplification task was already done, in the right place
+
+The block's file list says `src/core/paths.ts` (simplification), and the prompt
+says to add it there rather than to the UI. It was already there: Block A
+shipped `simplifyPoints` and `simplifyPath` — Ramer–Douglas–Peucker, tolerance
+a parameter in normalized units, endpoints always kept, ten tests including a
+jittered fixture — in the same commit that created the file. Nothing here
+touched it.
+
+So the block's budget went to the tool, and the simplifier got the one thing it
+had never had: a *measurement* against D19's actual condition. It failed it. At
+the tolerance a first guess suggests, a 400-sample stroke simplifies to 162
+points, not to tens.
+
+| tolerance | 41-point cornered stroke | 401-sample wandering stroke |
+|---|---|---|
+| 0.003 | 38 | 267 |
+| 0.004 | 4 | 162 |
+| **0.006** | **3** | **19** |
+| 0.010 | 3 | 16 |
+
+The cliff between 0.004 and 0.005 is the hand's own jitter: at ±0.002 the
+zigzag's perpendicular deviation is ~0.0028, so a tolerance of 0.004 is close
+enough to it that the algorithm is obliged to keep most of the wobble, and far
+enough from it to look like a reasonable number. `FREEHAND_TOLERANCE = 0.006`
+sits clear of it — ~8 px on a 1280-wide projector, ~3 px on the 480-wide
+preview, under the width of the line the operator was watching. **The constant
+was chosen by measurement and the table is here because the number alone would
+read as taste.**
+
+### The shift constraint made every constrained click read as a drag
+
+`CLICK_SLOP` decides whether a press was a click or a stroke, and the first
+version measured it from the point the press *placed*. Under shift those are
+different points by construction — the constraint's whole job is to move the
+placed point off the pointer, usually by much more than the slop. So a
+shift-click went down, placed its constrained point, and then released; the
+release measured the pointer against the placed point, found them far apart,
+concluded a stroke, and appended a second point at the raw pointer position.
+
+Two clicked corners of a rectangle produced three points, the third of them off
+the right angle the operator had just asked for.
+
+The fix is one line — `origin` is where the *pointer* went down — and it is the
+kind of bug that is invisible until something makes the placed point differ
+from the pointer. It was found by a test asserting the third click of a
+shift-constrained sequence, not by drawing. Mutation M4 puts it back and one
+test fails.
+
+### `MEASURED` — mutation checks
+
+Each applied alone to a pristine copy of `pathTool.ts` and reverted before the
+next; counts are `src/test/pathTool.test.ts` only. Block C's trap avoided the
+same way it named — the file is new and untracked, so the pristine copy lives
+outside git and the restore is a `cp`, not a `git checkout`.
+
+| mutation | tests failed |
+|---|---|
+| M1 simplification skipped on release: the run committed raw | 2 |
+| M2 the right-angle constraint ignores aspect | 1 |
+| M3 pointer-down order swapped: grab wins over close | 3 |
+| M4 `CLICK_SLOP` measured from the placed point, not the pointer | 1 |
+| M5 `pointIndexAt` walks forwards, so the oldest point wins an overlap | 1 |
+| M6 the whole path simplified, not the run this press drew | 1 |
+| M7 the `FREEHAND_MIN_STEP` guard removed | 3 |
+| M8 `deletePointAt` keeps the press it is reindexing under | 1 |
+| M9 the grab radius measured without aspect — an ellipse on 16:9 | 1 |
+| M10 `pathToolPath` bypasses `createPath`'s clamp | 1 |
+| *(all reverted; 721 green afterwards, `pathTool.ts` byte-identical to the copy)* | 0 of 10 |
+
+**Two of these needed a second attempt, and both failures were the mutation's,
+not the suite's.** M2 first read "ignore aspect" as comparing the raw deltas —
+but the fixture it was aimed at used equal deltas, which tie under both the
+correct and the mutated rule, so it killed nothing while the constraint was
+genuinely untested for the case aspect decides. The fix was a test: 0.1 across
+and 0.15 down is vertical by the numbers and horizontal on a 16:9 canvas.
+M8 inserted `press: state.press` *above* the `press: null` that follows it in
+the same object literal, where the later key wins and the mutation does
+nothing. A mutation that does not compile-or-behave differently reports zero
+for the same reason a passing test does, which is worth knowing: **a zero in
+this table is a claim about the mutation before it is a claim about the tests.**
+
+### The corner assertion, and the tolerance it is asserted at
+
+The fixture jitters by ±0.002 and turns at (0.5, 0.5). The corner the tool
+receives is the sample that sat at the turn, and that sample carries the jitter
+like every other one: it is at (0.5, 0.502). The test asserts a point within
+**the jitter amplitude** of the ideal corner, and then pins the survivor
+exactly — so it would also notice a simplifier that started *moving* points
+rather than dropping them.
+
+`0.502 - 0.5` is `0.0020000000000000018`, so a bound of exactly `JITTER`
+rejects the sample the fixture placed. One `DRIFT` of 1e-9 is added, which is
+Block A's clamp-versus-refuse rule applied to an assertion: the value drifted,
+so it is accepted. Naming it `DRIFT` rather than folding 1e-9 into the
+constant keeps the two facts separate — the bound is the jitter, and the ulp is
+float arithmetic.
+
+### `SHORTCUT` — the drawn path has nowhere to go
+
+`Scene` has no path field, and should not get one here: paths belong to the
+surface tree, which is calibration and is Phase 6 (I-15, §11's order note). So
+the tool's output stays in `useState` in `PreviewCanvas`, next to the selection,
+and `new path` clears it. Nothing is serialized, nothing crosses IPC, no golden
+changes. P6-A is where a path acquires a home; `pathToolPath` already returns
+one through `createPath`, so the change there is a caller, not a rewrite.
+
+This is also why `PreviewCanvas.tsx` is in this block's diff and not in its
+stated file list. The list names `pathTool.ts`, `paths.ts` and tests, but
+deliverable 7 — "live preview of the path while drawing, in the editor only" —
+cannot exist inside a headless module. The wiring is a tool select, a pointer
+branch and one overlay component; the region gestures P5-B shipped are
+untouched and still take every event when the select says `region`.
+
+### `IDEAS`
+
+- **A second tool is a select; a second *mode* is a bug.** The tool select added
+  here is the operator choosing between region and path, which is not what D19
+  forbids — D19 is about click-versus-drag inside the path tool, and that
+  decision is `CLICK_SLOP` in `pathTool.ts` with a test. The state has four
+  fields and none of them is a mode, asserted as a key list *and* as a source
+  grep, so a mode arriving later has to arrive visibly.
+- `deletePointAt` deliberately does not clear `closed` when the path drops below
+  three points. Deleting a point would otherwise flip a second field nobody
+  asked about, and a two-point closed path is a shape `pathSegments` already
+  handles. If the wall shows that as confusing, the fix is a refusal at the
+  point of *closing*, not a silent un-closing at the point of deleting.
+- `FREEHAND_MIN_STEP` exists because of P5-C's M10 finding: the one input that
+  reaches `segmentAtProgress`'s zero-length guard is a stroke whose first two
+  samples share a coordinate. The tool now declines to produce that input at
+  all. Both mechanisms stay — the guard is for float drift, the step is for this
+  tool's own sampling, and neither is the other's excuse.
