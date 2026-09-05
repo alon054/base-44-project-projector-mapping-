@@ -124,6 +124,25 @@ export type PathPress =
 export interface PathToolState {
   points: PathPoint[];
   closed: boolean;
+  /**
+   * Editing is over — the operator pressed Enter, or otherwise said "that's the
+   * path". Orthogonal to `closed` on purpose, and the two answer different
+   * questions:
+   *
+   *  - `closed` is **geometry**: does a segment join the last point to the
+   *    first. It is the flag I-17 stores and the renderer reads.
+   *  - `finished` is **editing**: does the next click extend this path. It is
+   *    editor state and never reaches a stored path.
+   *
+   * An open path had no way to end before this. Closing one was the only
+   * terminal act available, so an operator drawing a run along the top of a box
+   * — a route, an outline that is not a loop — had to leave it dangling and
+   * hope the next click landed somewhere harmless. That is what Enter fixes,
+   * and it is why finishing does NOT set `closed`: a finished open path is a
+   * perfectly ordinary path, and forcing a loop onto it would be the tool
+   * inventing a segment the operator never drew.
+   */
+  finished: boolean;
   press: PathPress | null;
   /**
    * Point count before and after the last release that simplified something,
@@ -139,7 +158,7 @@ export interface PathToolState {
 
 /** The empty tool. A separate function so no caller writes the shape by hand. */
 export function emptyPathTool(): PathToolState {
-  return { points: [], closed: false, press: null, lastSimplification: null };
+  return { points: [], closed: false, finished: false, press: null, lastSimplification: null };
 }
 
 /** Square-space distance, the same measure `handleAt` uses. Dimensionless. */
@@ -225,6 +244,10 @@ export function pathToolDown(
   aspect: number,
   shift = false,
 ): PathToolState {
+  // A finished path takes no more pointer input. This is what makes finishing
+  // mean something rather than being a label — without it, `finished` would be
+  // a flag the status line reads and the tool ignores.
+  if (state.finished) return state;
   if (wouldClose(state, p, aspect)) {
     // `closed` is the only field that changes. Not "the only field that
     // *should* change" — the spread is the mechanism, and the test asserts the
@@ -323,22 +346,53 @@ export function pathToolUp(
   aspect: number,
   shift = false,
 ): PathToolState {
-  const press = state.press;
-  if (!press) return state;
+  if (!state.press) return state;
   const moved = p ? pathToolMove(state, p, aspect, shift) : state;
-  const settled = moved.press?.kind === 'draw' ? moved.press : null;
+  return endPress(moved);
+}
 
-  if (!settled || !settled.freehand) return { ...moved, press: null };
+/**
+ * End whatever press is in flight, simplifying the run it drew.
+ *
+ * Shared by `pathToolUp` and `finishPath` rather than written twice, because
+ * "a stroke is simplified exactly once, on release" is the rule and two copies
+ * of it is one copy too many — Enter pressed with the pointer still down has to
+ * take the same path a normal release does or it would commit a raw stroke.
+ */
+function endPress(state: PathToolState): PathToolState {
+  const settled = state.press?.kind === 'draw' ? state.press : null;
+  if (!settled || !settled.freehand) return { ...state, press: null };
 
-  const head = moved.points.slice(0, settled.startIndex);
-  const run = moved.points.slice(settled.startIndex);
+  const head = state.points.slice(0, settled.startIndex);
+  const run = state.points.slice(settled.startIndex);
   const simplified = simplifyPoints(run, FREEHAND_TOLERANCE);
   return {
-    ...moved,
+    ...state,
     points: [...head, ...simplified],
     press: null,
     lastSimplification: { before: run.length, after: simplified.length },
   };
+}
+
+/**
+ * Finish the path where it stands — the Enter key.
+ *
+ * The path ends at **the last point the operator marked**. Nothing is appended,
+ * nothing is joined, `closed` is not touched: an open path that has been
+ * finished is an open path, which is exactly what a route is (I-17) and what an
+ * outline along one edge of a box is.
+ *
+ * A path of fewer than two points cannot be finished, and this returns it
+ * unfinished rather than throwing. One point is not a shape — `pathSegments`
+ * yields nothing for it — and an operator who pressed Enter after a single
+ * stray click means "never mind", not "commit this". The press still ends, so
+ * the key is never inert.
+ */
+export function finishPath(state: PathToolState): PathToolState {
+  if (state.finished) return state;
+  const ended = state.press ? endPress(state) : state;
+  if (ended.points.length < 2) return ended;
+  return { ...ended, finished: true };
 }
 
 /**
@@ -376,7 +430,8 @@ export function deletePointAt(state: PathToolState, index: number): PathToolStat
  * both off the same `points` array, so the line the operator watches and the
  * path they get are not two approximations of each other. `hover` is `null`
  * when the pointer is outside the surface or a press is in flight — during a
- * press the appended point already tracks the pointer.
+ * press the appended point already tracks the pointer. A closed or finished
+ * path gets no band: there is no next point for it to lead to.
  */
 export function previewPoints(
   state: PathToolState,
@@ -385,7 +440,7 @@ export function previewPoints(
   shift = false,
 ): PathPoint[] {
   const points = state.points.map((q) => ({ ...q }));
-  if (!hover || state.press || state.closed || points.length === 0) return points;
+  if (!hover || state.press || state.closed || state.finished || points.length === 0) return points;
   points.push(placedPoint(state, hover, aspect, shift));
   return points;
 }

@@ -39,6 +39,7 @@ import {
 import {
   CLOSE_MIN_POINTS,
   emptyPathTool,
+  finishPath,
   pathToolDown,
   pathToolMove,
   pathToolUp,
@@ -319,6 +320,14 @@ function RegionSurface({
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
+    // Enter finishes the path where it stands. It is the only way to end an
+    // OPEN path — closing is for loops, and a route or a run along one edge of
+    // a box is neither.
+    if (tool === 'path' && e.key === 'Enter') {
+      e.preventDefault();
+      setPath(finishPath);
+      return;
+    }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     if (tool === 'path') {
       e.preventDefault();
@@ -473,13 +482,17 @@ function RegionSurface({
             <span>
               {`${path.points.length} point${path.points.length === 1 ? '' : 's'}` +
                 (path.closed ? ' · closed' : '') +
+                (path.finished ? ' · finished' : '') +
                 (path.lastSimplification
                   ? ` · last stroke ${path.lastSimplification.before} → ${path.lastSimplification.after}`
                   : '') +
-                ' — click adds, drag draws, shift squares, Delete removes' +
-                (path.points.length >= CLOSE_MIN_POINTS && !path.closed
-                  ? ', first point closes'
-                  : '')}
+                (path.finished
+                  ? ' — new path starts another'
+                  : ' — click adds, drag draws, shift squares, Delete removes' +
+                    (path.points.length >= 2 ? ', Enter finishes' : '') +
+                    (path.points.length >= CLOSE_MIN_POINTS && !path.closed
+                      ? ', first point closes it into a loop'
+                      : ''))}
             </span>
           </>
         ) : (
@@ -537,7 +550,16 @@ function PathOverlay({
         (state.closed ? (
           <polygon points={d} fill="rgba(64,224,255,0.10)" stroke="#40e0ff" strokeWidth={1} />
         ) : (
-          <polyline points={d} fill="none" stroke="#40e0ff" strokeWidth={1} />
+          <polyline
+            points={d}
+            fill="none"
+            stroke="#40e0ff"
+            strokeWidth={1}
+            // A path still being drawn is dashed and a finished one is solid,
+            // so "is this still taking my clicks" is answerable at a glance
+            // rather than by clicking and seeing what happens.
+            strokeDasharray={state.finished ? undefined : '4 3'}
+          />
         ))}
       {state.points.map((q, i) => (
         <rect

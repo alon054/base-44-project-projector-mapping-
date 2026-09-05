@@ -23,6 +23,7 @@ import {
   POINT_HIT_RADIUS,
   constrainToRightAngle,
   deletePointAt,
+  finishPath,
   emptyPathTool,
   pathToolDown,
   pathToolMove,
@@ -155,6 +156,7 @@ describe('D19 — one tool, no mode switch', () => {
     // than a behaviour nobody notices. Read as source, like P5-C's grep test.
     expect(Object.keys(emptyPathTool()).sort()).toEqual([
       'closed',
+      'finished',
       'lastSimplification',
       'points',
       'press',
@@ -219,6 +221,76 @@ describe('the right-angle constraint', () => {
     s = pathToolMove(s, { x: 0.25, y: 0.62 }, WIDE, true);
     s = pathToolUp(s, { x: 0.25, y: 0.62 }, WIDE, true);
     expect(s.points[0]).toEqual({ x: 0.25, y: 0.62 });
+  });
+});
+
+describe('Enter finishes an open path at the last point marked', () => {
+  const run = (): PathToolState => {
+    let s = click(emptyPathTool(), 0.2, 0.3);
+    s = click(s, 0.5, 0.3);
+    return click(s, 0.8, 0.45);
+  };
+
+  it('ends the path where it stands, without joining it into a loop', () => {
+    const open = run();
+    const done = finishPath(open);
+    expect(done.finished).toBe(true);
+    // The three assertions that matter to the operator who asked for this: the
+    // points are the ones they marked, the last one is still the last one, and
+    // nothing became a loop.
+    expect(done.points).toEqual(open.points);
+    expect(done.points[done.points.length - 1]).toEqual({ x: 0.8, y: 0.45 });
+    expect(done.closed).toBe(false);
+    expect(pathToolPath(done, 'route-1').closed).toBe(false);
+  });
+
+  it('a finished path takes no more points', () => {
+    const done = finishPath(run());
+    expect(click(done, 0.9, 0.9)).toEqual(done);
+    expect(pathToolDown(done, { x: 0.2, y: 0.3 }, WIDE)).toBe(done);
+    // Including the one press that is not an append: it cannot be closed either.
+    expect(pathToolDown(done, { x: 0.2, y: 0.3 }, WIDE).closed).toBe(false);
+  });
+
+  it('finishing mid-stroke ends the press and simplifies it, exactly like a release', () => {
+    const stroke = corneredStroke();
+    let s = pathToolDown(emptyPathTool(), stroke[0]!, WIDE);
+    for (let i = 1; i < stroke.length; i++) s = pathToolMove(s, stroke[i]!, WIDE);
+    const done = finishPath(s);
+    expect(done.press).toBeNull();
+    expect(done.finished).toBe(true);
+    // The same counts a normal release produces — one rule, not two.
+    expect(done.lastSimplification).toEqual(drag(emptyPathTool(), stroke).lastSimplification);
+    expect(done.points).toEqual(drag(emptyPathTool(), stroke).points);
+  });
+
+  it('a single stray click cannot be finished — one point is not a path', () => {
+    const one = click(emptyPathTool(), 0.4, 0.4);
+    const after = finishPath(one);
+    expect(after.finished).toBe(false);
+    expect(after.points).toHaveLength(1);
+    expect(finishPath(emptyPathTool()).finished).toBe(false);
+  });
+
+  it('finishing twice is the same as finishing once', () => {
+    const done = finishPath(run());
+    expect(finishPath(done)).toBe(done);
+  });
+
+  it('a closed path is not automatically finished, and vice versa', () => {
+    // The two flags answer different questions, and the block's own deliverable
+    // requires closing to change exactly one field — so closing must not set
+    // this one.
+    let tri = click(emptyPathTool(), 0.2, 0.2);
+    tri = click(tri, 0.8, 0.2);
+    tri = click(tri, 0.5, 0.8);
+    expect(pathToolDown(tri, { x: 0.2, y: 0.2 }, WIDE).finished).toBe(false);
+    expect(finishPath(tri).closed).toBe(false);
+  });
+
+  it('the preview stops offering a next point once the path is finished', () => {
+    const done = finishPath(run());
+    expect(previewPoints(done, { x: 0.95, y: 0.95 }, WIDE)).toEqual(done.points);
   });
 });
 

@@ -5500,3 +5500,95 @@ untouched and still take every event when the select says `region`.
   samples share a coordinate. The tool now declines to produce that input at
   all. Both mechanisms stay — the guard is for float drift, the step is for this
   tool's own sampling, and neither is the other's excuse.
+
+---
+
+## 2026-09-05 — Phase 5 (block D, follow-up) — Enter finishes an open path
+
+- DID: `finishPath` added to `src/editor/pathTool.ts` with a `finished` field on
+  `PathToolState`; `endPress` extracted so a finish and a release simplify by
+  the same rule; Enter wired in `PreviewCanvas`, with a dashed stroke while
+  drawing and solid once finished. Seven tests.
+- MEASURED: tests 721 → 728, all green. Mutations 10 → 14, every one kills at
+  least one test.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid. `POINT_HIT_RADIUS` left
+  open on P5-D — see below.
+
+### The operator's first pass found the gap the test suite could not
+
+37 tests, ten mutations, and none of them noticed that **an open path had no way
+to end.** Closing was the only terminal act the tool had. Every test drew a path
+and then asserted something about it; not one asked "and now how does the
+operator say they are done", because the state after the last click is a
+perfectly good state to assert against.
+
+The operator's words were "if i want to do an open path i click enter and than
+it finish the open path in the last point that i marked", and that is exactly
+what it now does — no point appended, no segment joined, `closed` untouched.
+
+This is worth writing down because the gap is a *category*, not an incident. A
+suite built out of "drive the tool, assert the state" cannot see a missing
+terminal action, since every intermediate state is legitimate. The same shape of
+hole will exist in P6-C's calibration mode the moment it has a gesture that
+begins.
+
+### `DECISION` — `finished` and `closed` are two flags, and stay two
+
+Making Enter set `closed` would have been one line shorter and wrong. `closed`
+is geometry, stored, read by the renderer: does a segment join the last point to
+the first. `finished` is editing, editor-only, never serialized: does the next
+click extend this path.
+
+A route is open (I-18 walks it end to end). An outline along the top edge of a
+box is open. Finishing either of those by closing it would have the tool invent
+a segment the operator never drew — and, on a boundary, that segment is the
+difference between clipping to a shape and clipping to a shape plus a wedge.
+
+Keeping them separate also preserved the block's own deliverable: closing still
+changes exactly one field, and there is now a test asserting the two flags do
+not imply each other in either direction (M13 sets `closed` alongside
+`finished` and fails 3).
+
+### `MEASURED` — mutation checks, the four new ones
+
+| mutation | tests failed |
+|---|---|
+| M11 `finishPath` leaves the press in flight | 1 |
+| M12 a finished path still takes pointer input | 1 |
+| M13 finishing closes the path into a loop | 3 |
+| M14 a one-point path can be finished | 1 |
+| *(M1–M10 re-run against the edited file; M6's text moved into `endPress` and was re-aimed. All 14 kill something; `pathTool.ts` byte-identical afterwards)* | 0 of 14 |
+
+M12 is the one that matters: without it `finished` is a label the status line
+reads and the tool ignores. The guard is at the top of `pathToolDown`, which is
+the single entrance — a finished path cannot be extended, closed, or grabbed,
+because there is one door and it is shut.
+
+### `RISK-TRIGGERED` — one radius, two affordances
+
+Left open on P5-D rather than fixed here. `POINT_HIT_RADIUS` is 0.02 — ~10 px on
+the 480-wide preview — and it decides two different questions:
+
+1. a click that near the **first** point closes the path;
+2. a click that near **any** point grabs it instead of adding a new one.
+
+So a run of short straight segments is awkward: the clicks land inside the
+previous point's grab radius and drag it instead of extending the path. The
+operator reported the tool as "not working good", and this is the most likely
+half of it that Enter does not address.
+
+It is not changed on a hunch. The same radius is what makes a point grabbable at
+all, and shrinking it trades "hard to add a point" for "hard to grab one" — a
+trade that wants a number from the table, at the projector's real size, not a
+guess at the desk. The two could also be split into separate constants, which is
+the better fix if the table says both are wrong at once.
+
+### `IDEAS`
+
+- A finished path is drawn solid and an unfinished one dashed. Cheap, and it
+  answers "is this still taking my clicks" at a glance — the question the
+  operator was actually asking when they said the tool was not working.
+- There is still nowhere to *put* a finished path. It sits in `useState` and
+  `new path` discards it. P6-A is where finishing starts meaning "add this
+  surface to the tree", and `finishPath` is the hook that call goes on.
