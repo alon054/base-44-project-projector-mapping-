@@ -38,17 +38,21 @@ import {
 } from '../providers/procedural/ProceduralProvider';
 import {
   CLOSE_MIN_POINTS,
-  emptyPathTool,
-  finishPath,
+  commitActivePath,
+  deletePointAt,
+  discardActivePath,
+  emptyPathSession,
   pathToolDown,
   pathToolMove,
   pathToolUp,
   pointIndexAt,
   previewPoints,
+  removePath,
   wouldClose,
-  deletePointAt,
+  type PathSession,
   type PathToolState,
 } from './pathTool';
+import type { Path } from '../core/paths';
 import {
   HANDLES,
   aspectOf,
@@ -213,9 +217,9 @@ function RegionSurface({
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [draft, setDraft] = useState<NormalizedRect | null>(null);
   const [placeKind, setPlaceKind] = useState<ProceduralKind>('rect');
-  /** P5-D. The path tool's whole state, and the pointer it has not pressed. */
+  /** P5-D. The paths drawn so far plus the one being drawn, and the pointer. */
   const [tool, setTool] = useState<'region' | 'path'>('region');
-  const [path, setPath] = useState<PathToolState>(emptyPathTool());
+  const [session, setSession] = useState<PathSession>(emptyPathSession());
   const [hover, setHover] = useState<NormalizedPoint | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
 
@@ -245,7 +249,7 @@ function RegionSurface({
     surface.current?.focus();
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
-      setPath((prev) => pathToolDown(prev, p, aspect, e.shiftKey));
+      setSession((prev) => ({ ...prev, active: pathToolDown(prev.active, p, aspect, e.shiftKey) }));
       return;
     }
     const start = beginGesture(scene, selectedId, p, aspect);
@@ -259,7 +263,12 @@ function RegionSurface({
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
       setHover(p);
-      if (p) setPath((prev) => pathToolMove(prev, p, aspect, e.shiftKey));
+      if (p) {
+        setSession((prev) => ({
+          ...prev,
+          active: pathToolMove(prev.active, p, aspect, e.shiftKey),
+        }));
+      }
       return;
     }
     if (!gesture || !p) return;
@@ -286,7 +295,7 @@ function RegionSurface({
     if (tool === 'path') {
       const p = pointOf(e);
       // Simplification happens inside this call, once, on release (D19).
-      setPath((prev) => pathToolUp(prev, p, aspect, e.shiftKey));
+      setSession((prev) => ({ ...prev, active: pathToolUp(prev.active, p, aspect, e.shiftKey) }));
       return;
     }
     const g = gesture;
@@ -320,12 +329,14 @@ function RegionSurface({
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    // Enter finishes the path where it stands. It is the only way to end an
-    // OPEN path — closing is for loops, and a route or a run along one edge of
-    // a box is neither.
+    // Enter finishes the path where it stands AND starts the next one. It is
+    // the only way to end an OPEN path — closing is for loops, and a route or a
+    // run along one edge of a box is neither — and one gesture rather than two,
+    // because an operator who has just marked one face of a box is about to
+    // mark the next.
     if (tool === 'path' && e.key === 'Enter') {
       e.preventDefault();
-      setPath(finishPath);
+      setSession(commitActivePath);
       return;
     }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -333,9 +344,9 @@ function RegionSurface({
       e.preventDefault();
       // The point under the pointer, or the last one placed when the pointer is
       // nowhere near a point — which is what "undo that click" means here.
-      setPath((prev) => {
-        const at = hover ? pointIndexAt(prev, hover, aspect) : null;
-        return deletePointAt(prev, at ?? prev.points.length - 1);
+      setSession((prev) => {
+        const at = hover ? pointIndexAt(prev.active, hover, aspect) : null;
+        return { ...prev, active: deletePointAt(prev.active, at ?? prev.active.points.length - 1) };
       });
       return;
     }
@@ -416,14 +427,19 @@ function RegionSurface({
             </g>
           )}
           {tool === 'path' && (
-            <PathOverlay
-              state={path}
-              hover={hover}
-              aspect={aspect}
-              shift={shiftHeld}
-              px={px}
-              py={py}
-            />
+            <>
+              {session.paths.map((q) => (
+                <BankedPath key={q.id} path={q} px={px} py={py} />
+              ))}
+              <PathOverlay
+                state={session.active}
+                hover={hover}
+                aspect={aspect}
+                shift={shiftHeld}
+                px={px}
+                py={py}
+              />
+            </>
           )}
           {/* Handles only on a settled selection: mid-gesture they would be
               drawn at the corners of a box that is still moving under them. */}
@@ -476,23 +492,41 @@ function RegionSurface({
         </select>
         {tool === 'path' ? (
           <>
-            <button type="button" onClick={() => setPath(emptyPathTool())} style={SELECT_STYLE}>
-              new path
+            <button
+              type="button"
+              onClick={() => setSession(discardActivePath)}
+              style={SELECT_STYLE}
+            >
+              discard
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setSession((prev) =>
+                  prev.paths.length === 0
+                    ? prev
+                    : removePath(prev, prev.paths[prev.paths.length - 1]!.id),
+                )
+              }
+              disabled={session.paths.length === 0}
+              style={SELECT_STYLE}
+            >
+              undo last
             </button>
             <span>
-              {`${path.points.length} point${path.points.length === 1 ? '' : 's'}` +
-                (path.closed ? ' · closed' : '') +
-                (path.finished ? ' · finished' : '') +
-                (path.lastSimplification
-                  ? ` · last stroke ${path.lastSimplification.before} → ${path.lastSimplification.after}`
+              {`${session.paths.length} path${session.paths.length === 1 ? '' : 's'} · ` +
+                `${session.active.points.length} point${
+                  session.active.points.length === 1 ? '' : 's'
+                } in this one` +
+                (session.active.closed ? ' · closed' : '') +
+                (session.active.lastSimplification
+                  ? ` · last stroke ${session.active.lastSimplification.before} → ${session.active.lastSimplification.after}`
                   : '') +
-                (path.finished
-                  ? ' — new path starts another'
-                  : ' — click adds, drag draws, shift squares, Delete removes' +
-                    (path.points.length >= 2 ? ', Enter finishes' : '') +
-                    (path.points.length >= CLOSE_MIN_POINTS && !path.closed
-                      ? ', first point closes it into a loop'
-                      : ''))}
+                ' — click adds, drag draws, shift squares, Delete removes' +
+                (session.active.points.length >= 2 ? ', Enter finishes and starts the next' : '') +
+                (session.active.points.length >= CLOSE_MIN_POINTS && !session.active.closed
+                  ? ', first point closes it into a loop'
+                  : '')}
             </span>
           </>
         ) : (
@@ -516,6 +550,29 @@ const SELECT_STYLE: React.CSSProperties = {
   color: 'inherit',
   font: '11px/1.2 inherit',
 };
+
+/**
+ * A path already banked. Drawn dimmer and without its points, so the one being
+ * drawn is the one that looks live — the operator needs to see the faces they
+ * have marked without those marks competing with the stroke in their hand.
+ */
+function BankedPath({
+  path,
+  px,
+  py,
+}: {
+  path: Path;
+  px: (v: number) => number;
+  py: (v: number) => number;
+}): React.JSX.Element | null {
+  if (path.points.length < 2) return null;
+  const d = path.points.map((q) => `${px(q.x)},${py(q.y)}`).join(' ');
+  return path.closed ? (
+    <polygon points={d} fill="rgba(64,224,255,0.06)" stroke="#2f7f92" strokeWidth={1} />
+  ) : (
+    <polyline points={d} fill="none" stroke="#2f7f92" strokeWidth={1} />
+  );
+}
 
 /**
  * The path being drawn, live.
@@ -555,9 +612,11 @@ function PathOverlay({
             fill="none"
             stroke="#40e0ff"
             strokeWidth={1}
-            // A path still being drawn is dashed and a finished one is solid,
-            // so "is this still taking my clicks" is answerable at a glance
-            // rather than by clicking and seeing what happens.
+            // Dashed while it is taking clicks. Enter banks it, and it comes
+            // back as a solid `BankedPath` — so "is this still mine to edit" is
+            // answerable at a glance rather than by clicking and finding out.
+            // The solid branch stays reachable for a finished-but-unbanked
+            // path, which is what `finishPath` alone produces.
             strokeDasharray={state.finished ? undefined : '4 3'}
           />
         ))}

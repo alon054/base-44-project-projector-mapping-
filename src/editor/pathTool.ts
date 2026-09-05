@@ -455,3 +455,79 @@ export function previewPoints(
 export function pathToolPath(state: PathToolState, id: string): Path {
   return createPath({ id, points: state.points, closed: state.closed });
 }
+
+/**
+ * More than one path.
+ *
+ * The tool draws one path at a time, which is right — a pointer has one
+ * position and a stroke has one owner. But a room has many paths: a box has a
+ * face per side, a table of panels has one per panel, and a scene has a route
+ * *and* the boundary it stays inside. The first version of this block could
+ * hold exactly one and threw it away to start another, which made the tool
+ * useless for the thing it exists for.
+ *
+ * A session is therefore the finished paths plus the one being drawn. It is
+ * **editor state and nothing else** — not serialized, not sent over IPC, not
+ * written to `calibration/`. P6-A is where a finished path becomes a `Surface`
+ * with a role and a home in `calibration/surfaces.json`; until then this is a
+ * drawing board, and `commitActivePath` is the single call that block will
+ * re-point at the surface tree.
+ */
+export interface PathSession {
+  /** Finished paths, in the order they were drawn. */
+  paths: Path[];
+  /** The one taking pointer input. */
+  active: PathToolState;
+}
+
+export function emptyPathSession(): PathSession {
+  return { paths: [], active: emptyPathTool() };
+}
+
+/**
+ * The next free `path-N`, picked the way `addLayer` picks a layer id: the first
+ * suffix nothing is using, not a counter.
+ *
+ * A counter would drift the moment a path is removed — two paths could end up
+ * sharing an id after a delete and a redraw, and an id collision in a list that
+ * P6-A will turn into surfaces is the kind of fault that surfaces as "the wrong
+ * wall lit up".
+ */
+export function nextPathId(paths: readonly Path[]): string {
+  let n = 1;
+  while (paths.some((q) => q.id === `path-${n}`)) n++;
+  return `path-${n}`;
+}
+
+/**
+ * Finish the active path and bank it — the Enter key, end to end.
+ *
+ * One gesture, not two. The operator who has just finished drawing a face wants
+ * to draw the next one, and making them press Enter and then click a button is
+ * the affordance nobody finds twice.
+ *
+ * A path that cannot be finished is not banked, and the session comes back with
+ * its press ended and its points intact — `finishPath` decides that, so "what
+ * counts as a path" is answered in exactly one place.
+ */
+export function commitActivePath(session: PathSession): PathSession {
+  const finished = finishPath(session.active);
+  if (!finished.finished) return { ...session, active: finished };
+  const paths = [...session.paths, pathToolPath(finished, nextPathId(session.paths))];
+  return { paths, active: emptyPathTool() };
+}
+
+/** Throw away the path being drawn. The banked ones are untouched. */
+export function discardActivePath(session: PathSession): PathSession {
+  return { ...session, active: emptyPathTool() };
+}
+
+/**
+ * Remove a banked path by id. Unknown id returns the session unchanged — the id
+ * comes from a list the operator can shorten, which is drift rather than
+ * corruption (Block A's rule).
+ */
+export function removePath(session: PathSession, id: string): PathSession {
+  if (!session.paths.some((q) => q.id === id)) return session;
+  return { ...session, paths: session.paths.filter((q) => q.id !== id) };
+}

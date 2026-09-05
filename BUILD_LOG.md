@@ -5592,3 +5592,83 @@ the better fix if the table says both are wrong at once.
 - There is still nowhere to *put* a finished path. It sits in `useState` and
   `new path` discards it. P6-A is where finishing starts meaning "add this
   surface to the tree", and `finishPath` is the hook that call goes on.
+
+---
+
+## 2026-09-05 — Phase 5 (block D, follow-up 2) — more than one path
+
+- DID: `PathSession` added to `src/editor/pathTool.ts` — the banked paths plus
+  the one being drawn — with `commitActivePath`, `discardActivePath`,
+  `removePath` and `nextPathId`. Enter now finishes **and** banks in one
+  gesture. `PreviewCanvas` holds a session instead of a single tool state and
+  draws banked paths dimmer, behind the live one; `discard` and `undo last`
+  replace the old `new path` button.
+- MEASURED: tests 728 → 736, all green. Goldens 43/43, nothing re-blessed.
+  Mutations 14 → 18, every one kills at least one test.
+- BLOCKER: -
+- NEXT: P5-E, key forwarding and the scene-space grid.
+
+### The tool could hold one path, which made it useless for the thing it is for
+
+Logged as a `SHORTCUT` two entries ago — "the drawn path has nowhere to go, so
+it sits in `useState` and `new path` clears it" — and the reasoning was sound
+about *storage* and wrong about *use*. A box has a path per face. A table of
+panels has one per panel. A scene has a route and the boundary it stays inside.
+The first path the operator drew was fine; the second destroyed the first.
+
+The shortcut was written from the question "where does this get saved", and the
+answer to that is still P6-A. But the operator was never asking to save
+anything — they were asking to draw three faces and see them at once. **A
+storage question was allowed to answer a drawing question**, which is worth
+naming, because the same substitution is sitting in front of P6-C: "surfaces
+live in `calibration/`" is not a reason for the calibration mode to show one
+surface at a time.
+
+The fix needed no storage at all. `PathSession` is editor state next to the
+selection: not serialized, not sent over IPC, not written to `calibration/`.
+
+### `DECISION` — Enter banks, in one gesture
+
+Enter finishes the active path and starts the next one. The alternative — Enter
+finishes, then a button banks it — is two actions for one intention, and the
+second is the affordance nobody finds twice. An operator who has just marked one
+face of a box is about to mark the next; that is the whole workflow.
+
+`finishPath` stays the pure terminal operation and `commitActivePath` calls it,
+so "what counts as a path" is answered in one place. A path of fewer than two
+points is not banked and not lost either: the session comes back with the press
+ended and the stray click still sitting there, which is what "never mind" should
+do.
+
+### `DECISION` — ids fill the first free slot
+
+`nextPathId` walks for the first unused `path-N`, the way `addLayer` picks a
+layer id, rather than counting the list. A counter drifts the moment a path is
+removed: delete `path-2` of three, draw another, and a counter hands out
+`path-3` a second time. An id collision in a list P6-A will turn into surfaces
+with roles is the fault that shows up on the wall as *the wrong panel lit*, and
+it would be discovered there rather than here. M17 puts the counter back and one
+test fails.
+
+### `MEASURED` — mutation checks, the four new ones
+
+| mutation | tests failed |
+|---|---|
+| M15 `commitActivePath` banks without resetting the active path | 2 |
+| M16 an unfinishable path is banked anyway | 1 |
+| M17 `nextPathId` counts instead of filling the first free slot | 1 |
+| M18 `discardActivePath` clears the banked paths too | 1 |
+| *(M1–M14 re-run against the edited file; all 18 kill something, `pathTool.ts` byte-identical afterwards)* | 0 of 18 |
+
+### `IDEAS`
+
+- Three follow-ups to one block, all from the same fifteen minutes of the
+  operator using it. The headless suite was 37 tests and ten mutations and it
+  found none of them, because every one was a **missing** action rather than a
+  wrong one, and a test that drives a tool through the actions it has cannot
+  miss the action it does not have. The cheap counter-move is not more tests; it
+  is running the thing for five minutes before calling the block done.
+- `undo last` removes the most recently banked path. Selecting and deleting a
+  specific one wants the path to be selectable, which wants a hit test against a
+  polyline — that is P6-C's job and it needs the surface tree behind it, so it
+  is not built here.

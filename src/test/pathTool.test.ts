@@ -21,9 +21,14 @@ import {
   FREEHAND_MIN_STEP,
   FREEHAND_TOLERANCE,
   POINT_HIT_RADIUS,
+  commitActivePath,
   constrainToRightAngle,
   deletePointAt,
+  discardActivePath,
+  emptyPathSession,
   finishPath,
+  nextPathId,
+  removePath,
   emptyPathTool,
   pathToolDown,
   pathToolMove,
@@ -32,6 +37,7 @@ import {
   pointIndexAt,
   previewPoints,
   wouldClose,
+  type PathSession,
   type PathToolState,
 } from '../editor/pathTool';
 
@@ -541,5 +547,86 @@ describe('the tool is pure, and its preview is the path it will commit', () => {
     expect(FREEHAND_TOLERANCE).toBeGreaterThan(JITTER);
     expect(FREEHAND_MIN_STEP).toBeLessThan(JITTER);
     expect(FREEHAND_TOLERANCE).toBeLessThan(POINT_HIT_RADIUS);
+  });
+});
+
+describe('more than one path', () => {
+  /** Draw an open three-point path into the session's active slot. */
+  const draw = (session: PathSession, x: number): PathSession => {
+    let a = click(session.active, x, 0.3);
+    a = click(a, x + 0.05, 0.3);
+    a = click(a, x + 0.05, 0.6);
+    return { ...session, active: a };
+  };
+
+  it('banks the finished path and hands back an empty one to draw into', () => {
+    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    expect(one.paths).toHaveLength(1);
+    expect(one.active).toEqual(emptyPathTool());
+
+    // The point of the whole exercise: a second path, without losing the first.
+    const two = commitActivePath(draw(one, 0.5));
+    expect(two.paths).toHaveLength(2);
+    expect(two.paths.map((q) => q.id)).toEqual(['path-1', 'path-2']);
+    expect(two.paths[0]!.points[0]).toEqual({ x: 0.1, y: 0.3 });
+    expect(two.paths[1]!.points[0]).toEqual({ x: 0.5, y: 0.3 });
+  });
+
+  it('a banked path is open unless it was closed, and keeps its own flag', () => {
+    let s = draw(emptyPathSession(), 0.1);
+    s = commitActivePath(s);
+    let closed = draw(s, 0.5);
+    closed = { ...closed, active: pathToolDown(closed.active, { x: 0.5, y: 0.3 }, WIDE) };
+    const both = commitActivePath(closed);
+    expect(both.paths.map((q) => q.closed)).toEqual([false, true]);
+  });
+
+  it('banks a path a face at a time — three of them, which is a box', () => {
+    let s = emptyPathSession();
+    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x));
+    expect(s.paths).toHaveLength(3);
+    expect(s.paths.map((q) => q.id)).toEqual(['path-1', 'path-2', 'path-3']);
+    // Every one of them a real path as far as `core/paths.ts` is concerned.
+    for (const q of s.paths) expect(deserializePath(serializePath(q))).toEqual(q);
+  });
+
+  it('an unfinishable path is not banked, and is not lost either', () => {
+    const stray = { ...emptyPathSession(), active: click(emptyPathTool(), 0.4, 0.4) };
+    const after = commitActivePath(stray);
+    expect(after.paths).toEqual([]);
+    expect(after.active.points).toHaveLength(1);
+    expect(after.active.finished).toBe(false);
+  });
+
+  it('ids fill the first free slot, so a delete and a redraw cannot collide', () => {
+    let s = emptyPathSession();
+    for (const x of [0.1, 0.4, 0.7]) s = commitActivePath(draw(s, x));
+    const gap = removePath(s, 'path-2');
+    expect(gap.paths.map((q) => q.id)).toEqual(['path-1', 'path-3']);
+    expect(nextPathId(gap.paths)).toBe('path-2');
+    const refilled = commitActivePath(draw(gap, 0.2));
+    expect(refilled.paths.map((q) => q.id).sort()).toEqual(['path-1', 'path-2', 'path-3']);
+  });
+
+  it('discarding the active path leaves the banked ones alone', () => {
+    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    const mid = draw(one, 0.5);
+    const after = discardActivePath(mid);
+    expect(after.paths).toEqual(one.paths);
+    expect(after.active).toEqual(emptyPathTool());
+  });
+
+  it('removing an id nothing has is a no-op, not a throw', () => {
+    const one = commitActivePath(draw(emptyPathSession(), 0.1));
+    expect(removePath(one, 'path-9')).toBe(one);
+  });
+
+  it('banking does not mutate the session it was given', () => {
+    const before = draw(emptyPathSession(), 0.1);
+    const copy = JSON.parse(JSON.stringify(before)) as PathSession;
+    commitActivePath(before);
+    discardActivePath(before);
+    removePath(before, 'path-1');
+    expect(before).toEqual(copy);
   });
 });
