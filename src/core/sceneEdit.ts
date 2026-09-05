@@ -10,8 +10,52 @@
  * by a unit test rather than only by clicking. Phase 6's history (D12) snapshots
  * the results of these.
  */
-import { createLayer, type BlendMode, type JsonObject, type Layer } from './layer';
+import {
+  clamp01,
+  createLayer,
+  type BlendMode,
+  type JsonObject,
+  type Layer,
+  type NormalizedTransform,
+} from './layer';
 import { layersInDrawOrder, reindexZOrder, type Scene } from './scene';
+
+/**
+ * The smallest a region may be made, in normalized units (I-1).
+ *
+ * A clamp rather than a refusal, and load-bearing rather than cosmetic: a
+ * region dragged to zero width is invisible, unhittable and therefore
+ * unrecoverable without editing the JSON by hand — a state the editor can
+ * reach in one gesture and cannot leave in any. Same reasoning as `clamp01`:
+ * the value drifted somewhere useless, so it is pulled back rather than
+ * rejected.
+ */
+export const MIN_LAYER_EXTENT = 0.02;
+
+/** A normalized box: centre plus extents, exactly `NormalizedTransform` minus rotation (I-1). */
+export interface NormalizedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A structural edit was asked for with a value that is not a number at all.
+ *
+ * The clamp-versus-refuse rule Block A settled (`core/paths.ts`): a coordinate
+ * outside `[0, 1]` is float drift and is clamped, while a non-finite one is not
+ * an out-of-range number — it is the arithmetic having gone wrong upstream, and
+ * `clamp01(NaN)` would silently teleport a region to the top-left corner. That
+ * is the plausible-wrong-answer failure A9 names, so it is refused with the
+ * layer, the field and the offending value in the message.
+ */
+export class SceneEditError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SceneEditError';
+  }
+}
 
 export interface AddLayerSpec {
   providerId: string;
@@ -20,6 +64,12 @@ export interface AddLayerSpec {
   idPrefix: string;
   name?: string;
   blendMode?: BlendMode;
+  /**
+   * Where the layer goes, normalized (I-1). Absent means the staggered default
+   * below — which is what the layer-list buttons want, since they name no
+   * place. A region drawn on the preview names one, and it wins.
+   */
+  rect?: NormalizedRect;
 }
 
 /**
@@ -58,27 +108,112 @@ export function addLayer(scene: Scene, spec: AddLayerSpec): Scene {
             ? { ...spec.content, tint: ADDED_TINTS[nth % ADDED_TINTS.length] as number }
             : spec.content,
         zOrder: scene.layers.length,
-        // Half-frame, and STAGGERED rather than centred. Every added layer used
-        // to land on exactly the same box with the same default colour, so two
-        // of them were pixel-identical and reordering them changed nothing on
-        // screen — the engine was right and the scene could not show it.
-        // Region placement is Phase 5; until then a new layer has to be
-        // distinguishable from the last one without a gesture.
-        transform: {
-          x: 0.5 + (((nth % 3) - 1) * 0.12),
-          y: 0.5 + (((Math.floor(nth / 3) % 3) - 1) * 0.12),
-          width: 0.5,
-          height: 0.5,
-          rotation: 0,
-        },
+        // A drawn rect wins. Without one: half-frame, and STAGGERED rather than
+        // centred. Every added layer used to land on exactly the same box with
+        // the same default colour, so two of them were pixel-identical and
+        // reordering them changed nothing on screen — the engine was right and
+        // the scene could not show it. That stagger is still what the layer-list
+        // buttons need, because a button names no place; P5-B's gesture does,
+        // which is the case the branch above exists for.
+        transform: spec.rect
+          ? { ...normalizeRectFields(spec.rect, id), rotation: 0 }
+          : {
+              x: 0.5 + (((nth % 3) - 1) * 0.12),
+              y: 0.5 + (((Math.floor(nth / 3) % 3) - 1) * 0.12),
+              width: 0.5,
+              height: 0.5,
+              rotation: 0,
+            },
         ...(spec.blendMode ? { blendMode: spec.blendMode } : {}),
       }),
     ],
   });
 }
 
+/**
+ * The one structural removal in the engine, and therefore the one place a
+ * layer's GPU resources can be orphaned.
+ *
+ * **Disposal is not this function's job and must not become it.** Every scene
+ * this returns reaches the renderer through `RenderHost.setScene`, and
+ * `Compositor.setScene` opens by tearing the whole stack down — every provider
+ * view destroyed, every holder destroyed — before rebuilding from the new
+ * state. So a layer that leaves the scene here has its texture released by the
+ * next `setScene`, with no call for a caller to remember and no second removal
+ * path to keep in step. That is the mechanism; a `dispose()` call added here
+ * would be a guard beside it, and a second one to forget.
+ *
+ * `sceneEdit.test.ts` asserts the teardown-first ordering in the compositor, so
+ * the claim above fails a test rather than a soak if someone reorders it.
+ */
 export function removeLayer(scene: Scene, id: string): Scene {
   return reindexZOrder({ ...scene, layers: scene.layers.filter((l) => l.id !== id) });
+}
+
+/**
+ * Sets a layer's normalized box — the mutation behind both dragging a region
+ * and dragging its corner handle.
+ *
+ * One function for move and scale rather than two, because a corner drag is
+ * *both*: the opposite corner stays put, so the centre moves as the size
+ * changes. Two functions would mean two writes per gesture and an intermediate
+ * state where the region has its new size at its old centre.
+ *
+ * **`rotation` is not a field here.** It exists on the stored transform, in
+ * turns, and this block ships no gesture that writes it (CHECKLIST P5-B). A
+ * partial write that carried rotation would be a rotate handle with no handle.
+ *
+ * Absent fields are left alone; present ones are clamped into `[0, 1]` and the
+ * extents to at least `MIN_LAYER_EXTENT`; non-numbers are refused. Unknown ids
+ * return the scene unchanged, which is what `moveLayer` and `reorderLayer`
+ * already do — a pointer gesture against a layer that has since been deleted is
+ * a race, not a corrupt request.
+ */
+export function setLayerRect(scene: Scene, id: string, rect: Partial<NormalizedRect>): Scene {
+  if (!scene.layers.some((l) => l.id === id)) return scene;
+  return {
+    ...scene,
+    layers: scene.layers.map((l) =>
+      l.id === id ? { ...l, transform: applyRect(l.transform, rect, id) } : l,
+    ),
+  };
+}
+
+function applyRect(
+  t: NormalizedTransform,
+  rect: Partial<NormalizedRect>,
+  layerId: string,
+): NormalizedTransform {
+  const next: NormalizedTransform = { ...t };
+  for (const field of ['x', 'y', 'width', 'height'] as const) {
+    const v = rect[field];
+    if (v === undefined) continue;
+    next[field] = checkedCoordinate(v, field, layerId);
+  }
+  // The extents only. A centre AT the frame edge is a region half off-screen,
+  // which is a legitimate thing to want on a wall; a zero-width region is not.
+  next.width = Math.max(MIN_LAYER_EXTENT, next.width);
+  next.height = Math.max(MIN_LAYER_EXTENT, next.height);
+  return next;
+}
+
+/** Every normalized field entering stored state from a gesture passes here. */
+function checkedCoordinate(v: number, field: string, layerId: string): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    throw new SceneEditError(
+      `layer "${layerId}": ${field} must be a finite number, got ${JSON.stringify(v)}`,
+    );
+  }
+  return clamp01(v);
+}
+
+function normalizeRectFields(rect: NormalizedRect, layerId: string): NormalizedRect {
+  return {
+    x: checkedCoordinate(rect.x, 'x', layerId),
+    y: checkedCoordinate(rect.y, 'y', layerId),
+    width: Math.max(MIN_LAYER_EXTENT, checkedCoordinate(rect.width, 'width', layerId)),
+    height: Math.max(MIN_LAYER_EXTENT, checkedCoordinate(rect.height, 'height', layerId)),
+  };
 }
 
 /**

@@ -441,12 +441,17 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Panel title="Preview (I-7: approximation, not a mirror)">
+          {/* P5-B: `setScene` is the same setter the layer list writes
+              through, so a pointer edit and a button edit are one code path to
+              the output. Selection is NOT passed — it is the preview's own UI
+              state and has no business up here (I-7). */}
           <PreviewCanvas
             speed={speed}
             nominalMs={nominalMs}
             scene={scene}
             clockState={clockTransport.state}
             onClockReady={setPreviewClock}
+            setScene={setScene}
           />
         </Panel>
 

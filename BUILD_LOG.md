@@ -4754,3 +4754,280 @@ usual finding and took a minute to believe.
 the shape. Nothing in `paths.ts` knows about surfaces (§11's order note, §0.2);
 it is the shape primitive alone.
 
+
+## 2026-09-05 — Phase 5 (session 3) — v4 ratified: scope cut to a ship date, three rows closed
+
+- DID: No code. `SPEC.md` rewritten to **v4.0**, `CHECKLIST.md` rebuilt around
+  blocks, `CLAUDE.md` trimmed. Five outstanding `SPEC-CHANGE-PROPOSED` entries
+  from sessions 4, 5 and this session's part 1 are resolved below — none was
+  declined, two were absorbed into larger changes and that is stated per item.
+- MEASURED: nothing new. **581 tests / 28 files, 43 of 43 goldens** carried
+  unchanged from part 2.
+- BLOCKER: none.
+- NEXT: **P5-B — region interaction on the preview.** Its plan is the block's
+  task list in `CHECKLIST.md`; the confirmation round trip is removed.
+
+### `DECISION` — the ship date is now a spec input
+
+A live demo on **2026-10-05**, to evaluators assessing the operator's ability to
+build with an AI coding agent. This is stated in `SPEC.md` §1.1 as a
+three-minute run on a table, and every gate from here is judged against its part
+of it.
+
+**This is the first constraint in the project that is external.** Every previous
+decision optimised for correctness with time as a soft variable. Time is now the
+hard variable, and §12 exists to say what that cost.
+
+### The v4 amendment table
+
+| # | Change | Reason | Alternative rejected |
+|---|---|---|---|
+| V1 | Product statement rewritten around a table, a library and one month | The spec described an engine; the deliverable is a demo. §1.1 names the three minutes so a block can be judged against them | Leaving §2.1's three usage modes as the statement. They are still true and are now background, not scope |
+| V2 | Phases 5–7 kept; **new 8 = library + scenes**, **new 9 = polish + demo**; old 8–13 cut or folded | Four weeks, five phases, one per week plus a buffer | A clean renumber from 1. It would produce exactly the drift the B-series existed to correct, and `BUILD_LOG.md`'s phase labels would go stale for a second time |
+| V3 | §4 gates on **M1 alone**; M2 reported | Headroom is ~100×. **Explicitly not an instrument argument** — M2 works properly now | Retiring M2 outright. It costs nothing to read and it is the number that would move first if something regressed |
+| V4 | §10 rows 11, 12, 13 closed | Each blocked Phase 6 and each now has evidence rather than an argument. Details below | Carrying them into Phase 6 as this session's part 1 proposed. Correct then; the scope cut changed row 12's premise |
+| V5 | **I-18 added — route motion declared, progress derived** | The product's core verb had no data model. I-17 said how a route is *stored* and nothing said how content *travels* it: no speed, no heading, no end behaviour, no offset | Leaving it to be discovered in the block that needs it. That is how a per-layer playhead gets built by accident, which is the thing I-16 exists to refuse |
+| V6 | Gate 4's status corrected to **PASSED** | Five conditions passed on the wall 2026-09-05 and the sixth was discharged the same day. §11 still read "one condition from closed". Absorbs the session-3 proposal | Applying §0's "spec wins" mechanically and un-checking the box. It would deny an event that happened |
+| V7 | §4 records macOS **26.6.2 (25G83)**, the boundary and **both** effects with numbers | Absorbs session 4's and this session's part-1 proposals in full, including the two-numbers-not-one-ratio ruling | Recording the version without the numbers. The version is the label; the ratios are the finding |
+| V8 | A14's count is **seven**, with **two** lessons | Absorbs part 1's proposal verbatim, including that the seventh is the same kind as the first six | The handoff's single sentence and calling it a category error. Reading `GCManagedHash` showed the premise was wrong |
+| V9 | Phases subdivided into **blocks**, one per session, each with files, spec sections, a mechanical "Done when" and a ready prompt | The build is driven one prompt at a time and the tracker did not match how it is driven | Keeping flat deliverable lists. They give an agent no stopping point, and a session that does not know where to stop is a session that reaches into the next phase |
+
+### `DECISION` — §10 row 11, closed by the mechanism that shipped in part 1
+
+Closed, not ruled. The output window's preload carries `hrtime` at **84 ns**
+against a subject that had been measured in 100 µs quanta for four gates. The
+question "accept p99 as a ceiling or fix the clock" is answered by the clock
+being fixed. **M2 is ungated for a different reason than the one the row was
+about** — 1.7–4.1% of N against a 60% limit — and `SPEC.md` §4 states that
+distinction explicitly so a later reader does not record it as "we gave up on
+measuring M2".
+
+### `DECISION` — §10 row 12, `k` retired, and the premise that changed
+
+Part 1 proposed moving row 12 to Phase 6 and **explicitly rejected retiring `k`
+outright**, on the grounds that `k_target` against an offscreen 1080p
+`RenderTexture` is the only thing in the project that sees fill-rate work at
+TARGET_RESOLUTION.
+
+**v4 removes TARGET_RESOLUTION** (§4: there is no 1080p hardware, I-1 makes the
+resolution free when it arrives). So the rejection's premise is gone, and the
+two roles resolve separately:
+
+- **A1's thermal derate** — supplied directly by M2's cold→warm delta, +82% and
+  +55%, two scenes, one session, both runs clean. `k` reported
+  `meaningful: false` at every gate since Phase 3 and could not supply it.
+- **A8's fill-rate coefficient** — has no subject in v4.
+
+**The probe, its call sites and its 14 arithmetic tests are deleted in P9-A.**
+Recorded this way rather than as a quiet drop because the earlier rejection is on
+the record and a later reader is entitled to see which premise moved.
+
+### `DECISION` — §10 row 13, closed on the fix, with what is deferred named
+
+The verdict split, the live/slots separation and `describeSoak` all shipped in
+part 1. The rolling check gates on **textures flat AND settled (K = 64)**;
+buffers and geometries are reported and never gated; slot counts are never gated
+at all.
+
+**What part 1 said was still owed — a 20-minute soak on `phase4-forces` with the
+corrected counter — is deferred to v2, not answered.** Live buffers grew
+74 → 312 over five minutes without settling and that observation stands
+unexplained. It is deferred rather than closed because closing it would be the
+"green box over a question still open" that part 1's own proposal rejected.
+P6-B runs the 5-minute soak in the block that first draws surfaces with
+`Graphics`, which is the scene row 13 was always about.
+
+### `NOTE` — what v4 cuts, and the one thing that is not a cost
+
+§12 lists twelve cuts. Eleven are capability the demo does not show. The twelfth
+is different and is worth naming: **the measurement apparatus itself.** Between
+Phase 0 and Phase 5 the instrument was the bug seven times, and every one of
+those cost more than the number it was chasing. Cutting it is not a compromise
+against quality; on this project's own evidence it is a quality decision.
+
+What is kept is the part that repeatedly paid: M1, the golden harness with its
+lit-pixel floors and measured text exclusions, the import-graph checks, and
+mutation-checking anything load-bearing. Those found real defects. The k probe,
+the p95/p99 dispute and the 20-minute soaks did not.
+
+### `NOTE` — three predictions v4 makes, so they can be checked later
+
+1. **The four-window case (P7-D) is where the schedule actually breaks**, not the
+   surfaces. It is the first block that requires two subsystems built in
+   different weeks to agree on the wall.
+2. **The library (P8-D) is the thing left too late** if it is not started in week
+   1. It needs no code, which is exactly why it will be deprioritised.
+3. **P9-C's usability run will find something cheap and embarrassing** — a
+   missing affordance, not an architecture fault. The prediction is that it is
+   fixable inside its own block; if it is not, that is the signal that "easy to
+   use" was never tested and is now being discovered at the deadline.
+
+### `IDEAS` — parked, not built
+
+- **Record the OS build in each run's conditions block.** Said in sessions 4 and
+  5 and part 1, still unbuilt. `CLAUDE.md` now names it as a precondition so it
+  is at least done by hand.
+- **A focus-theft canary** naming the process that took focus. Three runs lost
+  across three sessions; the diagnosis (Adobe Creative Cloud stack, OneDrive
+  updater) is now written into `CLAUDE.md`'s pre-run preconditions instead.
+- **A `[soak]`-style human-readable line for every structured verdict.**
+  `describeSoak` took ten minutes and made a four-gate-old defect legible.
+- **The 20-minute soak with the corrected counter** — row 13's deferred half.
+  First item on v2's list.
+
+## 2026-09-05 — Phase 5 (block B) — regions placed, moved, scaled and deleted, in normalized space
+
+- DID: **P5-B code-complete, not verified on the table.** `src/editor/interaction.ts`
+  (new — the pixel boundary, hit testing, the three gestures);
+  `src/core/sceneEdit.ts` gains `setLayerRect`, `MIN_LAYER_EXTENT`,
+  `SceneEditError` and an optional `rect` on `addLayer`; `PreviewCanvas.tsx`
+  gains a pointer surface and an SVG selection overlay; `App.tsx` passes one
+  prop. Selection is `useState` in the preview and exists nowhere else.
+- MEASURED: **631 tests / 29 files** (581 / 28 before; **+50** — 32 in
+  `interaction.test.ts`, 18 appended to `sceneEdit.test.ts`). **630 pass.**
+  `npm run test:render` **43 / 43 goldens, none re-blessed.** Typecheck clean
+  both projects. Six mutation checks below.
+- BLOCKER: **`specVersion.test.ts` fails, and it predates this block.** Not
+  fixable inside it — see below. Nothing in P5-B is blocked by it.
+- NEXT: **the operator's table pass on P5-B** — the four hand checks in
+  `CHECKLIST.md`. Not P5-C.
+
+### `BLOCKER` — the suite is 630/631, and the one red test is session 3's
+
+`specVersion.test.ts` slices `SPEC.md` from `## 1. Revision history` and reads
+the first `**vX — ...**` block out of it. v4.0 renamed §1 to *What it is* and
+carries no revision-history section at all, so the slice is empty and the match
+is null. **The test is doing its job**: it exists because B1's version drift
+shipped as an edit and came back, and it was rebuilt as a mechanism precisely to
+catch a spec change that moved its subject. It caught one.
+
+It is left red rather than fixed, for two reasons that both point the same way:
+`SPEC.md` is read-only to this session, and `specVersion.test.ts` is outside
+P5-B's stated files. The choice — restore a revision block to §1, or re-point
+the test at wherever v4 keeps its version history — is the operator's, and it is
+one line either way. Recorded here so that "630/631" is never read as P5-B
+having shipped a red test.
+
+*Verified pre-existing:* `git show HEAD:SPEC.md` has `## 1. Revision history` at
+line 79; the working tree's v4 has `## 1. What it is` at line 45. Session 3
+rewrote the spec and did not re-run the suite, which is why its entry records
+581 green as carried forward rather than measured.
+
+### `DECISION` — the scene is mutated once, on release, and the outline moves live
+
+The obvious implementation mutates the scene on every `pointermove`. It is
+wrong here, and structurally rather than aesthetically:
+
+- `Compositor.setScene` **tears the whole layer stack down and rebuilds it** —
+  every provider view destroyed, every texture recreated. Its own comment says
+  scene edits are operator-paced and a diff would be optimising something that
+  does not happen 60 times a second. A live-follow drag makes that comment false.
+- `App`'s effect sends **the whole scene over IPC on every change**. A drag would
+  put a scene JSON on the boundary once per frame.
+
+So a 90-frame drag would be 90 full teardowns, 90 texture rebuilds and 90 scene
+messages — visible as flicker, and as churn in exactly the counter the rolling
+flatness check watches. Instead the overlay draws the live rect from
+`gestureRect`, and pointer-up commits **one** mutation. The outline and the
+committed transform are the same function, not two approximations of it, so what
+the operator drags is where the region lands.
+
+The cost is honest and worth stating: the *content* does not follow the pointer
+until release, only its outline. Making it follow needs a diffing compositor,
+which is a different block and is not on the ship list.
+
+### `DECISION` — no parameter is registered, for Block A's reason
+
+`entity.<id>.transform.*` is **not** added to the registry. Rule 5 binds every
+*new* parameter, and this block introduces none: `x`, `y`, `width`, `height` have
+been stored fields since Phase 1 and `addLayer` has written them since Phase 1.
+Registering them would be a genuine improvement and it is a change to
+`parameters.ts` and `useSceneRegistry.ts`, both outside this block's files —
+which is the block's own rule for when to stop and ask. Filed as the question,
+not answered: *should the transform be addressable, so a region can be nudged by
+key as well as by mouse?*
+
+### What the block settled
+
+**The pixel boundary is one function wide, and that is testable.**
+`toNormalizedPoint` is the only export in `interaction.ts` that takes a canvas
+dimension; `aspectOf` returns a ratio, which is dimensionless. A test enumerates
+the exports whose parameters mention a pixel and requires the set to be exactly
+those two, so the boundary moving is a failing test rather than a review
+question. Everything downstream — hit test, handle test, gesture geometry,
+mutation — is `[0, 1]`.
+
+**The handle radius is normalized, and that is the whole point.** A radius in
+pixels is 0.025 of a 480 px frame and 0.00625 of a 1920 px one, so the same
+*relative* click grabs a handle on the preview and misses it on a larger canvas.
+That defect would arrive through the **input** path, where nothing was watching:
+I-1 is asserted over stored state, and stored state would have been innocent.
+There is a test that clicks the same near-miss at both resolutions.
+
+**A region's own corner is one ulp outside it.** Centre 0.5 plus half-width 0.15
+is `0.65`; `0.65 - 0.5` is `0.15000000000000002`. So the corner of a region —
+the single most-clicked point on it, because that is where the handles are —
+fails a naive `<=` test. Two fixes, both kept: `toLocal`/`fromLocal` return
+early when `rotation === 0` so the unrotated case does no lossy aspect round
+trip at all, and `containsPoint` carries an `EDGE_TOLERANCE` of 1e-9 — two
+millionths of a pixel at 1920 wide, with a negative control asserting a click a
+thousandth of a frame outside still misses. This is Block A's ruling applied to
+the input path: the value drifted, so it is accepted rather than refused.
+
+**Rotation is read and never written.** The gestures honour it — a rotated
+region is hit where it is drawn, not where its axis-aligned box would be,
+because the compositor rotates in *pixel* space and the hit test un-rotates in
+the same space via the aspect ratio. No gesture writes the field, and a test
+asserts it survives a move and a scale untouched, including when a caller passes
+one through a cast. The block that adds the handle inherits correct maths
+instead of writing them under time pressure.
+
+**The selection outline cannot reach the output, by import graph.** It is an SVG
+sibling of the canvas in `PreviewCanvas.tsx`, not a Pixi display object.
+`output/main.ts` and `golden/main.ts` both build a `Compositor` directly and
+neither can reach `editor/PreviewCanvas.tsx` or `editor/interaction.ts` — a test
+walks the transitive import graph from both entry points and asserts it. That is
+why 43 goldens matched with none re-blessed. Selection likewise has no field on
+`Scene` to occupy, and a test asserts neither `scene.ts` nor `layer.ts` contains
+the string `select` at all.
+
+**Disposal shipped as the mechanism that was already there, not as a new call.**
+Grepping the class rather than the instance — the Phase 3 lesson — there is
+exactly **one** structural removal in the engine, `removeLayer`; the two other
+`layers.filter` sites (`debug/forceLog.ts`, `editor/ForcePanel.tsx`) filter to
+*count* and never produce a scene, and the test names all three rather than
+excluding them by a loose pattern. Every scene reaches the renderer through
+`RenderHost.setScene`, and `Compositor.setScene` opens with `teardownLayers()`.
+So the delete path disposes because there is no other path, and there is nothing
+for a caller to remember. Two tests hold it: `setScene` tears down *before* it
+rebuilds, and teardown destroys the provider view **and** the holder — the
+counter beside the counter, checked this time.
+
+**Mutation checks**, because a new test that cannot fail is not a test. Baseline
+is 1 pre-existing failure; the column is failures *added*:
+
+| mutation | tests failed |
+|---|---|
+| `toNormalizedPoint` hard-codes the preview size instead of the canvas's | 3 |
+| `hitTest` walks back-to-front, so the bottom-most region wins a click | 1 |
+| `setLayerRect`'s refusal replaced by a silent `clamp01` | 2 |
+| the `MIN_LAYER_EXTENT` clamp removed | 1 |
+| `Compositor.setScene` tears down *after* rebuilding | 1 |
+| `addLayer` ignores the drawn rect and staggers anyway | 3 |
+| *(all reverted)* | 1 of 631, the pre-existing one |
+
+**One test assertion was wrong and the test was fixed, not the code** — Block A's
+finding, again. "A scale holds the opposite corner still" is false when the drag
+crosses the anchor: the box turns inside out, and the anchor is still *a* corner
+but no longer the *opposite* one. Split into two tests naming two different true
+properties, rather than loosened into one that says less.
+
+### `IDEAS` — parked, not built
+
+- **Edge handles**, for scaling one axis. Four more cases, zero new mechanism.
+- **Shift to constrain a placement to a square**, and the same modifier
+  constraining a move to one axis. D19 already wants shift for right angles on
+  paths, so there is one convention to settle rather than two to invent.
+- **The transform in the registry** — the question above, filed not answered.
+- **A live-follow drag**, which needs a diffing compositor. Named here so that if
+  the demo rehearsal says the snap reads badly, the cost is already known.
