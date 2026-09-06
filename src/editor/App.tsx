@@ -57,6 +57,7 @@ import {
 import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core/surfaces';
 import { SurfacePanel } from './SurfacePanel';
 import { FillPanel } from './FillPanel';
+import { GroupPanel } from './GroupPanel';
 import { addWhiteFill } from '../core/sceneEdit';
 
 
@@ -693,6 +694,10 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
           </div>
           <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} />
           <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
+        </Panel>
+
+        <Panel title="Groups — I-16, together and in turn, one clock">
+          <GroupPanel scene={scene} setScene={setScene} registry={registry} />
         </Panel>
 
         {!wallMode && (

@@ -32,7 +32,7 @@ import {
   withSurfaceRole,
   type Surface,
 } from '../core/surfaces';
-import { knownRoles, logRoleMiss, resetRoleLog, resolveRole } from '../core/roles';
+import { knownRoles, logRoleMiss, resetRoleLog, resolveRole, roleTokens } from '../core/roles';
 import {
   SURFACES_VERSION,
   createSurfaceFile,
@@ -583,5 +583,52 @@ describe('I-15 — the two trees do not import each other', () => {
       importsOf(f).some((i) => /render\/calibration/.test(i)),
     );
     expect(offenders.map((f) => f.slice(SRC.length + 1))).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* B4 — a face may carry more than one role: `role` is split on whitespace    */
+/* -------------------------------------------------------------------------- */
+
+describe('roleTokens — a face carrying "panel f1" is in both bindings (I-15, B4)', () => {
+  const room = (): Surface[] => [
+    createSurface({ id: 'surface-1', role: 'panel f1', path: quad('p1') }),
+    createSurface({ id: 'surface-2', role: 'panel  f2', path: quad('p2') }),
+    createSurface({ id: 'surface-3', role: 'f3', path: quad('p3') }),
+  ];
+
+  it('splits on any whitespace and drops empties', () => {
+    expect(roleTokens('panel f1')).toEqual(['panel', 'f1']);
+    expect(roleTokens('  panel \t f2  ')).toEqual(['panel', 'f2']);
+    expect(roleTokens('panel')).toEqual(['panel']);
+    expect(roleTokens('')).toEqual([]);
+  });
+
+  it('resolveRole matches any token, in marking order', () => {
+    expect(resolveRole('panel', room()).surfaces.map((s) => s.id)).toEqual(['surface-1', 'surface-2']);
+    expect(resolveRole('f1', room()).surfaces.map((s) => s.id)).toEqual(['surface-1']);
+    expect(resolveRole('f3', room()).surfaces.map((s) => s.id)).toEqual(['surface-3']);
+  });
+
+  it('a one-word role behaves exactly as before — the token IS the role', () => {
+    const plain = [createSurface({ id: 'surface-1', role: 'panel', path: quad('p1') })];
+    expect(resolveRole('panel', plain).surfaces.map((s) => s.id)).toEqual(['surface-1']);
+    expect(resolveRole('pane', plain).unmatched).toBe(true);
+    expect(resolveRole('panel f1', plain).unmatched).toBe(true);
+  });
+
+  it('a fillRole is one token and is never split: "panel f1" matches nothing on its own', () => {
+    expect(resolveRole('panel f1', room()).unmatched).toBe(true);
+  });
+
+  it('knownRoles lists tokens, distinct, first-marked first — and the miss message names them', () => {
+    expect(knownRoles(room())).toEqual(['panel', 'f1', 'f2', 'f3']);
+    expect(resolveRole('nope', room()).message).toContain('"f3"');
+  });
+
+  it('the stored role string is untouched — the format did not change', () => {
+    const s = room()[1]!;
+    expect(s.role).toBe('panel  f2');
+    expect(Object.keys(s).sort()).toEqual(['id', 'name', 'path', 'role']);
   });
 });

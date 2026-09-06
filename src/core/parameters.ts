@@ -34,6 +34,17 @@ import {
   type RouteMotion,
 } from './motion';
 import type { ContentParamSpec } from '../providers/ContentProvider';
+import {
+  CHILD_DURATION_MAX_SECONDS,
+  CHILD_DURATION_MIN_SECONDS,
+  DEFAULT_CHILD_DURATION_SECONDS,
+  GROUP_MODES,
+  childDuration,
+  isGroupMode,
+  type Group,
+  type GroupChild,
+  type GroupMode,
+} from './groups';
 
 export type ParameterValue = number | boolean | string;
 
@@ -699,6 +710,65 @@ export function defineMotionParameters(
       step: 0.001,
       get: () => read().phaseOffset,
       set: (v: number) => write({ phaseOffset: v }),
+    },
+  ];
+}
+
+/**
+ * The `group.<id>.mode` key (I-8, I-16, CLAUDE.md rule 5). Sprint block B4.
+ *
+ * Id-based, so a group keeps its key whatever it holds. The mode is a
+ * parameter — a value on a group that exists — where membership is not: which
+ * layer is in which group is structure, edited through `core/sceneEdit.ts`,
+ * for the same reason adding a layer is not a registry write.
+ */
+export function defineGroupParameters(
+  groupId: string,
+  read: () => Group,
+  write: (mode: GroupMode) => void,
+): ParameterDef[] {
+  return [
+    {
+      key: `group.${groupId}.mode`,
+      label: 'Group — mode',
+      kind: 'enum',
+      options: GROUP_MODES,
+      default: 'parallel',
+      get: () => read().mode,
+      set: (v: string) => {
+        if (isGroupMode(v)) write(v);
+      },
+    },
+  ];
+}
+
+/**
+ * The `child.<id>.duration` key (I-8, I-16, D18). Sprint block B4.
+ *
+ * Keyed by the LAYER's id and not by `group.<gid>.child.<lid>`: a layer moved
+ * between groups keeps its key, which is I-8's rule stated for exactly this
+ * case ("moving a layer between groups does not change its registry key",
+ * Gate 7). One layer is in at most one group, so the key has one owner.
+ *
+ * The read reports the effective block length — the default when the child
+ * states none — so a fader shows what the sequence will actually do.
+ */
+export function defineChildParameters(
+  layerId: string,
+  read: () => GroupChild,
+  write: (duration: number) => void,
+): ParameterDef[] {
+  return [
+    {
+      key: `child.${layerId}.duration`,
+      label: 'Block — duration (s)',
+      kind: 'number',
+      default: DEFAULT_CHILD_DURATION_SECONDS,
+      min: CHILD_DURATION_MIN_SECONDS,
+      max: CHILD_DURATION_MAX_SECONDS,
+      step: 0.1,
+      get: () => childDuration(read()),
+      set: (v: number) => write(v),
     },
   ];
 }

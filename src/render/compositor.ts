@@ -55,6 +55,7 @@ import {
   type PlaceholderInfo,
 } from '../core/resilience';
 import { layersInDrawOrder, type Scene } from '../core/scene';
+import { resolveAt, type Group } from '../core/groups';
 import { layerRng } from '../core/rng';
 import { logRoleMiss, resolveRole } from '../core/roles';
 import type { Surface, SurfaceTree } from '../core/surfaces';
@@ -177,6 +178,15 @@ interface Mounted {
    * must not fall back to drawing at the layer's transform.
    */
   isFill: boolean;
+  /**
+   * B4 / I-16. Whether this layer's `sequence` block is the one showing at the
+   * last frame's time. Always `true` for a layer in no sequence — the implicit
+   * `parallel` root and an explicit `parallel` group behave identically, which
+   * is what makes a defaulted group byte-identical to no group at all.
+   *
+   * Compared before it is written (A14): an unchanged sequence writes nothing.
+   */
+  active: boolean;
 }
 
 /** What actually reaches the renderer, after modulation. Pixels and radians. */
@@ -259,6 +269,14 @@ export class Compositor {
   private mounts = new Map<string, Mounted>();
   private surfaces: SurfaceTree = [];
   private misses: RoleMiss[] = [];
+  /**
+   * B4. The scene's `sequence` groups, and which one each layer belongs to.
+   * Derived at `setScene` so the per-frame question is a map lookup and one
+   * `resolveAt` per sequence, not a search through the scene sixty times a
+   * second. `parallel` groups are deliberately absent: they change nothing.
+   */
+  private sequences: Group[] = [];
+  private sequenceOf = new Map<string, Group>();
 
   constructor(opts: CompositorOptions) {
     this.providers = opts.providers;
@@ -406,6 +424,9 @@ export class Compositor {
     this.scene = scene;
     this.misses = [];
     this.drawBackground();
+    this.sequences = scene.groups.filter((g) => g.mode === 'sequence');
+    this.sequenceOf = new Map();
+    for (const g of this.sequences) for (const c of g.children) this.sequenceOf.set(c.id, g);
 
     const ordered = layersInDrawOrder(scene);
     this.entries = isolateCreate<LayerView>(
@@ -566,7 +587,7 @@ export class Compositor {
     if (stack) this.applyFillHolder(holder, entry.layer);
     else this.applyTransform(holder, entry.layer);
     this.layerRoot.addChild(holder);
-    this.mounts.set(entry.layer.id, {
+    const mounted: Mounted = {
       holder,
       // Seeded with exactly what `applyTransform` just wrote, so an unmodulated
       // scene writes nothing on its first frame and the blessed golden frames
@@ -574,7 +595,13 @@ export class Compositor {
       applied: this.appliedFor(entry.layer, IDENTITY_MODULATION),
       fills: stack ? stack.instances : [],
       isFill: stack !== null,
-    });
+      // Every layer starts ACTIVE and the first `update` decides otherwise, so
+      // a sequence child that is not showing is hidden on the frame it is
+      // judged, and a layer in no sequence is never touched at all.
+      active: true,
+    };
+    this.mounts.set(entry.layer.id, mounted);
+    this.syncVisibility(mounted, entry.layer);
     if (stack) return;
     const box = this.pixelBox(entry.layer);
     entry.view.resize(box.w, box.h);
@@ -697,7 +724,27 @@ export class Compositor {
     holder.rotation = rect.rotation;
     holder.alpha = layer.opacity;
     holder.blendMode = toPixiBlendMode(layer.blendMode);
-    holder.visible = layer.visible;
+    // `visible` is NOT written here — see `syncVisibility`. A sequence can hide
+    // a layer the scene says is visible, and the two rulings meet in one place.
+  }
+
+  /**
+   * The one place a holder's `visible` is written (B4).
+   *
+   * Two things decide it: the layer's own flag, and whether its `sequence`
+   * block is the active one. Before B4 this was one write in `applyTransform`;
+   * now that a second ruling exists, they meet here so that a resize, a
+   * placeholder swap and a block change cannot disagree about what is showing.
+   *
+   * SHOW-THEN-DRAW, and it matters: the per-frame caller sets visibility
+   * BEFORE the provider's `update`, because PixiJS v8 drops a geometry update
+   * made to an invisible view — the `setWallGrid` fault, documented there. A
+   * child becoming active must be visible before it draws its first frame, or
+   * the GPU shows whatever it held when it was last seen.
+   */
+  private syncVisibility(mount: Mounted, layer: Layer): void {
+    const visible = layer.visible && mount.active;
+    if (mount.holder.visible !== visible) mount.holder.visible = visible;
   }
 
   /**
@@ -716,7 +763,7 @@ export class Compositor {
     holder.rotation = 0;
     holder.alpha = layer.opacity;
     holder.blendMode = toPixiBlendMode(layer.blendMode);
-    holder.visible = layer.visible;
+    // Not `visible` — `syncVisibility` owns it, as for `applyTransform`.
   }
 
   private drawBackground(): void {
@@ -740,6 +787,7 @@ export class Compositor {
         // it would put the clip half a face out at the new resolution, which is
         // the one thing on this path that I-1 exists to prevent.
         this.applyFillHolder(mount.holder, entry.layer);
+        this.syncVisibility(mount, entry.layer);
         mount.applied = this.appliedFor(entry.layer, IDENTITY_MODULATION);
         for (const instance of mount.fills) {
           this.reshapeFill(instance, entry.layer, instance.surface);
@@ -748,6 +796,7 @@ export class Compositor {
       }
       if (mount) {
         this.applyTransform(mount.holder, entry.layer);
+        this.syncVisibility(mount, entry.layer);
         // Every cached pixel value was derived from the old size. Rebase, or
         // the next frame's change detection compares against stale pixels and
         // a layer stays where the previous resolution put it.
@@ -760,9 +809,41 @@ export class Compositor {
 
   /** Per frame. A layer that throws is swapped for a placeholder (I-13). */
   update(frame: LayerFrame): void {
+    // I-16 / B4. Which block of each `sequence` is showing at THIS frame's
+    // time — derived from the clock through `resolveAt`, once per sequence,
+    // never remembered from the previous frame. A layer in no sequence is not
+    // visited: the loop is over the sequences' children, so a scene with no
+    // groups pays nothing here and renders exactly as before (§8.1's
+    // byte-identical goldens).
+    //
+    // Visibility is written BEFORE the provider updates below, and a hidden
+    // child is not updated at all — see `syncVisibility` for why the order is
+    // load-bearing and not a tidy-up. "Hidden, not dismounted": the view, its
+    // textures and its decoder stay resident; only its holder is off.
+    for (const group of this.sequences) {
+      const position = resolveAt(group, frame.timeSeconds);
+      for (const child of group.children) {
+        const mount = this.mounts.get(child.id);
+        if (!mount) continue;
+        const active = position !== null && position.child.id === child.id;
+        if (mount.active === active) continue;
+        mount.active = active;
+        const entry = this.entries.find((e) => e.layer.id === child.id);
+        if (entry) this.syncVisibility(mount, entry.layer);
+      }
+    }
+
     const changed = isolateUpdate<LayerView>(
       this.entries,
-      (entry) => entry.view.update(frame),
+      (entry) => {
+        // An inactive sequence child is resident but not drawn into: its
+        // geometry update would be dropped by an invisible view anyway, and a
+        // decoder or a Lottie player that must be told about time is told the
+        // frame it comes back — `update` runs before `render`, so the block
+        // that becomes active draws its first frame at the right time.
+        if (this.mounts.get(entry.layer.id)?.active === false) return;
+        entry.view.update(frame);
+      },
       (info) => this.createPlaceholder(info),
       this.onLayerFailed,
     );
@@ -793,6 +874,7 @@ export class Compositor {
         mount.applied = this.appliedFor(entry.layer, IDENTITY_MODULATION);
       }
       mount.holder.addChild(entry.view.view);
+      this.syncVisibility(mount, entry.layer);
       const box = this.pixelBox(entry.layer);
       entry.view.resize(box.w, box.h);
     }

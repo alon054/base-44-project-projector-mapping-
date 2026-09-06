@@ -42,6 +42,7 @@ import {
   type SurfaceTree,
 } from '../core/surfaces';
 import { MASK_MIN_POINTS } from '../render/mask';
+import { roleTokens } from '../core/roles';
 
 interface Props {
   surfaces: SurfaceTree;
@@ -75,7 +76,8 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
         // to it. Not an error — it is what a face looks like mid-marking, and
         // one more point fixes it.
         const tooFew = points < MASK_MIN_POINTS;
-        const lit = filledRoles.includes(surface.role);
+        // Any token of the face's role that a layer fills lights it (`roleTokens`).
+        const lit = roleTokens(surface.role).some((t) => filledRoles.includes(t));
         return (
           <div key={surface.id} style={rowStyle}>
             <input

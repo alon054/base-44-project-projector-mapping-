@@ -25,7 +25,13 @@ import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
 import { editorLibrary } from './assets';
 import type { Scene } from '../core/scene';
-import { layerSignature, registerGlobalParameters, syncEntityParameters } from './sceneRegistry';
+import {
+  groupSignature,
+  layerSignature,
+  registerGlobalParameters,
+  syncEntityParameters,
+  syncGroupParameters,
+} from './sceneRegistry';
 
 /**
  * The editor's own provider registry. It exists only to ask providers which
@@ -77,6 +83,14 @@ export function useSceneRegistry(
     );
     // `signature` is the dependency; `scene` deliberately is not.
   }, [signature, registry, read, setScene]);
+
+  // I-16, B4: `group.<id>.mode` and `child.<id>.duration`, keyed on group
+  // membership for `layerSignature`'s reason — a duration change is a value,
+  // not a key, and must not churn the registry.
+  const groups = groupSignature(scene);
+  useEffect(() => {
+    syncGroupParameters(registry, read, setScene);
+  }, [groups, registry, read, setScene]);
 
   return registry;
 }

@@ -19,6 +19,13 @@ import {
   type NormalizedTransform,
 } from './layer';
 import { layersInDrawOrder, reindexZOrder, type Scene } from './scene';
+import {
+  DEFAULT_CHILD_DURATION_SECONDS,
+  groupOfLayer,
+  type Group,
+  type GroupChild,
+  type GroupMode,
+} from './groups';
 import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
 
 /**
@@ -195,7 +202,150 @@ export function addWhiteFill(scene: Scene, role: string): Scene {
  * the claim above fails a test rather than a soak if someone reorders it.
  */
 export function removeLayer(scene: Scene, id: string): Scene {
-  return reindexZOrder({ ...scene, layers: scene.layers.filter((l) => l.id !== id) });
+  return reindexZOrder({
+    ...scene,
+    layers: scene.layers.filter((l) => l.id !== id),
+    // A group naming a layer the scene no longer has is refused at the scene
+    // boundary (I-16), so the layer leaves its group in the same edit that
+    // removes it — one removal, both trees of the scene consistent after it.
+    groups: withoutChild(scene.groups, id),
+  });
+}
+
+/* ───────────────────────────── groups (B4) ───────────────────────────── */
+
+/** `groups` with `layerId` removed from whichever group held it. Identity when none did. */
+function withoutChild(groups: readonly Group[], layerId: string): Group[] {
+  if (!groups.some((g) => g.children.some((c) => c.id === layerId))) return groups as Group[];
+  return groups.map((g) =>
+    g.children.some((c) => c.id === layerId)
+      ? { ...g, children: g.children.filter((c) => c.id !== layerId) }
+      : g,
+  );
+}
+
+/**
+ * Appends an empty group with a unique id. The id is unique for I-8's reason:
+ * `group.<id>.mode` must not collide, and the scene format refuses a duplicate.
+ */
+export function addGroup(scene: Scene, mode: GroupMode = 'sequence'): Scene {
+  let n = 1;
+  while (scene.groups.some((g) => g.id === `group-${n}`)) n++;
+  return { ...scene, groups: [...scene.groups, { id: `group-${n}`, mode, children: [] }] };
+}
+
+/**
+ * Removes a group. Its layers are NOT removed — they fall back into the
+ * implicit root, which is where a layer with no group lives (I-16). Deleting
+ * a "this, then that" must not delete the this and the that.
+ */
+export function removeGroup(scene: Scene, groupId: string): Scene {
+  if (!scene.groups.some((g) => g.id === groupId)) return scene;
+  return { ...scene, groups: scene.groups.filter((g) => g.id !== groupId) };
+}
+
+/**
+ * Puts a layer in a group, or back in the implicit root (`null`).
+ *
+ * A layer has one place: it is taken out of whichever group held it first,
+ * then appended to the target — at the END, because in a `sequence` the
+ * children's order is the block order and a layer that joins goes after the
+ * blocks already there. A duration it had in its old group travels with it;
+ * one it never had is filled with the default when the target is a sequence,
+ * so the stored JSON states every block length (`canonicalizeChild`'s rule).
+ *
+ * Unknown layer or group ids return the scene unchanged — a panel firing at a
+ * layer deleted a moment ago is a race, not a corrupt request.
+ */
+export function setLayerGroup(scene: Scene, layerId: string, groupId: string | null): Scene {
+  if (!scene.layers.some((l) => l.id === layerId)) return scene;
+  const current = groupOfLayer(scene, layerId);
+  if ((current?.id ?? null) === groupId) return scene;
+  if (groupId !== null && !scene.groups.some((g) => g.id === groupId)) return scene;
+  const previous = current?.children.find((c) => c.id === layerId);
+  const stripped = withoutChild(scene.groups, layerId);
+  if (groupId === null) return { ...scene, groups: stripped };
+  return {
+    ...scene,
+    groups: stripped.map((g) => {
+      if (g.id !== groupId) return g;
+      const child: GroupChild =
+        previous?.duration !== undefined
+          ? { id: layerId, duration: previous.duration }
+          : g.mode === 'sequence'
+            ? { id: layerId, duration: DEFAULT_CHILD_DURATION_SECONDS }
+            : { id: layerId };
+      return { ...g, children: [...g.children, child] };
+    }),
+  };
+}
+
+/**
+ * Moves a child through its group's order. `delta` is +1 towards the end.
+ * In a `sequence` this is the block order — "this, then that" — and it is
+ * independent of z-order on purpose: which block plays when and which layer
+ * draws over which are two different questions.
+ *
+ * Returns the scene unchanged at either end rather than wrapping, for
+ * `moveLayer`'s reason.
+ */
+export function moveChild(scene: Scene, groupId: string, layerId: string, delta: number): Scene {
+  const group = scene.groups.find((g) => g.id === groupId);
+  if (!group) return scene;
+  const i = group.children.findIndex((c) => c.id === layerId);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= group.children.length) return scene;
+  const children = [...group.children];
+  const a = children[i] as GroupChild;
+  children[i] = children[j] as GroupChild;
+  children[j] = a;
+  return { ...scene, groups: scene.groups.map((g) => (g.id === groupId ? { ...g, children } : g)) };
+}
+
+/**
+ * Sets a group's mode — the registry's `group.<id>.mode` write lands here.
+ *
+ * Switching TO `sequence` fills any child that never stated a duration with
+ * the default, for the same reason the canonicalizer does; switching away
+ * keeps every duration, so the round trip is lossless.
+ */
+export function setGroupMode(scene: Scene, groupId: string, mode: GroupMode): Scene {
+  const group = scene.groups.find((g) => g.id === groupId);
+  if (!group || group.mode === mode) return scene;
+  const children =
+    mode === 'sequence'
+      ? group.children.map((c) =>
+          c.duration === undefined ? { id: c.id, duration: DEFAULT_CHILD_DURATION_SECONDS } : c,
+        )
+      : group.children;
+  return {
+    ...scene,
+    groups: scene.groups.map((g) => (g.id === groupId ? { ...g, mode, children } : g)),
+  };
+}
+
+/**
+ * Sets one child's block length — the registry's `child.<id>.duration` write.
+ * Refuses a non-finite or non-positive value with the ids in the message: a
+ * zero-length block is a sequence that skips a child nobody deleted, which is
+ * the plausible wrong answer, not drift.
+ */
+export function setChildDuration(scene: Scene, layerId: string, duration: number): Scene {
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+    throw new SceneEditError(
+      `child "${layerId}": duration must be a finite number > 0 seconds, got ${JSON.stringify(duration)}`,
+    );
+  }
+  const group = groupOfLayer(scene, layerId);
+  if (!group) return scene;
+  return {
+    ...scene,
+    groups: scene.groups.map((g) =>
+      g.id === group.id
+        ? { ...g, children: g.children.map((c) => (c.id === layerId ? { ...c, duration } : c)) }
+        : g,
+    ),
+  };
 }
 
 /**

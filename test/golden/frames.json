@@ -740,5 +740,65 @@
       0
     ],
     "meanLuminance": 0.260638
+  },
+  "group-parallel-default": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.109309
+  },
+  "group-sequence-t6": {
+    "width": 1280,
+    "height": 720,
+    "hash": "88731dc5",
+    "coverage": 0.64,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      32,
+      192,
+      96
+    ],
+    "meanLuminance": 0.379113
+  },
+  "group-sequence-t9.5": {
+    "width": 1280,
+    "height": 720,
+    "hash": "68731dc5",
+    "coverage": 0.64,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      32,
+      64,
+      208
+    ],
+    "meanLuminance": 0.169647
+  },
+  "group-sequence-t12": {
+    "width": 1280,
+    "height": 720,
+    "hash": "64731dc5",
+    "coverage": 0.64,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      208,
+      32,
+      32
+    ],
+    "meanLuminance": 0.174225
   }
 }

@@ -25,6 +25,12 @@ import type { RouteMotion } from './motion';
 import { DEFAULT_PARALLAX, defaultForceValues, type ParallaxState } from './forces';
 import { FORCE_DEFINITIONS } from './forceDefs';
 import { MotionFormatError, canonicalizeRouteMotion } from './motion';
+import {
+  GroupFormatError,
+  assertGroupsConsistent,
+  canonicalizeGroup,
+  type Group,
+} from './groups';
 
 /**
  * Bumped whenever a stored scene's shape changes incompatibly. A file from a
@@ -67,6 +73,16 @@ export interface Scene {
    * slides near layers across far ones — see `depthGain` in `forces.ts`.
    */
   parallax: ParallaxState;
+  /**
+   * I-16, sprint block B4. The groups the operator made — and ONLY those.
+   *
+   * The root is implicit: a layer in no group here is in a `parallel` root
+   * that is never stored (`core/groups.ts`). So a scene written before groups
+   * existed loads with `groups: []`, every layer in that root, and renders
+   * exactly as it did — migrated by the absence of a field, which is the one
+   * migration that cannot be got wrong.
+   */
+  groups: Group[];
 }
 
 export interface SceneInit {
@@ -77,6 +93,7 @@ export interface SceneInit {
   layers?: Layer[];
   forces?: Record<string, Record<string, number>>;
   parallax?: Partial<ParallaxState>;
+  groups?: Group[];
 }
 
 export function createScene(init: SceneInit): Scene {
@@ -92,6 +109,7 @@ export function createScene(init: SceneInit): Scene {
       x: clamp01(init.parallax?.x ?? DEFAULT_PARALLAX.x),
       y: clamp01(init.parallax?.y ?? DEFAULT_PARALLAX.y),
     },
+    groups: init.groups ?? [],
   };
 }
 
@@ -195,7 +213,29 @@ export function canonicalizeScene(raw: unknown): Scene {
     layers,
     forces: canonicalizeForceValues(o['forces']),
     parallax: canonicalizeParallax(o['parallax']),
+    groups: canonicalizeGroups(o['groups'], seen),
   });
+}
+
+/**
+ * I-16's groups from untrusted data, judged at the scene boundary like every
+ * other field. Absent means none — the implicit root holds every layer, which
+ * is the pre-groups scene exactly. Present goes through `canonicalizeGroup`
+ * per entry and `assertGroupsConsistent` across them; a refusal is re-thrown
+ * as a `SceneFormatError` so a loader catches one type and is still told which
+ * group and which value.
+ */
+function canonicalizeGroups(raw: unknown, layerIds: ReadonlySet<string>): Group[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new SceneFormatError('scene.groups must be an array');
+  try {
+    const groups = raw.map((g) => canonicalizeGroup(g));
+    assertGroupsConsistent(groups, layerIds);
+    return groups;
+  } catch (e) {
+    if (e instanceof GroupFormatError) throw new SceneFormatError(`scene.groups: ${e.message}`);
+    throw e;
+  }
 }
 
 /**

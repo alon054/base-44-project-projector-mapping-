@@ -534,8 +534,60 @@ app.whenReady().then(async () => {
     problems.push('I-4: the reference-patch cases are missing from the harness');
   }
 
-  // The 43 cases that predate B2, by name and by hash.
-  const preFill = Object.keys(expected).filter((n) => !n.startsWith('fill-'));
+  // -------------------------------------------------------------------------
+  // B4 — I-16, SPRINT.md R4, asserted in the runner rather than only stored.
+  //
+  // A defaulted `parallel` group must be BYTE-IDENTICAL to no group at all,
+  // and a `sequence` must show exactly its active block. Both are claims a
+  // re-bless would happily record the failure of.
+  // -------------------------------------------------------------------------
+  const stackPlain = observed['stack'];
+  const stackGrouped = observed['group-parallel-default'];
+  if (stackPlain && stackGrouped) {
+    if (stackGrouped.hash !== stackPlain.hash) {
+      problems.push(
+        `I-16: a defaulted parallel group is NOT byte-identical to no group — stack ${stackPlain.hash}, ` +
+          `group-parallel-default ${stackGrouped.hash}. A group must be inert at its defaults.`,
+      );
+    } else {
+      process.stdout.write(
+        `I-16: a defaulted parallel group is byte-identical to no group at all (${stackPlain.hash})\n`,
+      );
+    }
+  } else {
+    problems.push('I-16: the parallel-group case is missing from the harness');
+  }
+  const seqExpect = { 'group-sequence-t6': 'green', 'group-sequence-t9.5': 'blue', 'group-sequence-t12': 'red' };
+  const channel = (p) => {
+    const [r, g, b] = p;
+    if (r > g && r > b) return 'red';
+    if (g > r && g > b) return 'green';
+    if (b > r && b > g) return 'blue';
+    return 'none';
+  };
+  const seqSeen = Object.entries(seqExpect).map(([name, want]) => {
+    const r = observed[name];
+    if (!r) {
+      problems.push(`I-16: sequence case ${name} is missing from the harness`);
+      return null;
+    }
+    const got = channel(r.centrePixel);
+    if (got !== want) {
+      problems.push(
+        `I-16: ${name} shows ${got} at the centre ${JSON.stringify(r.centrePixel)}, expected ${want}. ` +
+          'The sequence is not deriving its active block from the clock — or is drawing every block.',
+      );
+    }
+    return `${name}=${got}`;
+  });
+  if (seqSeen.every((x) => x !== null)) {
+    process.stdout.write(`I-16: 5 + 3 + 2 sequence shows one block per clock time (${seqSeen.join(', ')})\n`);
+  }
+
+  // The 43 cases that predate B2, by name and by hash. B4's `group-` cases are
+  // excluded the same way B2's `fill-` cases are: the set is "what existed
+  // before the compositor learned each new trick", and it must not grow.
+  const preFill = Object.keys(expected).filter((n) => !n.startsWith('fill-') && !n.startsWith('group-'));
   if (preFill.length !== PRE_FILL_CASES) {
     problems.push(
       `B2: ${preFill.length} pre-fill goldens are committed, expected ${PRE_FILL_CASES}. ` +

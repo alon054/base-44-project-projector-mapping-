@@ -6947,3 +6947,81 @@ and `FillPanel` filters to LIST the bound layers. The test already names
 a loose pattern", so this was named the same way. The claim it protects is
 untouched: `core/sceneEdit.ts` is still the only place a scene is produced by
 removing a layer.
+
+## 2026-09-07 — Sprint (block B4) — `parallel` and `sequence`, derived from one clock
+- DID: `core/groups.ts` (R4 exactly, no `loop` field), `Scene.groups` with an
+  implicit root, group edits in `sceneEdit.ts`, `group.<id>.mode` and
+  `child.<id>.duration` in the registry, sequence gating in the compositor
+  (show-then-draw, hidden not dismounted), `GroupPanel.tsx`, four goldens with
+  runner assertions. `roleTokens`: a face's role matches per word.
+- MEASURED: npm test 1009 → 1065 (41 files). test:render 45 → 49; the 43
+  pre-fill goldens byte-identical; `group-parallel-default` hash-equal to
+  `stack` (ba2e7858). 12 mutations planted, 12 caught.
+- BLOCKER: -
+- NEXT: B5 — route motion on the render path.
+
+**I-16, kept mechanically.** There is no trigger in `groups.ts` and the grep
+test says so with comments stripped: no `setTimeout`, `setInterval`,
+`requestAnimationFrame`, `performance.now`, `Date.now`, no `callback`,
+`onComplete`, `emit(`, `subscribe`, no `+=`, no `%`, no `Math.floor`, and
+`phaseAt(` present. Planting a `setTimeout` fails it. `resolveAt` is
+`phaseAt(t, groupDuration) * groupDuration` walked against block boundaries;
+1000 shuffled times give the answers of 1000 ordered times.
+
+**The root is implicit.** `Scene.groups` lists only the groups the operator
+made; a layer in none is in a `parallel` root that is never stored. A scene
+written before groups has no `groups` key and canonicalizes to `groups: []`,
+which renders byte-identical to what it rendered yesterday — the migration is
+the absence of a field. The alternative, storing a root group and rewriting
+every scene's layers under it, was rejected: it would have put a field into
+every scene ever authored to say what the engine did anyway, which is the
+migration I-14 exists to avoid, and it would have given `group.root.mode` a
+registry key nobody could legitimately write.
+
+**Show-then-draw, again.** Addendum 3 found PixiJS v8 drops a geometry update
+made to an invisible view, and warned that if anything ever wrote `visible`
+per frame the `Compositor.resize` paragraph would become live. B4 is that
+thing. So the holder's `visible` is now written in exactly one place
+(`syncVisibility`), the per-frame pass sets it BEFORE any provider's `update`
+runs, and an inactive child is not updated at all — its geometry update would
+be discarded anyway, and a decoder or Lottie player is told the frame its
+block returns. Mutation 7 (visibility synced after the update via a microtask)
+fails 2 tests. Mutation 8 (destroying inactive children) fails 2: "hidden, not
+dismounted" is asserted, not described.
+
+DECISION — `roleTokens`. B4 as the checklist specifies it could not produce
+the reel's beat 6 beside beat 7. A sequence's children are layers; a layer
+binds to whole faces by one role; and beat 6 ("faces fill in turn while the
+first group fills them throughout") needs every face to be BOTH in the shared
+role and in its own. Group bindings — the P7 mechanism that would iterate a
+role's surfaces — are cut by SPRINT.md. The smallest change that closes the gap
+is to match a surface's `role` per whitespace-separated word: `Surface.role`
+stays one free string (R1), the file format is unchanged, a one-word role
+behaves exactly as before, and a layer's `fillRole` is one token and is never
+split. So `panel f1` is a face that lights with everything bound to `panel`
+and also with the one layer bound to `f1`. `knownRoles` and the miss message
+list tokens. Six tests; mutation 12 (whole-string match) fails 2. Recorded
+here rather than discovered at the wall, where the builder would otherwise
+have found that five faces in a sequence could not also share a fill.
+
+The compositor's `surfacesShapeKey` includes the whole role string, so
+re-tagging a face from `panel` to `panel f1` takes the rebuild path, which is
+right: it changes which layers own an instance on it.
+
+**Registry keys are id-based and the test says so.** `child.<layerId>.duration`
+rather than `group.<gid>.child.<lid>.duration`: moving a layer between groups
+keeps its key, which is Gate 7's line and I-8's rule for exactly this case. A
+layer is in at most one group (the scene boundary refuses two), so the key has
+one owner. `syncGroupParameters` re-keys on membership only — a duration or a
+mode change is a value, not a key, and does not churn the registry.
+
+**What the golden runner now asserts, not stores:** `group-parallel-default`
+(the `stack` scene with every layer in an explicit parallel group) hashes equal
+to `stack`; the three `group-sequence-t*` cases show green at t = 6, blue at
+t = 9.5, red at t = 12 by centre pixel. The pre-fill set excludes `group-` names
+as it excludes `fill-`, so it is still 43.
+
+`layers.filter` is grepped by `sceneEdit.test.ts` as the engine's one
+structural removal. Two reads in this block (`rootGroup`, `GroupPanel`) are
+written as `flatMap` rather than added to the test's named exceptions, so the
+test's claim stays exactly what it was.

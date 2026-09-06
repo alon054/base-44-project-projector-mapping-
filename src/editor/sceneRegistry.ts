@@ -19,7 +19,9 @@
 import { applyLayerPatch, type Layer, type LayerPatch } from '../core/layer';
 import {
   ParameterRegistry,
+  defineChildParameters,
   defineContentParameters,
+  defineGroupParameters,
   defineForceParameters,
   defineLayerParameters,
   defineMotionParameters,
@@ -34,6 +36,8 @@ import type { ContentParamSpec } from '../providers/ContentProvider';
 // "a fix to one counter is not a fix to the counter beside it" is about.
 import { contentKeysOf } from './controls';
 import type { Scene } from '../core/scene';
+import { setChildDuration, setGroupMode } from '../core/sceneEdit';
+import type { Group, GroupChild } from '../core/groups';
 
 /** What the caller must be able to do to the scene. Nothing more. */
 export type ReadScene = () => Scene;
@@ -205,6 +209,77 @@ export function syncEntityParameters(
           patchLayer({ motion: createRouteMotion({ ...(readLayer().motion ?? {}), ...patch }) }),
       ),
     );
+  }
+}
+
+/**
+ * A string that changes when, and only when, the GROUP key set might have:
+ * which groups exist and which layers are their children. The mode is not in
+ * it — toggling a mode changes a value, not a key — and neither is a duration.
+ */
+export function groupSignature(scene: Scene): string {
+  return scene.groups.map((g) => `${g.id}:${g.children.map((c) => c.id).join(',')}`).join(' ');
+}
+
+/**
+ * Brings `group.*` and `child.*` into step with the scene (I-16, B4): every
+ * live group's mode and every child's duration registered, every dead one's
+ * keys given back. Idempotent and cheap to call again, like
+ * `syncEntityParameters`, and for the same reason: React runs effects twice.
+ *
+ * The writes go through `core/sceneEdit.ts` — `setGroupMode` fills durations
+ * on the way into `sequence`, and `setChildDuration` refuses a zero — so the
+ * registry and the panel's structural buttons produce the same scene for the
+ * same intent rather than two that agree today.
+ */
+export function syncGroupParameters(
+  registry: ParameterRegistry,
+  read: ReadScene,
+  setScene: UpdateScene,
+): void {
+  const scene = read();
+  const liveGroups = new Set(scene.groups.map((g) => g.id));
+  const liveChildren = new Set(scene.groups.flatMap((g) => g.children.map((c) => c.id)));
+
+  for (const key of registry.keys('group')) {
+    const id = key.split('.')[1];
+    if (id !== undefined && !liveGroups.has(id)) registry.unregisterPrefix(`group.${id}`);
+  }
+  for (const key of registry.keys('child')) {
+    const id = key.split('.')[1];
+    if (id !== undefined && !liveChildren.has(id)) registry.unregisterPrefix(`child.${id}`);
+  }
+
+  for (const group of scene.groups) {
+    const gid = group.id;
+    if (!registry.has(`group.${gid}.mode`)) {
+      const readGroup = (): Group => {
+        const found = read().groups.find((g) => g.id === gid);
+        if (!found) throw new Error(`group ${gid} is gone`);
+        return found;
+      };
+      registry.registerAll(
+        defineGroupParameters(gid, readGroup, (mode) =>
+          setScene((prev) => setGroupMode(prev, gid, mode)),
+        ),
+      );
+    }
+    for (const child of group.children) {
+      const cid = child.id;
+      if (registry.has(`child.${cid}.duration`)) continue;
+      const readChild = (): GroupChild => {
+        for (const g of read().groups) {
+          const found = g.children.find((c) => c.id === cid);
+          if (found) return found;
+        }
+        throw new Error(`child ${cid} is gone`);
+      };
+      registry.registerAll(
+        defineChildParameters(cid, readChild, (duration) =>
+          setScene((prev) => setChildDuration(prev, cid, duration)),
+        ),
+      );
+    }
   }
 }
 

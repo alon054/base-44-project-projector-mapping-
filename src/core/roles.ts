@@ -32,6 +32,25 @@
  */
 import type { Surface, SurfaceTree } from './surfaces';
 
+/**
+ * The roles a surface carries: its `role` string split on whitespace.
+ *
+ * B4 added this so one face can be in two bindings at once, which the reel's
+ * beat 6 needs: every face carries `panel` so the parallel fill lights them all
+ * (and a fifth face marked later lights itself — beat 7), AND each carries its
+ * own tag (`f1` … `f5`) so a sequence of five layers, one per tag, lights them
+ * in turn. `Surface.role` stays a single free string (SPRINT.md §3 R1, R2) —
+ * nothing is renamed and the file format is unchanged; a role with a space in
+ * it simply matches each of its words. A face with one word behaves exactly as
+ * before.
+ *
+ * A layer's `fillRole` is one token, never split: it names one role, and a
+ * layer that wanted two roles would draw twice on a face carrying both.
+ */
+export function roleTokens(role: string): string[] {
+  return role.split(/\s+/).filter((t) => t !== '');
+}
+
 export interface RoleResolution {
   /** The role asked for, verbatim — including the typo, so the log can name it. */
   role: string;
@@ -51,7 +70,7 @@ export interface RoleResolution {
  * cannot be re-taken identically is not a shot.
  */
 export function resolveRole(role: string, tree: SurfaceTree): RoleResolution {
-  const surfaces = tree.filter((s) => s.role === role);
+  const surfaces = tree.filter((s) => roleTokens(s.role).includes(role));
   if (surfaces.length > 0) return { role, surfaces, unmatched: false, message: '' };
   return {
     role,
@@ -65,10 +84,10 @@ export function resolveRole(role: string, tree: SurfaceTree): RoleResolution {
   };
 }
 
-/** The distinct roles present, in first-marked order. For the miss message and the HUD. */
+/** The distinct role TOKENS present, in first-marked order. For the miss message and the HUD. */
 export function knownRoles(tree: SurfaceTree): string[] {
   const out: string[] = [];
-  for (const s of tree) if (!out.includes(s.role)) out.push(s.role);
+  for (const s of tree) for (const t of roleTokens(s.role)) if (!out.includes(t)) out.push(t);
   return out;
 }
 

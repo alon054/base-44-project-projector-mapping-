@@ -686,7 +686,68 @@ function cases(): GoldenCase[] {
       surfaces: [GOLDEN_FACE_QUAD, GOLDEN_FACE_L],
       clipRole: 'panel',
     },
+
+    // -----------------------------------------------------------------------
+    // B4 — I-16, SPRINT.md R4. Groups.
+    //
+    // `group-parallel-default` is the `stack` scene with every layer placed in
+    // an explicit `parallel` group. It MUST hash identical to `stack`: the
+    // standard a force met at Phase 4 — a group is inert at its defaults, and
+    // the runner asserts the equality rather than leaving it to a re-bless.
+    //
+    // The three `group-sequence-*` cases are one scene — three full-frame
+    // rects, red 5 s, green 3 s, blue 2 s, in one sequence — at three clock
+    // times. Only the active block is drawn, so the centre pixel names the
+    // block: t = 6 is green (block 2 at local 1), t = 9.5 is blue, and t = 12
+    // wraps to 2 and is red again. The runner reads those pixels; a sequence
+    // that drew everything would show blue (the top layer) at every t, and one
+    // that never advanced would show red.
+    // -----------------------------------------------------------------------
+    { name: 'group-parallel-default', scene: parallelGrouped(stack()) },
+    { name: 'group-sequence-t6', scene: sequenceScene(), timeSeconds: 6 },
+    { name: 'group-sequence-t9.5', scene: sequenceScene(), timeSeconds: 9.5 },
+    { name: 'group-sequence-t12', scene: sequenceScene(), timeSeconds: 12 },
   ];
+}
+
+/** `scene` with every layer in one explicit `parallel` group. Must change nothing. */
+function parallelGrouped(scene: Scene): Scene {
+  return {
+    ...scene,
+    id: `${scene.id}-grouped`,
+    groups: [{ id: 'all', mode: 'parallel', children: scene.layers.map((l) => ({ id: l.id })) }],
+  };
+}
+
+/** SPEC.md Gate 7's 5 + 3 + 2, as three coloured blocks. */
+export const SEQUENCE_COLOURS = { a: 0xd02020, b: 0x20c060, c: 0x2040d0 } as const;
+
+function sequenceScene(): Scene {
+  const rect = (id: keyof typeof SEQUENCE_COLOURS, z: number): ReturnType<typeof createLayer> =>
+    createLayer({
+      id,
+      providerId: PROVIDER_ID,
+      content: { kind: 'rect', tint: SEQUENCE_COLOURS[id] },
+      transform: { x: 0.5, y: 0.5, width: 0.8, height: 0.8, rotation: 0 },
+      zOrder: z,
+    });
+  return createScene({
+    id: 'golden-sequence',
+    seed: 0x5eed,
+    background: 0x000000,
+    layers: [rect('a', 0), rect('b', 1), rect('c', 2)],
+    groups: [
+      {
+        id: 'seq',
+        mode: 'sequence',
+        children: [
+          { id: 'a', duration: 5 },
+          { id: 'b', duration: 3 },
+          { id: 'c', duration: 2 },
+        ],
+      },
+    ],
+  });
 }
 
 /**
