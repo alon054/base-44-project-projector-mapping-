@@ -578,8 +578,11 @@ export interface PathSession {
    * path**, which is `interaction.ts`'s ruling and is what makes the move a
    * function of the current session rather than of a snapshot: a path removed
    * mid-drag ends the move instead of resurrecting itself.
+   *
+   * `origin` and `live` are the slop latch — see `DRAG_SLOP`. A press that has
+   * not travelled far enough is a SELECTION and moves nothing.
    */
-  move: { id: string; grab: NormalizedPoint } | null;
+  move: { id: string; grab: NormalizedPoint; origin: NormalizedPoint; live: boolean } | null;
   /**
    * B3. One point of one banked path, being dragged.
    *
@@ -589,8 +592,10 @@ export interface PathSession {
    * an id and an INDEX — never a copy of the point — for the reason `move`
    * holds no copy of the path: a face deleted mid-drag ends the drag instead of
    * resurrecting the point that was on it.
+   *
+   * Latched by `DRAG_SLOP` like `move`, and for the same reason.
    */
-  grabPoint: { id: string; index: number } | null;
+  grabPoint: { id: string; index: number; origin: NormalizedPoint; live: boolean } | null;
 }
 
 export function emptyPathSession(): PathSession {
@@ -599,6 +604,41 @@ export function emptyPathSession(): PathSession {
 
 /** How near a banked path's outline the pointer must be to hit it. Square space. */
 export const PATH_HIT_TOLERANCE = 0.012;
+
+/**
+ * How far the pointer must travel before a press on a BANKED face starts moving
+ * anything. Square space, the same measure `CLICK_SLOP` uses.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THIS EXISTS BECAUSE OF A MEASURED FAULT, NOT A HUNCH.
+ *
+ * Before it, a press on a face selected it AND began a whole-face translation on
+ * the same event, so the first pointer sample after mouse-down moved the face.
+ * A launch of the app that nobody deliberately dragged rewrote
+ * `calibration/surfaces.json` **231 times in 15 seconds** and left every point of
+ * `face 1` translated by an identical delta. The room is calibration: there is no
+ * undo in the app, and the only recovery is `git checkout`.
+ *
+ * That is the same class of fault `render/calibration.ts` refuses for the warp
+ * corners — "a knob that nudges keystone mid-show is a destroyed calibration with
+ * no undo on a wall" — reached from the pointer instead of from a knob. In wall
+ * mode it is worse, because the preview is 960x540 and the path tool is forced
+ * on, so most of the editor window is a surface where a stray click costs an
+ * evening of marking.
+ *
+ * A press below this threshold therefore SELECTS and moves nothing. P5-B's
+ * "select and move in one press" survives — one press still does both — it just
+ * has to be a press that went somewhere.
+ *
+ * Value: `CLICK_SLOP`, deliberately, rather than a second number tuned by eye.
+ * It is the distance this project has already decided separates a click from a
+ * drag, measured at a real 7.2 px on the preview, and a room edit should not have
+ * a different idea of that than a stroke does. If it bites at the wall it can be
+ * split — that is `POINT_HIT_RADIUS`'s note, and it applies here for the same
+ * reason and with the same warning against splitting it on a guess.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export const DRAG_SLOP = CLICK_SLOP;
 
 /** A point with y scaled so distances measure what the canvas shows (`handleAt`). */
 function square(p: NormalizedPoint, aspect: number): PathPoint {
@@ -877,7 +917,9 @@ export function pathSessionDown(
       : session.paths.find((q) => q.id === session.selectedId);
   if (selected) {
     const index = pointIndexOnPath(selected, p, aspect);
-    if (index !== null) return { ...session, grabPoint: { id: selected.id, index } };
+    if (index !== null) {
+      return { ...session, grabPoint: { id: selected.id, index, origin: p, live: false } };
+    }
   }
   const hit = pathHitTest(session.paths, p, aspect);
   if (hit !== null) {
@@ -886,7 +928,15 @@ export function pathSessionDown(
     return {
       ...session,
       selectedId: hit,
-      move: { id: hit, grab: { x: p.x - anchor.x, y: p.y - anchor.y } },
+      // Selected immediately; MOVED only once the press has travelled past
+      // `DRAG_SLOP`. Selecting is free and reversible, translating a marked face
+      // is neither.
+      move: {
+        id: hit,
+        grab: { x: p.x - anchor.x, y: p.y - anchor.y },
+        origin: p,
+        live: false,
+      },
     };
   }
   return {
@@ -914,21 +964,37 @@ export function pathSessionMove(
   if (grab) {
     const path = session.paths.find((q) => q.id === grab.id);
     if (!path) return { ...session, grabPoint: null };
+    // Below the slop this press is still a click and the point does NOT move —
+    // `pathToolMove`'s ruling for a run being drawn, applied to a banked face
+    // where the cost of being wrong is a calibration rather than a stroke.
+    const live = grab.live || squareDistance(grab.origin, p, aspect) > DRAG_SLOP;
+    if (!live) return session;
     const moved = withPathPoint(path, grab.index, p);
     // Identity all the way up: an unmoved point returns the same path, which
     // returns the same session, which leaves `reconcileSurfaces` returning the
     // same room and the editor writing no file. See `withPathPoint`.
-    if (moved === path) return session;
-    return { ...session, paths: session.paths.map((q) => (q.id === grab.id ? moved : q)) };
+    if (moved === path) return grab.live ? session : { ...session, grabPoint: { ...grab, live } };
+    return {
+      ...session,
+      grabPoint: { ...grab, live },
+      paths: session.paths.map((q) => (q.id === grab.id ? moved : q)),
+    };
   }
   const move = session.move;
   if (move) {
     const path = session.paths.find((q) => q.id === move.id);
     if (!path) return { ...session, move: null };
+    // The one that cost a room. See `DRAG_SLOP`.
+    const live = move.live || squareDistance(move.origin, p, aspect) > DRAG_SLOP;
+    if (!live) return session;
     const anchor = path.points[0]!;
     const moved = translatePath(path, p.x - move.grab.x - anchor.x, p.y - move.grab.y - anchor.y);
-    if (moved === path) return session;
-    return { ...session, paths: session.paths.map((q) => (q.id === move.id ? moved : q)) };
+    if (moved === path) return move.live ? session : { ...session, move: { ...move, live } };
+    return {
+      ...session,
+      move: { ...move, live },
+      paths: session.paths.map((q) => (q.id === move.id ? moved : q)),
+    };
   }
   return { ...session, active: pathToolMove(session.active, p, aspect, shift) };
 }

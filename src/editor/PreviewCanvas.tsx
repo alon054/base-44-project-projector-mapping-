@@ -133,6 +133,27 @@ interface Props {
    * received every previous one in order.
    */
   onSurfaces?: (tree: SurfaceTree) => void;
+  /**
+   * How big to draw the preview, in CSS pixels. Defaults to `PREVIEW_SIZE`.
+   *
+   * The BACKING STORE is resized to match, never stretched: `host.resize` goes
+   * through `Compositor.resize`, which rebuilds every mask from its normalized
+   * path (I-1) rather than scaling the pixels it had. A stretched canvas would
+   * put a marked face half a box out at the new size, which is the one thing on
+   * this path I-1 exists to prevent.
+   */
+  size?: { width: number; height: number };
+  /**
+   * B3, after the first attempt to use this at a wall. Wall mode: the pointer
+   * marks faces and does nothing else.
+   *
+   * The tool is FORCED to `path` and its dropdown is gone. That dropdown was the
+   * whole failure — a builder who did not find it clicked on the preview and got
+   * coloured rectangles instead of a marked face, which reads as "it doesn't
+   * work" and is indistinguishable from a broken engine at three metres in a
+   * dark room.
+   */
+  wallMode?: boolean;
 }
 
 export function PreviewCanvas({
@@ -144,6 +165,8 @@ export function PreviewCanvas({
   setScene,
   surfaces = EMPTY_ROOM,
   onSurfaces,
+  size = PREVIEW_SIZE,
+  wallMode = false,
 }: Props): React.JSX.Element {
   const mount = useRef<HTMLDivElement | null>(null);
   const host = useRef<RenderHost | null>(null);
@@ -159,6 +182,11 @@ export function PreviewCanvas({
   // the one thing the preview never hears about.
   const surfacesRef = useRef(surfaces);
   surfacesRef.current = surfaces;
+  // The mount effect runs once and must start at whatever size was asked for,
+  // not at the default — opening straight into wall mode would otherwise leave a
+  // 480-wide backing store under a much wider canvas until something else moved.
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
 
   useEffect(() => {
     let disposed = false;
@@ -168,8 +196,8 @@ export function PreviewCanvas({
 
     void createRenderHost({
       parent: el,
-      width: PREVIEW_SIZE.width,
-      height: PREVIEW_SIZE.height,
+      width: sizeRef.current.width,
+      height: sizeRef.current.height,
       nominalMs: nominalMs || 16.67,
       // §5 / A2, stated by omission elsewhere and explicitly here: the preview
       // does NOT decode video. It shows the poster plus a badge. This is not a
@@ -230,6 +258,18 @@ export function PreviewCanvas({
     host.current?.setSurfaces(surfaces);
   }, [surfaces]);
 
+  /**
+   * Resize the backing store, not the CSS box alone.
+   *
+   * `Compositor.resize` re-derives every layer's pixel box and rebuilds every
+   * fill mask from its normalized path, so a face marked at 480x270 is the same
+   * face at 960x540 (I-1). `RenderHost.resize` returns early when the size has
+   * not changed, so this is safe to run on every render.
+   */
+  useEffect(() => {
+    host.current?.resize(size.width, size.height);
+  }, [size.width, size.height]);
+
   // I-2. The preview's clock is a real clock; this applies the operator's
   // intent to it, which is what makes a pause visible in the editor without a
   // round trip to the output window.
@@ -242,13 +282,15 @@ export function PreviewCanvas({
       scene={scene}
       setScene={setScene}
       surfaces={surfaces}
+      size={size}
+      wallMode={wallMode}
       {...(onSurfaces ? { onSurfaces } : {})}
     >
       <div
         ref={mount}
         style={{
-          width: PREVIEW_SIZE.width,
-          height: PREVIEW_SIZE.height,
+          width: size.width,
+          height: size.height,
           background: '#000',
           border: '1px solid #2b2f34',
           borderRadius: 4,
@@ -281,12 +323,16 @@ function RegionSurface({
   setScene,
   surfaces,
   onSurfaces,
+  size,
+  wallMode,
   children,
 }: {
   scene: Scene;
   setScene: ((update: (prev: Scene) => Scene) => void) | undefined;
   surfaces: SurfaceTree;
   onSurfaces?: (tree: SurfaceTree) => void;
+  size: { width: number; height: number };
+  wallMode: boolean;
   children: React.ReactNode;
 }): React.JSX.Element {
   const surface = useRef<HTMLDivElement | null>(null);
@@ -297,6 +343,16 @@ function RegionSurface({
   const [placeKind, setPlaceKind] = useState<ProceduralKind>('rect');
   /** P5-D. The paths drawn so far plus the one being drawn, and the pointer. */
   const [tool, setTool] = useState<'region' | 'path'>('region');
+  /**
+   * Wall mode marks faces and nothing else, so the tool is not a choice there.
+   *
+   * Resolved on every render rather than pushed into `setTool` by an effect: a
+   * mode flag that has to be copied into a second piece of state is a second
+   * source of truth, and it would flicker one render's worth of region gestures
+   * on the way in — which at a wall is a coloured rectangle appearing on the
+   * projection for a frame.
+   */
+  const activeTool: 'region' | 'path' = wallMode ? 'path' : tool;
   /**
    * D11. On by default: the mental model is meant to be right from the start,
    * not corrected after the first placement lands somewhere surprising. It is
@@ -319,7 +375,7 @@ function RegionSurface({
   const [hover, setHover] = useState<NormalizedPoint | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
 
-  const aspect = aspectOf(PREVIEW_SIZE.width, PREVIEW_SIZE.height);
+  const aspect = aspectOf(size.width, size.height);
 
   /**
    * The session the path tool operates on, assembled from the room and the
@@ -387,7 +443,7 @@ function RegionSurface({
     e.currentTarget.setPointerCapture(e.pointerId);
     // Focus, so the Delete key below reaches this element rather than the page.
     surface.current?.focus();
-    if (tool === 'path') {
+    if (activeTool === 'path') {
       setShiftHeld(e.shiftKey);
       applySession(pathSessionDown(session, p, aspect, e.shiftKey));
       return;
@@ -400,7 +456,7 @@ function RegionSurface({
 
   const onPointerMove = (e: React.PointerEvent): void => {
     const p = pointOf(e);
-    if (tool === 'path') {
+    if (activeTool === 'path') {
       setShiftHeld(e.shiftKey);
       setHover(p);
       // **The room is written on every pointer sample**, which is the opposite
@@ -433,7 +489,7 @@ function RegionSurface({
    * which is a different block than this one and is not on the ship list.
    */
   const onPointerUp = (e: React.PointerEvent): void => {
-    if (tool === 'path') {
+    if (activeTool === 'path') {
       const p = pointOf(e);
       // Simplification happens inside this call, once, on release (D19).
       applySession(pathSessionUp(session, p, aspect, e.shiftKey));
@@ -475,7 +531,7 @@ function RegionSurface({
     // run along one edge of a box is neither — and one gesture rather than two,
     // because an operator who has just marked one face of a box is about to
     // mark the next.
-    if (tool === 'path' && e.key === 'Enter') {
+    if (activeTool === 'path' && e.key === 'Enter') {
       e.preventDefault();
       // Enter banks the active path, which `applySession` turns into a marked
       // face. Closing a path banks it too — that decision is in
@@ -484,7 +540,7 @@ function RegionSurface({
       return;
     }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-    if (tool === 'path') {
+    if (activeTool === 'path') {
       e.preventDefault();
       // The point under the pointer, or the last one placed when the pointer is
       // nowhere near a point — which is what "undo that click" means here. On a
@@ -516,8 +572,8 @@ function RegionSurface({
     return { x: t.x, y: t.y, width: t.width, height: t.height };
   }, [draft, gesture, selected]);
 
-  const px = (v: number): number => v * PREVIEW_SIZE.width;
-  const py = (v: number): number => v * PREVIEW_SIZE.height;
+  const px = (v: number): number => v * size.width;
+  const py = (v: number): number => v * size.height;
   const rotationDeg = selected && !draft ? selected.transform.rotation * 360 : 0;
 
   return (
@@ -534,8 +590,8 @@ function RegionSurface({
         onKeyDown={onKeyDown}
         style={{
           position: 'relative',
-          width: PREVIEW_SIZE.width,
-          height: PREVIEW_SIZE.height,
+          width: size.width,
+          height: size.height,
           cursor: setScene ? 'crosshair' : 'default',
           touchAction: 'none',
           outline: 'none',
@@ -543,15 +599,15 @@ function RegionSurface({
       >
         {children}
         <svg
-          width={PREVIEW_SIZE.width}
-          height={PREVIEW_SIZE.height}
+          width={size.width}
+          height={size.height}
           // The canvas underneath owns every pointer event; this is decoration.
           style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           aria-hidden
         >
           {/* First child, so everything else draws over it. */}
           {showGrid && <SceneGrid px={px} py={py} />}
-          {tool === 'region' && outline && (
+          {activeTool === 'region' && outline && (
             <g
               transform={
                 rotationDeg === 0
@@ -571,7 +627,7 @@ function RegionSurface({
               />
             </g>
           )}
-          {tool === 'path' && (
+          {activeTool === 'path' && (
             <>
               {session.paths.map((q) => (
                 <BankedPath
@@ -594,7 +650,7 @@ function RegionSurface({
           )}
           {/* Handles only on a settled selection: mid-gesture they would be
               drawn at the corners of a box that is still moving under them. */}
-          {tool === 'region' && selected && !draft &&
+          {activeTool === 'region' && selected && !draft &&
             HANDLES.map((h) => {
               const c = handlePoint(selected.transform, h, aspect);
               return (
@@ -613,18 +669,28 @@ function RegionSurface({
         </svg>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#6f767d' }}>
-        <label htmlFor="edit-tool" style={{ color: '#8b939b' }}>
-          tool
-        </label>
-        <select
-          id="edit-tool"
-          value={tool}
-          onChange={(e) => setTool(e.currentTarget.value as 'region' | 'path')}
-          style={SELECT_STYLE}
-        >
-          <option value="region">region</option>
-          <option value="path">path</option>
-        </select>
+        {/*
+          Hidden in wall mode, and that is the fix rather than a tidy-up. A
+          builder who did not find this dropdown clicked on the preview and got
+          coloured rectangles instead of a marked face — which at a projector is
+          indistinguishable from an engine that does not work.
+        */}
+        {!wallMode && (
+          <>
+            <label htmlFor="edit-tool" style={{ color: '#8b939b' }}>
+              tool
+            </label>
+            <select
+              id="edit-tool"
+              value={tool}
+              onChange={(e) => setTool(e.currentTarget.value as 'region' | 'path')}
+              style={SELECT_STYLE}
+            >
+              <option value="region">region</option>
+              <option value="path">path</option>
+            </select>
+          </>
+        )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#8b939b' }}>
           <input
             type="checkbox"
@@ -633,23 +699,27 @@ function RegionSurface({
           />
           grid
         </label>
-        <label htmlFor="place-kind" style={{ color: '#8b939b' }}>
-          draw
-        </label>
-        <select
-          id="place-kind"
-          value={placeKind}
-          onChange={(e) => setPlaceKind(e.currentTarget.value as ProceduralKind)}
-          disabled={tool === 'path'}
-          style={SELECT_STYLE}
-        >
-          {PROCEDURAL_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
-        </select>
-        {tool === 'path' ? (
+        {!wallMode && (
+          <>
+            <label htmlFor="place-kind" style={{ color: '#8b939b' }}>
+              draw
+            </label>
+            <select
+              id="place-kind"
+              value={placeKind}
+              onChange={(e) => setPlaceKind(e.currentTarget.value as ProceduralKind)}
+              disabled={activeTool === 'path'}
+              style={SELECT_STYLE}
+            >
+              {PROCEDURAL_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {activeTool === 'path' ? (
           <>
             <button
               type="button"

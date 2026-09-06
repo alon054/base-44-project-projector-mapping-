@@ -55,6 +55,8 @@ import {
   type ProviderContext,
 } from '../providers/ContentProvider';
 import {
+  CLICK_SLOP,
+  DRAG_SLOP,
   commitActivePath,
   deleteFromPathSession,
   emptyPathSession,
@@ -241,7 +243,10 @@ describe('B3 — a banked face is still editable, point by point', () => {
 
   it('a press ON a point of the selected face grabs THAT point, not the face', () => {
     const s = pathSessionDown(selectedFace(), { x: 0.2, y: 0.2 }, WIDE);
-    expect(s.grabPoint).toEqual({ id: 'path-1', index: 0 });
+    expect(s.grabPoint?.id).toBe('path-1');
+    expect(s.grabPoint?.index).toBe(0);
+    // Not live yet: a press is a selection until it has travelled. See DRAG_SLOP.
+    expect(s.grabPoint?.live).toBe(false);
     expect(s.move).toBeNull();
   });
 
@@ -249,6 +254,7 @@ describe('B3 — a banked face is still editable, point by point', () => {
     const grabbed = pathSessionDown(selectedFace(), { x: 0.2, y: 0.2 }, WIDE);
     const before = grabbed.paths[0]!.points;
     const moved = pathSessionMove(grabbed, { x: 0.3, y: 0.25 }, WIDE);
+    expect(moved.grabPoint?.live).toBe(true);
     const after = moved.paths[0]!.points;
     expect(after[0]).toEqual({ x: 0.3, y: 0.25 });
     expect(after.slice(1)).toEqual(before.slice(1));
@@ -306,6 +312,72 @@ describe('B3 — a banked face is still editable, point by point', () => {
     s = deleteFromPathSession(s, { x: 0.2, y: 0.2 }, WIDE);
     expect(s.paths[0]!.points).toHaveLength(2);
     expect(s.paths[0]!.points.length).toBeLessThan(MASK_MIN_POINTS);
+  });
+});
+
+/**
+ * The fault that cost a committed room, pinned so it cannot come back.
+ *
+ * A launch of the app that nobody deliberately dragged rewrote
+ * `calibration/surfaces.json` 231 times in 15 seconds and left every point of
+ * `face 1` translated by an identical delta. The room is calibration — there is
+ * no undo in the app, and the only recovery was `git checkout`.
+ */
+describe('DRAG_SLOP — a press on a marked face selects it and moves nothing', () => {
+  function selected(): PathSession {
+    const banked = pathSessionDown(triangleInProgress(), { x: 0.2, y: 0.2 }, WIDE);
+    return pathSessionUp(pathSessionDown(banked, { x: 0.45, y: 0.35 }, WIDE), null, WIDE);
+  }
+
+  it('THE FAULT: a sub-slop wobble on a face changes nothing at all', () => {
+    const pressed = pathSessionDown(selected(), { x: 0.45, y: 0.35 }, WIDE);
+    expect(pressed.selectedId).toBe('path-1');
+    const before = pressed.paths[0]!;
+    // A few pixels of drift, which is what a hand resting on a mouse produces.
+    const wobbled = pathSessionMove(pressed, { x: 0.4530, y: 0.3515 }, WIDE);
+    expect(wobbled).toBe(pressed);
+    expect(wobbled.paths[0]).toBe(before);
+    // And therefore no new room — which is what `applySession` tests before it
+    // writes the file and crosses to the output window.
+    const tree = room(before);
+    expect(reconcileSurfaces(tree, wobbled.paths)).toBe(tree);
+  });
+
+  it('a wobble repeated many times still moves nothing — no accumulation', () => {
+    // The 231 writes were each tiny. Anything that accumulated sub-slop steps
+    // would pass the single-wobble test above and still destroy a room.
+    let s = pathSessionDown(selected(), { x: 0.45, y: 0.35 }, WIDE);
+    const before = s.paths[0]!;
+    for (let i = 0; i < 240; i++) {
+      s = pathSessionMove(s, { x: 0.45 + (i % 2) * 0.0008, y: 0.35 }, WIDE);
+    }
+    expect(s.paths[0]).toBe(before);
+  });
+
+  it('a deliberate drag past the slop still moves the whole face', () => {
+    const pressed = pathSessionDown(selected(), { x: 0.45, y: 0.35 }, WIDE);
+    const moved = pathSessionMove(pressed, { x: 0.6, y: 0.45 }, WIDE);
+    expect(moved.move?.live).toBe(true);
+    expect(moved.paths[0]!.points[0]).not.toEqual(pressed.paths[0]!.points[0]);
+  });
+
+  it('once live it stays live — a drag that returns near its origin is still a drag', () => {
+    // `pathToolMove`'s freehand latch, for the same reason: a stroke that comes
+    // back to where it started is still a stroke, and a face dragged out and
+    // back must end where the hand left it rather than snapping home.
+    const pressed = pathSessionDown(selected(), { x: 0.45, y: 0.35 }, WIDE);
+    const out = pathSessionMove(pressed, { x: 0.6, y: 0.45 }, WIDE);
+    const back = pathSessionMove(out, { x: 0.4505, y: 0.3502 }, WIDE);
+    expect(back.move?.live).toBe(true);
+    expect(back.paths[0]!.points[0]).not.toEqual(out.paths[0]!.points[0]);
+  });
+
+  it('a point grab is latched the same way, by the same constant', () => {
+    const grabbed = pathSessionDown(selected(), { x: 0.2, y: 0.2 }, WIDE);
+    expect(grabbed.grabPoint?.live).toBe(false);
+    const wobbled = pathSessionMove(grabbed, { x: 0.2008, y: 0.2004 }, WIDE);
+    expect(wobbled).toBe(grabbed);
+    expect(DRAG_SLOP).toBe(CLICK_SLOP);
   });
 });
 

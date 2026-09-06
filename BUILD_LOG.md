@@ -6578,3 +6578,96 @@ window's `applySurfaces`, are built on exactly the warp's shape and have not
 been executed. Those two checklist lines are deliberately left unticked. The
 suite says a value was written and a scene changed; it says nothing about
 whether light landed on a box.
+
+## 2026-09-06 — Sprint (block B3, addendum) — wall mode, and the press that destroyed the room
+- DID: ran the app for the first time this block. Added wall mode (editor
+  defaults to the loop and nothing else; preview 960x540; tool forced to `path`).
+  Fixed `pathSessionDown` starting a whole-face translation on the same event
+  that selected the face — `DRAG_SLOP`, latched, on both the face move and the
+  point drag.
+- MEASURED: before the fix, an untouched 15 s launch called `saveSurfacesRaw`
+  **231 times** and translated every point of `face 1` by an identical delta.
+  After the fix, the same launch: **0 writes in 16 s, surfaces.json
+  byte-identical**. npm test 952 → 957 (38 files). test:render 45/45, 43
+  pre-fill goldens byte-identical. 3 more mutations, 3 caught.
+- BLOCKER: -
+- NEXT: W1 — the builder at the projector, room dark.
+
+RISK-TRIGGERED — the operator could not find the controls, and that was the
+block failing, not the operator.
+
+B3 shipped a loop that worked and could not be reached. The editor opened on
+twelve panels and the one control that mattered — the preview's `tool` dropdown,
+which has to be moved from `region` to `path` before a click marks anything at
+all — was the size of a word, below the preview, between two other dropdowns.
+Click without finding it and you get coloured rectangles. At three metres in a
+dark room that is indistinguishable from an engine that does not work, and the
+report that came back was "it doesn't work, I don't understand, there is too
+much stuff over there."
+
+That is a fair verdict and the checklist had no line for it. Every Done-when in
+this block was about whether the loop *functions*; none was about whether a
+person can find it with a projector running. The suite was 952 green at the time.
+
+Wall mode is the answer and it DEFAULTS ON: four numbered steps, the preview at
+960x540, the white-fill button, the surface list. Tool forced to `path`, its
+dropdown gone. Everything else behind one button. The bar keeps the three facts
+wall mode would otherwise hide — which display, warp on or off, how many faces.
+
+The preview doubling matters more than it looks. `Compositor.resize` rebuilds
+every mask from its normalized path (I-1), so it is the same geometry at a bigger
+backing store rather than a stretch — a face marked at 480x270 is the same face
+at 960x540 — and a corner is four times the area to aim at.
+
+INVARIANT-TENSION — none, but this came close to being the sprint's worst loss.
+
+A PRESS ON A MARKED FACE WAS TRANSLATING IT, AND NOTHING SAID SO.
+
+`pathSessionDown` selected a banked face and installed a `move` record on the
+same event, so the very first pointer sample after mouse-down translated it.
+P5-B's ruling — "select and move in one press, two gestures to move an unselected
+thing is the affordance nobody finds" — was inherited from REGIONS, where the
+cost of an accidental two-pixel nudge is a layer you can see and drag back. It
+was applied to the ROOM, where the cost is a calibration, there is no undo in the
+app, and the only recovery is `git checkout`.
+
+Measured, on a launch nobody deliberately dragged: `saveSurfacesRaw` called
+**231 times in 15 seconds**, and every point of `face 1` came out translated by
+one identical delta. The committed `calibration/surfaces.json` was destroyed
+twice in this session before the cause was found. Wall mode had just made it
+far worse — 960x540 of forced path tool is most of the editor window, all of it
+a surface where a stray click costs an evening of marking.
+
+This is the same fault `render/calibration.ts` already refuses for the warp
+corners, and its comment names it exactly: "a knob that nudges keystone mid-show
+is a destroyed calibration with no undo on a wall." That argument was written
+about the parameter registry and it is just as true of a pointer. The room got
+the file-store half of I-5's protection and none of the input half.
+
+`DRAG_SLOP` is the fix: a press below the threshold selects and moves nothing,
+latched so a drag that returns near its origin is still a drag (`pathToolMove`'s
+freehand latch, same reasoning). It is `CLICK_SLOP` and not a new number — this
+project has already decided what separates a click from a drag, measured at a
+real 7.2 px on the preview, and a room edit should not hold a different opinion
+than a stroke does. If it bites at the wall it can be split, with the same
+warning `POINT_HIT_RADIUS` carries against splitting it on a guess.
+
+Three tests pin it, and the second one is the one that matters: 240 sub-slop
+wobbles in a row must move nothing. A threshold that merely filtered each sample
+would have passed a single-wobble test and still accumulated a destroyed room
+over 231 of them.
+
+MEASURED — the two lines B3 would not tick are now ticked, by accident.
+
+B3's Result deliberately left "the file is rewritten on every change" and "the
+output window picks it up live" unticked, because no test runs main's IPC
+handlers or two Electron windows. The 231-write incident executed exactly that
+chain in front of a probe: `gesture → applySurfaces → ipcMain.on(surfaces:set) →
+saveSurfacesRaw`, with the output window logging `[surfaces] 2: …` on every one
+of them, and logging the stored room at launch before any edit. Ugly evidence,
+but it is evidence, and it is recorded as what it is rather than upgraded to a
+claim about the wall.
+
+Still owed to the wall: everything about light landing on a box. The app running
+on a desk says the chain works. It says nothing about whether a fill lands inside
+a real face and stops at its edge.

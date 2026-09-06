@@ -24,7 +24,7 @@ import {
   passesPresentation,
   percentile,
 } from '../debug/hud';
-import { PreviewCanvas } from './PreviewCanvas';
+import { PREVIEW_SIZE, PreviewCanvas } from './PreviewCanvas';
 import { forwardedShortcut } from './outputKeys';
 import { LayerPanel } from './LayerPanel';
 import { EntityPanel } from './EntityPanel';
@@ -126,6 +126,20 @@ export function App(): React.JSX.Element {
    * property of the design rather than of message ordering.
    */
   const [surfaces, setSurfaces] = useState<SurfaceTree>([]);
+  /**
+   * Wall mode — the editor with everything that is not the loop taken away.
+   *
+   * **Defaults ON, and that is the point.** The first attempt to use B3 at a
+   * projector failed on "couldn't find the controls": twelve panels, and the one
+   * that mattered was a tool dropdown the size of a word. The loop worked and was
+   * unreachable, which from the wall is the same thing as broken. So the editor
+   * now opens on the four things the loop needs and everything else is one click
+   * away, rather than the other way round.
+   *
+   * `useState` here, like the panel's own UI state: it is not content, it must
+   * not reach a saved file, and there is nothing that copies it into one.
+   */
+  const [wallMode, setWallMode] = useState(true);
 
   /**
    * True once the config has been consulted, so the FIRST scene this editor
@@ -403,8 +417,63 @@ export function App(): React.JSX.Element {
   const pStat = useMemo(() => stat(presented), [presented]);
   const wStat = useMemo(() => stat(frameWait), [frameWait]);
 
+  const selectedDisplay = displays.find((d) => d.isSelected);
+
   return (
-    <div style={{ display: 'flex', gap: 20, padding: 20, alignItems: 'flex-start' }}>
+    <div style={{ padding: wallMode ? 12 : 20 }}>
+      {/*
+        The mode switch, first and unmissable. Everything hidden below is one
+        click away, and the line beside it says what the output is doing, so
+        "which display, and is the warp on" is answerable without leaving wall
+        mode to go and look.
+      */}
+      <div style={wallBarStyle}>
+        <button
+          type="button"
+          onClick={() => setWallMode((w) => !w)}
+          style={{
+            ...buttonStyle,
+            marginTop: 0,
+            fontWeight: 600,
+            borderColor: wallMode ? '#40e0ff' : '#2b2f34',
+            background: wallMode ? '#16323a' : '#191c1f',
+          }}
+        >
+          {wallMode ? 'WALL MODE — show everything' : 'Back to wall mode'}
+        </button>
+        <span style={{ fontSize: 12, color: '#8b939b' }}>
+          {selectedDisplay
+            ? `output → ${selectedDisplay.label} ${selectedDisplay.size.width}×${selectedDisplay.size.height}`
+            : 'output → no display picked'}
+          {' · warp '}
+          {calibration.enabled ? 'ON' : 'off'}
+          {' · '}
+          {surfaces.length} face{surfaces.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {/*
+        Hoisted out of the left column, because a warning about the projector
+        display is exactly what a builder in wall mode needs to see and the left
+        column is the thing wall mode hides.
+      */}
+      {warning ? (
+        <div
+          style={{
+            background: '#6b1b1b',
+            padding: '8px 10px',
+            borderRadius: 4,
+            fontFamily: 'ui-monospace, Menlo, monospace',
+            fontSize: 12,
+            marginBottom: 12,
+          }}
+        >
+          {warning}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      {!wallMode && (
       <div style={{ width: 380, display: 'flex', flexDirection: 'column', gap: 18 }}>
         <header>
           <h1 style={{ font: '600 15px/1.3 inherit', margin: '0 0 4px' }}>
@@ -416,20 +485,6 @@ export function App(): React.JSX.Element {
             {TARGET_RESOLUTION.width}×{TARGET_RESOLUTION.height}
           </p>
         </header>
-
-        {warning ? (
-          <div
-            style={{
-              background: '#6b1b1b',
-              padding: '8px 10px',
-              borderRadius: 4,
-              fontFamily: 'ui-monospace, Menlo, monospace',
-              fontSize: 12,
-            }}
-          >
-            {warning}
-          </div>
-        ) : null}
 
         <Panel title="Output display">
           {displays.length === 0 ? (
@@ -542,8 +597,34 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
           </p>
         </Panel>
       </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/*
+          The three lines that answer "I don't understand". Shown only in wall
+          mode, because in full mode the tool dropdown is visible and the reader
+          has the whole panel set to orient by.
+        */}
+        {wallMode && (
+          <ol style={stepsStyle}>
+            <li>
+              Click the corners of one face of the box, on the preview below.
+            </li>
+            <li>
+              Press <kbd style={kbdStyle}>Enter</kbd> — or click the first point again — to
+              bank it. It becomes <strong>face 1</strong>, role <code>panel</code>.
+            </li>
+            <li>
+              Hit <strong>White fill → panel</strong> once. Every face tagged{' '}
+              <code>panel</code> lights white, including ones you mark later.
+            </li>
+            <li>
+              Click a face to select it, then drag its points until the white sits on the
+              real box. <kbd style={kbdStyle}>Delete</kbd> over a point trims that corner;
+              away from a point it removes the face.
+            </li>
+          </ol>
+        )}
         <Panel title="Preview (I-7: approximation, not a mirror)">
           {/* P5-B: `setScene` is the same setter the layer list writes
               through, so a pointer edit and a button edit are one code path to
@@ -558,6 +639,8 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
             setScene={setScene}
             surfaces={surfaces}
             onSurfaces={applySurfaces}
+            size={wallMode ? WALL_PREVIEW_SIZE : PREVIEW_SIZE}
+            wallMode={wallMode}
           />
         </Panel>
 
@@ -583,6 +666,8 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
           <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
         </Panel>
 
+        {!wallMode && (
+          <>
         <Panel title="Transport — I-2, one clock for everything">
           <TransportPanel transport={clockTransport} clock={previewClock} />
         </Panel>
@@ -689,6 +774,9 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
             <p style={{ margin: 0, color: '#8b939b' }}>Waiting for the output window…</p>
           )}
         </Panel>
+          </>
+        )}
+      </div>
       </div>
     </div>
   );
@@ -710,6 +798,47 @@ const CALIBRATION_VIEWPORT = 'main';
  * string, which is the only thing they are allowed to agree on.
  */
 const WHITE_FILL_ROLE = 'panel';
+
+/**
+ * The preview at twice its normal edge in wall mode. Exactly 16:9 and integral,
+ * so it is the same geometry at a bigger backing store rather than a stretch —
+ * `Compositor.resize` rebuilds every mask from its normalized path (I-1), so a
+ * face marked at one size is the same face at the other.
+ *
+ * Sized to fit the editor window's 1180px default with the left column gone.
+ * Corners are aimed at with a mouse, and a corner is four times easier to hit
+ * here than in a 480-wide preview.
+ */
+const WALL_PREVIEW_SIZE = { width: 960, height: 540 } as const;
+
+const wallBarStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  marginBottom: 12,
+  flexWrap: 'wrap',
+};
+
+/** The four steps of the loop, numbered. The answer to "I don't understand". */
+const stepsStyle: React.CSSProperties = {
+  margin: 0,
+  padding: '10px 10px 10px 30px',
+  border: '1px solid #2b2f34',
+  borderRadius: 6,
+  background: '#15181b',
+  color: '#c7ced4',
+  fontSize: 13,
+  lineHeight: 1.7,
+  maxWidth: 900,
+};
+
+const kbdStyle: React.CSSProperties = {
+  padding: '1px 5px',
+  borderRadius: 3,
+  border: '1px solid #3a4046',
+  background: '#22262a',
+  font: '11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace',
+};
 
 const buttonStyle: React.CSSProperties = {
   marginTop: 8,
