@@ -18,3 +18,8 @@ measurements/*.log
 # mismatch. The hashes in test/golden/ are the committed artefact, not these.
 .golden-preview/
 .probe/
+
+# The downloaded catalog library is the operator's collection, like their room
+# (calibration/) — machine-local, brought home through the editor's catalog
+# panel with an I-10 record per asset in index.json. Never source.
+assets/library/

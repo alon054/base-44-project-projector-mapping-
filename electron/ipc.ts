@@ -15,6 +15,25 @@ export const CH = {
   /** editor -> main -> output: one parameter value. */
   paramSet: 'param:set',
   /**
+   * The online catalog and the downloaded library (operator-requested; see
+   * `catalogLogic.ts`). All JSON: a search returns hits, an add returns the
+   * entry that was written to `assets/library/index.json`, and the bytes
+   * themselves never cross — renderers load them through the `library:`
+   * protocol main serves from disk (I-7).
+   */
+  /** editor -> main (invoke): free-text search. */
+  catalogSearch: 'catalog:search',
+  /** editor -> main (invoke): the playable clips inside one hit (a pack). */
+  catalogFiles: 'catalog:files',
+  /** editor -> main (invoke): download one hit — or one named clip of it — into the library. */
+  catalogAdd: 'catalog:add',
+  /** main -> editor: download progress for one identifier. Never per frame. */
+  catalogProgress: 'catalog:progress',
+  /** renderer -> main (invoke): every entry in the downloaded library. */
+  libraryList: 'library:list',
+  /** main -> editor AND output: one entry just written. */
+  libraryAdded: 'library:added',
+  /**
    * output -> main -> editor: the same token, sent the instant the output
    * renderer RECEIVES it, before any frame wait (A11 transport latency).
    */
@@ -285,6 +304,36 @@ export interface SurfacesSet {
   version: number;
   surfaces: unknown[];
 }
+
+/** editor -> main: what to search for. */
+export interface CatalogSearchRequest {
+  query: string;
+}
+
+/** editor -> main: which hit to bring home. The hit is echoed back whole so main need not cache searches. */
+export interface CatalogAddRequest {
+  hit: CatalogHit;
+  /** A clip inside the item, by file name. Absent means the best single file. */
+  file?: string;
+}
+
+/** main -> editor: the clips of one item, best first, or the reason there are none. */
+export type CatalogFilesResult =
+  | { ok: true; clips: CatalogClip[]; license: string | null; licenseUrl: string }
+  | { ok: false; reason: string };
+
+/** main -> editor: the result of an add, in words when it did not happen. */
+export type CatalogAddResult = { ok: true; entry: LibraryEntry } | { ok: false; reason: string };
+
+/** main -> editor: bytes so far, for a progress bar. */
+export interface CatalogProgress {
+  identifier: string;
+  received: number;
+  total: number;
+  done: boolean;
+}
+
+export type { CatalogClip, CatalogHit, LibraryEntry } from './catalogLogic';
 
 /**
  * I-2's state, on the wire. Mirrors `ClockTransport` in `src/core/clock.ts`,
@@ -738,6 +787,8 @@ export interface DisplayInfo {
  *
  * Returns the value so it can be used inline at a send site.
  */
+import type { CatalogClip, CatalogHit, LibraryEntry } from './catalogLogic';
+
 export function assertJsonOnly<T>(value: T, path = 'payload'): T {
   walk(value, path, new Set());
   return value;

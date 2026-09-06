@@ -58,6 +58,8 @@ import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core
 import { SurfacePanel } from './SurfacePanel';
 import { FillPanel } from './FillPanel';
 import { GroupPanel } from './GroupPanel';
+import { CatalogPanel } from './CatalogPanel';
+import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
 import { addWhiteFill } from '../core/sceneEdit';
 
 
@@ -142,6 +144,24 @@ export function App(): React.JSX.Element {
    * not reach a saved file, and there is nothing that copies it into one.
    */
   const [wallMode, setWallMode] = useState(true);
+  /**
+   * The downloaded library's version — a memo dependency for the pickers, not
+   * a copy of the library. Pulled at startup (`library:list`), then advanced
+   * by every `library:added` and by the catalog panel's own adds.
+   */
+  const [libraryVersion, setLibraryVersion] = useState(readLibraryVersion);
+  useEffect(() => {
+    const off = onLibraryChange(setLibraryVersion);
+    void window.engine
+      .listLibrary()
+      .then((entries) => registerLibraryEntries(entries))
+      .catch((err: unknown) => console.warn(`[library] could not list: ${String(err)}`));
+    const offAdded = window.engine.onLibraryAdded((entry) => registerLibraryEntries([entry]));
+    return () => {
+      off();
+      offAdded();
+    };
+  }, []);
 
   /**
    * True once the config has been consulted, so the FIRST scene this editor
@@ -692,12 +712,16 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
                 : `filling: ${filledRoles.join(', ')}`}
             </span>
           </div>
-          <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} />
+          <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} libraryVersion={libraryVersion} />
           <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
         </Panel>
 
         <Panel title="Groups — I-16, together and in turn, one clock">
           <GroupPanel scene={scene} setScene={setScene} registry={registry} />
+        </Panel>
+
+        <Panel title="Catalog — Internet Archive loops, into assets/library with an I-10 record">
+          <CatalogPanel />
         </Panel>
 
         {!wallMode && (
@@ -790,6 +814,7 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
             layerId={selectedLayerId(panelUi, scene)}
             ui={panelUi}
             setUi={setPanelUi}
+            libraryVersion={libraryVersion}
           />
         </Panel>
 

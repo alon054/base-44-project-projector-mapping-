@@ -39,6 +39,7 @@ import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
 import { createBundledLibrary } from '../providers/bundled/manifest';
 import { ensureLottie } from '../providers/bundled/LottieView';
+import { canonicalizeLibraryEntry } from '../core/libraryEntry';
 import { Compositor, type RoleMiss } from './compositor';
 import { WarpStage } from './warp';
 import type { ViewportCalibration } from './calibration';
@@ -161,6 +162,14 @@ export interface RenderHost {
   gpuResources(): GpuResourceReport;
   /** Re-applies the current scene, exercising the teardown/rebuild path. */
   reapplyScene(): void;
+  /**
+   * Downloaded catalog assets, registered into THIS host's library through the
+   * one door (`AssetLibrary.register`, I-10). Entries already present are
+   * skipped; a malformed one is logged and skipped, never a throw (I-13).
+   * Returns how many were new — the caller re-applies the scene only when the
+   * answer is not zero and the scene names one of them.
+   */
+  registerAssets(entries: readonly unknown[]): string[];
   /** I-4. The field the last rendered frame was modulated by. Never per frame. */
   forceField(): ForceField;
   destroy(): void;
@@ -194,6 +203,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
 
   const providers = new ProviderRegistry();
   providers.register(new ProceduralProvider());
+  const library = createBundledLibrary();
   // Warm the Lottie player without blocking host creation. A scene with no
   // Lottie never touches it; a scene with one gets it a beat sooner than the
   // first frame that needs it, so the layer does not flash its placeholder.
@@ -203,7 +213,7 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
   // (I-7), and a module-global would only look shared.
   providers.register(
     new BundledProvider({
-      library: createBundledLibrary(),
+      library,
       decodeVideo: opts.decodeVideo ?? false,
       lottieResolution: opts.lottieResolution ?? 512,
       ...(opts.onVideoStage
@@ -402,6 +412,20 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     },
     reapplyScene() {
       compositor.setScene(currentScene);
+    },
+    registerAssets(entries) {
+      const added: string[] = [];
+      for (const raw of entries) {
+        try {
+          const asset = canonicalizeLibraryEntry(raw);
+          if (library.get(asset.id)) continue;
+          library.register(asset);
+          added.push(asset.id);
+        } catch (err) {
+          console.warn(`[library] entry skipped: ${String(err)}`);
+        }
+      }
+      return added;
     },
     failures() {
       return compositor.failures();

@@ -36,6 +36,7 @@ import { useMemo } from 'react';
 import type { Scene } from '../core/scene';
 import { applyContentChoice, contentChoices, currentChoiceId } from './controls';
 import { editorLibrary } from './assets';
+import { ContentPicker } from './ContentPicker';
 import { resolveRole } from '../core/roles';
 import type { SurfaceTree } from '../core/surfaces';
 import { CONCURRENCY_CAPS } from '../core/library';
@@ -45,13 +46,18 @@ interface Props {
   setScene: (update: (prev: Scene) => Scene) => void;
   /** The room, so a fill can say how many faces it is about to land on. */
   surfaces: SurfaceTree;
+  /** Ticks when a catalog asset lands, so the choice list is re-derived. */
+  libraryVersion: number;
 }
 
 /** Asset kinds that cost a decoder per instance. See this file's header. */
 const PER_INSTANCE_COST = new Set(['video', 'lottie']);
 
-export function FillPanel({ scene, setScene, surfaces }: Props): React.JSX.Element | null {
-  const assets = useMemo(() => editorLibrary.all(), []);
+export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props): React.JSX.Element | null {
+  // `libraryVersion` is the dependency: the library is a module singleton and
+  // grows when the catalog panel brings an asset home.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const assets = useMemo(() => editorLibrary.all(), [libraryVersion]);
   const choices = useMemo(() => contentChoices(assets), [assets]);
 
   const fills = scene.layers.filter((l) => l.fillRole !== undefined);
@@ -78,33 +84,17 @@ export function FillPanel({ scene, setScene, surfaces }: Props): React.JSX.Eleme
               <code style={{ fontSize: 11, color: '#6f767d' }}>
                 → {role} · {faces} face{faces === 1 ? '' : 's'}
               </code>
-              <select
-                value={chosen ?? ''}
-                aria-label={`fill content for ${layer.name}`}
-                style={selectStyle}
-                onChange={(e) => {
-                  const next = choices.find((c) => c.id === e.currentTarget.value);
-                  // One call, the same one the entity panel makes. It spreads
-                  // the layer, so `fillRole` survives the swap — the faces keep
-                  // their binding and only what is drawn into them changes.
-                  if (next) setScene((prev) => applyContentChoice(prev, layer.id, next));
-                }}
-              >
-                {chosen === null && (
-                  <option value="">{`${layer.providerId} — not in the picker`}</option>
-                )}
-                {[...new Set(choices.map((c) => c.group))].map((group) => (
-                  <optgroup key={group} label={group}>
-                    {choices
-                      .filter((c) => c.group === group)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
+              <ContentPicker
+                choices={choices}
+                chosen={chosen}
+                library={editorLibrary}
+                providerId={layer.providerId}
+                ariaLabel={`fill content for ${layer.name}`}
+                // One call, the same one the entity panel makes. It spreads
+                // the layer, so `fillRole` survives the swap — the faces keep
+                // their binding and only what is drawn into them changes.
+                onPick={(next) => setScene((prev) => applyContentChoice(prev, layer.id, next))}
+              />
             </div>
             {asset && PER_INSTANCE_COST.has(asset.kind) && faces > 1 ? (
               <p
@@ -127,14 +117,3 @@ export function FillPanel({ scene, setScene, surfaces }: Props): React.JSX.Eleme
     </div>
   );
 }
-
-const selectStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  padding: '3px 6px',
-  borderRadius: 4,
-  border: '1px solid #2b2f34',
-  background: '#15181b',
-  color: 'inherit',
-  font: '12px/1.2 inherit',
-};

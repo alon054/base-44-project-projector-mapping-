@@ -9,7 +9,21 @@ import {
   powerSaveBlocker,
   screen,
   type IpcMainEvent,
+  net,
+  protocol,
 } from 'electron';
+
+/**
+ * The downloaded library's scheme, registered BEFORE app ready as Electron
+ * requires. `standard` so `library://assets/a/b.mp4` parses like http;
+ * `stream` so a `<video>` can seek in it; `supportFetchAPI` so PixiJS's asset
+ * loader can `fetch()` a texture from it. Served by the handler in
+ * `whenReady`, from the library directory on disk, and nowhere else — this is
+ * how a downloaded byte reaches a renderer without crossing IPC (I-7).
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'library', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import {
@@ -30,6 +44,13 @@ import {
   type SurfacesSet,
   type ClockSet,
   type SceneSet,
+  type CatalogAddRequest,
+  type CatalogAddResult,
+  type CatalogFilesResult,
+  type CatalogHit,
+  type CatalogProgress,
+  type CatalogSearchRequest,
+  type LibraryEntry,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
 import {
@@ -39,6 +60,7 @@ import {
   saveCalibrationRaw,
   saveSurfacesRaw,
 } from './calibration';
+import { addFromCatalog, libraryEntries, listCatalogFiles, resolveLibraryRequest, searchCatalog } from './catalog';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
 
@@ -645,6 +667,39 @@ function wireIpc(): void {
 
   ipcMain.handle(CH.surfacesGet, (): unknown => lastSurfaces ?? loadSurfacesRaw());
 
+  // The online catalog and the downloaded library. JSON both ways; the bytes
+  // go to disk and come back through the `library:` protocol (I-7).
+  ipcMain.handle(CH.catalogSearch, async (_e, req: CatalogSearchRequest): Promise<CatalogHit[]> => {
+    return searchCatalog(typeof req?.query === 'string' ? req.query : '');
+  });
+  ipcMain.handle(CH.catalogFiles, async (_e, req: CatalogAddRequest): Promise<CatalogFilesResult> => {
+    const hit = req?.hit;
+    if (!hit || typeof hit.identifier !== 'string') return { ok: false, reason: 'no hit to list' };
+    return listCatalogFiles(hit);
+  });
+  ipcMain.handle(CH.catalogAdd, async (e, req: CatalogAddRequest): Promise<CatalogAddResult> => {
+    const hit = req?.hit;
+    if (!hit || typeof hit.identifier !== 'string') return { ok: false, reason: 'no hit to add' };
+    const file = typeof req.file === 'string' ? req.file : undefined;
+    const result = await addFromCatalog(hit, (received, total) => {
+      if (e.sender.isDestroyed()) return;
+      const p: CatalogProgress = { identifier: hit.identifier, received, total, done: false };
+      e.sender.send(CH.catalogProgress, assertJsonOnly(p));
+    }, file);
+    if (!e.sender.isDestroyed()) {
+      const done: CatalogProgress = { identifier: hit.identifier, received: 0, total: 0, done: true };
+      e.sender.send(CH.catalogProgress, assertJsonOnly(done));
+    }
+    if (result.ok) {
+      // Both windows learn of it: the editor for its pickers, the output so a
+      // scene naming the new id resolves to an asset and not a placeholder.
+      send(editorWin, CH.libraryAdded, result.entry);
+      send(outputWin, CH.libraryAdded, result.entry);
+    }
+    return result;
+  });
+  ipcMain.handle(CH.libraryList, (): LibraryEntry[] => libraryEntries());
+
   ipcMain.on(CH.sceneFailures, (_e: IpcMainEvent, payload: SceneFailure[]) => {
     send(editorWin, CH.sceneFailures, assertJsonOnly(payload));
   });
@@ -887,6 +942,13 @@ function logMetricsPeriodically(m: MetricsReport): void {
 
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
+  // `library://assets/...` and `library://thumbs/...` → files under the
+  // library root. Anything else, or anything escaping the root, is a 404.
+  protocol.handle('library', async (request) => {
+    const path = await resolveLibraryRequest(request.url);
+    if (!path) return new Response('not in the library', { status: 404 });
+    return net.fetch(`file://${encodeURI(path)}`);
+  });
   wireIpc();
   watchDisplays();
   createWindows('whenReady');

@@ -25,6 +25,7 @@ import type { Scene } from '../core/scene';
 import type { ParameterRegistry } from '../core/parameters';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import { editorLibrary } from './assets';
+import { ContentPicker } from './ContentPicker';
 import { ParamControl } from './ParamControl';
 import {
   applyContentChoice,
@@ -42,6 +43,8 @@ interface Props {
   layerId: string | null;
   ui: PanelUi;
   setUi: (ui: PanelUi) => void;
+  /** Ticks when a catalog asset lands, so the choice list is re-derived. */
+  libraryVersion: number;
 }
 
 export function EntityPanel({
@@ -51,10 +54,13 @@ export function EntityPanel({
   layerId,
   ui,
   setUi,
+  libraryVersion,
 }: Props): React.JSX.Element {
-  // Built once: the catalog does not change while the app runs, and rebuilding
-  // this list on every slider drag would sort it sixty times a second.
-  const choices = useMemo(() => contentChoices(editorLibrary.all()), []);
+  // Rebuilt only when the library grows (a catalog asset landed), never on a
+  // slider drag — sorting the catalog sixty times a second is what the memo
+  // exists to avoid.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const choices = useMemo(() => contentChoices(editorLibrary.all()), [libraryVersion]);
 
   if (layerId === null) {
     return <p style={{ margin: 0, color: '#8b939b' }}>No layers. Add one in the layer list.</p>;
@@ -66,7 +72,6 @@ export function EntityPanel({
 
   const groups = entityParamGroups(registry, layerId);
   const chosen = currentChoiceId(scene, layerId, choices);
-  const groupNames = [...new Set(choices.map((c) => c.group))];
   const open = (section: string): boolean => ui.openSections.includes(section);
 
   return (
@@ -81,34 +86,14 @@ export function EntityPanel({
         <label style={{ fontSize: 12, color: '#c7ced4', width: 148 }} htmlFor="content-choice">
           Content
         </label>
-        <select
+        <ContentPicker
           id="content-choice"
-          value={chosen ?? ''}
-          style={{ ...selectStyle, flex: 1 }}
-          onChange={(e) => {
-            const next = choices.find((c) => c.id === e.currentTarget.value);
-            if (next) setScene((prev) => applyContentChoice(prev, layerId, next));
-          }}
-        >
-          {chosen === null && (
-            // Content no choice describes — a scene authored by hand, or an
-            // asset this build no longer ships. Shown as what it is rather than
-            // silently displaying the first entry, which would tell the
-            // operator the layer is something it is not.
-            <option value="">{`${layer.providerId} — not in the picker`}</option>
-          )}
-          {groupNames.map((group) => (
-            <optgroup key={group} label={group}>
-              {choices
-                .filter((c) => c.group === group)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
+          choices={choices}
+          chosen={chosen}
+          library={editorLibrary}
+          providerId={layer.providerId}
+          onPick={(next) => setScene((prev) => applyContentChoice(prev, layerId, next))}
+        />
       </div>
 
       <Section

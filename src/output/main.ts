@@ -414,6 +414,20 @@ const storedSurfaces: Promise<SurfaceTree> = window.engine
     return [] as SurfaceTree;
   });
 
+/**
+ * The downloaded library, pulled like the room and the calibration so a scene
+ * naming a catalog asset resolves on the first frame rather than showing a
+ * placeholder until something re-applies it. A failed pull is not fatal: the
+ * bundled library still stands (I-13).
+ */
+const storedLibrary: Promise<unknown[]> = window.engine
+  .listLibrary()
+  .then((entries) => (Array.isArray(entries) ? entries : []))
+  .catch((err: unknown) => {
+    console.error(`[library] could not read the downloaded library: ${String(err)}`);
+    return [] as unknown[];
+  });
+
 host = await createRenderHost({
   parent: stage,
   width: config.width,
@@ -445,10 +459,29 @@ host = await createRenderHost({
   },
 });
 
+{
+  const added = host.registerAssets(await storedLibrary);
+  if (added.length > 0) console.log(`[library] ${added.length} downloaded asset(s) registered`);
+}
+
 if (pendingScene.v) {
   host.setScene(pendingScene.v);
   pendingScene.v = null;
 }
+
+// An asset added while the show runs. Registered, and the scene re-applied
+// only when it names the new id — otherwise nothing on the wall changes.
+window.engine.onLibraryAdded((entry) => {
+  if (!host) return;
+  const added = host.registerAssets([entry]);
+  if (added.length === 0) return;
+  console.log(`[library] added ${added.join(', ')}`);
+  const names = appliedScene !== null && JSON.stringify(appliedScene).includes(`"${added[0]}"`);
+  if (names) {
+    host.reapplyScene();
+    reportFailures();
+  }
+});
 
 // A live edit that landed during init wins over the stored file — it is newer.
 void storedCalibration.then((stored) => {

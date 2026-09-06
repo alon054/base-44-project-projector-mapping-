@@ -7,6 +7,13 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CH, assertJsonOnly } from './ipc';
 import type {
   CalibrationSet,
+  CatalogAddRequest,
+  CatalogAddResult,
+  CatalogFilesResult,
+  CatalogHit,
+  CatalogProgress,
+  CatalogSearchRequest,
+  LibraryEntry,
   SurfacesSet,
   ClockSet,
   DisplayInfo,
@@ -210,6 +217,30 @@ const api = {
   },
   setMeasurementMode(on: boolean): Promise<boolean> {
     return ipcRenderer.invoke(CH.measurementMode, assertJsonOnly(on)) as Promise<boolean>;
+  },
+  // The online catalog and the downloaded library. JSON only, both ways: the
+  // bytes are served by main's `library:` protocol, never sent here (I-7).
+  searchCatalog(req: CatalogSearchRequest): Promise<CatalogHit[]> {
+    return ipcRenderer.invoke(CH.catalogSearch, assertJsonOnly(req)) as Promise<CatalogHit[]>;
+  },
+  listCatalogFiles(req: CatalogAddRequest): Promise<CatalogFilesResult> {
+    return ipcRenderer.invoke(CH.catalogFiles, assertJsonOnly(req)) as Promise<CatalogFilesResult>;
+  },
+  addFromCatalog(req: CatalogAddRequest): Promise<CatalogAddResult> {
+    return ipcRenderer.invoke(CH.catalogAdd, assertJsonOnly(req)) as Promise<CatalogAddResult>;
+  },
+  onCatalogProgress(cb: (p: CatalogProgress) => void): () => void {
+    const h = (_e: unknown, p: CatalogProgress) => cb(p);
+    ipcRenderer.on(CH.catalogProgress, h);
+    return () => ipcRenderer.off(CH.catalogProgress, h);
+  },
+  listLibrary(): Promise<LibraryEntry[]> {
+    return ipcRenderer.invoke(CH.libraryList) as Promise<LibraryEntry[]>;
+  },
+  onLibraryAdded(cb: (e: LibraryEntry) => void): () => void {
+    const h = (_e: unknown, e: LibraryEntry) => cb(e);
+    ipcRenderer.on(CH.libraryAdded, h);
+    return () => ipcRenderer.off(CH.libraryAdded, h);
   },
 };
 

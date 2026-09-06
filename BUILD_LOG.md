@@ -7070,3 +7070,89 @@ points gains or loses its travellers.
 **What the wall still owes:** travel, orient, and the wind slider leaning a
 travelling object, seen on a box. The route golden shows it at t = 3 and the
 runner shows it elsewhere at t = 0; neither is a wall.
+
+## 2026-09-07 — Sprint (operator additions) — picker previews, and the Internet Archive catalog
+- DID: `ContentPicker.tsx` — every content dropdown (entity panel, fill panel)
+  gains a thumbnail strip: stills, sprite-sheet frame 0, video posters, labels
+  for Lottie and procedural. `CatalogPanel.tsx` + `electron/catalogLogic.ts`
+  (pure) + `electron/catalog.ts` (fetch/download/index) + a privileged
+  `library://` scheme: search archive.org from MAIN, list a pack's clips with
+  per-clip thumbs, download one with an I-10 record, register it in both
+  windows' libraries. `scripts/catalog-probe.mjs` exercises it headless.
+- MEASURED: npm test 1089 → 1118 (43 files; 29 in `catalog.test.ts`). Build
+  clean. Probe: search 883 ms, 40 hits, 6 addable; a 34-clip pack listed; one
+  clip (0.13 MB, CC-BY-3.0, credit recorded) downloaded in 547 ms; the renderer
+  fetched asset and poster through `library://` under the shipping CSP,
+  `library://assets/../../package.json` → 404, `<video>` decoded 320×240,
+  1.84 s. App launched twice: no errors; output logged `[library] 1 downloaded
+  asset(s) registered`, editor `[library] 1 … in the pickers`; 10 s of metrics
+  at 0.00% late (not a gate number; no preconditions were set).
+- BLOCKER: -
+- NEXT: W2 — the builder: set, roles per face, the sequence timed, one M1 run,
+  the backup take. Then D3.
+
+SPEC-CHANGE-PROPOSED — a catalog API, ahead of Phase 8 and against §12.
+SPEC.md §12 cuts "Catalog APIs — Pexels, Pixabay, LottieFiles, terms checks,
+caching" with the reason that a local folder achieves the same visible result.
+The operator asked, in this session, for the program to "connect to an API
+that I can load and search animation loops and VJ loops", and the request was
+built. Proposed change to §12: strike the catalog row, or narrow it to "keyed
+catalog APIs"; add to §11 Phase 8 a line "B′ — the Internet Archive catalog
+(keyless), built 2026-09-07 during the sprint". Reason: the operator's explicit
+instruction. Alternative rejected: refusing on §12 and asking first — the
+operator is not present mid-session and the instruction was unambiguous. This
+entry is the record; SPEC.md is the human's to edit and was not touched.
+
+Why the Internet Archive and not Pexels/Pixabay/LottieFiles: it is the one
+source with a keyless JSON search API and per-item license metadata. Every
+other candidate needs a key the builder would have to obtain and store, and
+the sprint has two days. `CatalogSource` is an enum of one so a keyed source
+can be added beside it without touching the panel.
+
+DECISION — `library://`, a privileged scheme served by main from disk.
+The renderers' CSP allows no remote host and this addition does not change
+that (a test asserts `img-src`, `media-src` and `connect-src` in both HTMLs
+carry `library:` and no `https:`). Main fetches, writes to
+`assets/library/<source>/<item>/<file>`, and the renderer loads
+`library://assets/…` — a `standard`, `stream`, `supportFetchAPI` scheme
+resolved by `protocol.handle` to a file under the library root and nothing
+else (a path that escapes the root is a 404, probed). So I-7 holds as
+mechanism: no downloaded byte crosses IPC, and `assertJsonOnly` never sees
+one. Thumbnails take the same route — `library://thumbs/<item>.jpg` for the
+item tile and `library://filethumbs/<item>/<item>.thumbs/<clip>_000001.jpg`
+for a clip's own frame — fetched on first view and cached under `.thumbs/`.
+The alternative, base64 thumbnails in the IPC reply, was rejected as a pixel
+buffer over IPC with a costume on.
+
+DECISION — the unit of the catalog is the CLIP, not the item.
+The first probe picked "the smallest MP4 in the item" and the first addable
+item had none: on the Archive a VJ item is a PACK of 34–100 clips, many of
+them QuickTime PhotoJPEG that Chromium cannot decode. So `catalog:files`
+lists an item's playable clips (h.264 derivatives first, then any MP4 the
+`<video>` element plays, never QuickTime/Flash/Ogg/GIF, never over 250 MB),
+each with the Archive's per-clip thumb, and `catalog:add` takes a clip name.
+An item with one clip adds on the first click; a pack opens. The refusal for
+an unplayable item names what it holds ("1× Cinepack, 100× Animated GIF, 100×
+QuickTime, 99× Windows Media") rather than saying "no file".
+
+I-10, at the button. `licenseFromUrl` maps the item's `licenseurl` onto CC0,
+CC-BY-4.0 and CC-BY-3.0 and nothing else — not ShareAlike, not NonCommercial,
+not the Public Domain Mark, not a BSD-style `rights` paragraph. 34 of 40 "vj
+loops" hits carry no mappable URL and their add button is disabled with the
+reason in its tooltip; `buildLibraryEntry` refuses before a byte is fetched;
+`AssetLibrary.register` would refuse again on the far side, and a test drives
+a built entry through it to show the two shapes agree. `attributionRequired`
+is what the license says (CC-BY: true, and the creator is named), never an
+inference from the name.
+
+Hard rules checked: no new dependency; the golden harness is untouched and
+never loads a `library://` URL; `ContentPicker`, `CatalogPanel` and
+`GroupPanel` contain no parameter write (the three writer tests still name
+`ParamControl` and `ForcePanel` alone); no `layers.filter` was added outside
+`sceneEdit.ts`; `assets/library/` is gitignored as the operator's collection,
+like their room. One downloaded clip sits there now from the probe
+(`archive.VJ-Style_Strippers.upper_dance_grid_512kb`, 320×240, CC-BY-3.0,
+credit "hamageddon"); delete the folder to start clean.
+
+Owed to the wall: a catalog video on a face at the projector — one instance
+per face is one decoder per face (R2), and the picker says so.
