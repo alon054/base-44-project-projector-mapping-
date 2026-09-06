@@ -6903,3 +6903,47 @@ Twice now the operator's ordinary use of the tool has turned the build red. Both
 times the fault was a test reaching into their working state. The rule that
 comes out of it: `calibration/` is the operator's, and a test may assert its
 FORMAT and never its CONTENTS.
+
+## 2026-09-06 — Sprint (block B3, addendum 4) — swapping the fill, in wall mode
+- DID: `FillPanel.tsx` — a content picker for every layer bound to a role, in
+  the Room panel where wall mode can see it, with the per-instance decoder cost
+  stated next to the choice.
+- MEASURED: npm test 1006 → 1009 (40 files). Build clean. The one mutation that
+  matters — `applyContentChoice` rebuilding the layer field-by-field instead of
+  spreading it, which silently drops `fillRole` — fails 3 tests.
+- BLOCKER: -
+- NEXT: W1 — the builder at the projector, room dark.
+
+The operator asked how to swap the white fill for an animation. The answer
+existed and was four clicks through two panels wall mode hides: leave wall mode,
+find the layer in the layer list, select it, open the entity panel, use the
+Content dropdown. That is the tool-dropdown failure again — a named step of the
+first wall session (SPRINT.md's "swap the fill white → animation, do all five
+change at once?") reachable only by leaving the mode built for the wall.
+
+`FillPanel` is a second VIEW of one mechanism, not a second mechanism. Same
+`contentChoices`, same `applyContentChoice`, no `registry.write` — it lists the
+layers that carry a `fillRole`, which is exactly the set a builder at a
+projector is thinking about, and offers each one the picker it already had.
+
+The binding surviving the swap is the load-bearing part and it now has a test.
+`applyContentChoice` spreads the layer, so `fillRole` rides along; a version
+that rebuilt the layer field by field would drop it, every face would go dark
+mid-shot, and nothing before today would have caught it. The mutation fails 3
+tests.
+
+R2's consequence is stated in the picker rather than left to be discovered. One
+fill instance per matching surface means ONE DECODER per matching surface, and
+the choice reads "seamless (video)" whether the role matches one face or six. So
+the row says `video × 4 faces = 4 decoders against a cap of 4` before the click
+instead of after the stutter. It warns and never refuses — §10's ruling stands:
+this is performance equipment, and a stumble that can be flagged is not a reason
+to stop an operator (I-13).
+
+One test was widened rather than worked around. `sceneEdit.test.ts`'s "exactly
+one structural removal in the engine" greps for `layers.filter` across `src/`,
+and `FillPanel` filters to LIST the bound layers. The test already names
+`forceLog.ts` and `ForcePanel.tsx` as read-only filters "rather than excluded by
+a loose pattern", so this was named the same way. The claim it protects is
+untouched: `core/sceneEdit.ts` is still the only place a scene is produced by
+removing a layer.

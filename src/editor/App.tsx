@@ -56,6 +56,7 @@ import {
 } from '../render/calibration';
 import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core/surfaces';
 import { SurfacePanel } from './SurfacePanel';
+import { FillPanel } from './FillPanel';
 import { addWhiteFill } from '../core/sceneEdit';
 
 
@@ -690,6 +691,7 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
                 : `filling: ${filledRoles.join(', ')}`}
             </span>
           </div>
+          <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} />
           <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
         </Panel>
 

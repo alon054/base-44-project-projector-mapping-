@@ -45,6 +45,7 @@ import {
 import { applyLayerPatch, createLayer, type Layer } from '../core/layer';
 import { createScene } from '../core/scene';
 import { addWhiteFill } from '../core/sceneEdit';
+import { applyContentChoice, contentChoices } from '../editor/controls';
 import { ParameterRegistry, defineLayerParameters } from '../core/parameters';
 import { EMPTY_FORCE_FIELD } from '../core/forces';
 import {
@@ -820,5 +821,70 @@ describe('the file store — surfaces.json lands beside warp.json and survives',
     // the undo" one gesture at the wall (SPRINT.md's W1 close-out).
     const dir = (f: string): string => f.replace(/\/[^/]+$/, '');
     expect(dir(surfacesFilePath())).toBe(dir(calibrationFilePath()));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Swapping what a bound layer fills its faces with — SPRINT.md's white →
+//    animation beat.
+// ---------------------------------------------------------------------------
+
+describe('applyContentChoice on a fill layer — the binding survives the swap', () => {
+  const choices = contentChoices([
+    { id: 'test.video.seamless', name: 'seamless', kind: 'video' },
+  ]);
+
+  it('changing the content keeps `fillRole`, so the faces stay bound', () => {
+    // The whole beat rests on this: one layer, N faces, and swapping what it
+    // draws must not unbind it. `applyContentChoice` spreads the layer, so the
+    // role rides along — asserted rather than assumed, because a patch written
+    // field-by-field instead would silently drop it and every face would go
+    // dark mid-shot.
+    const scene = addWhiteFill(createScene({ id: 'empty' }), 'panel');
+    const white = scene.layers[0]!;
+    expect(white.fillRole).toBe('panel');
+
+    const water = choices.find((c) => c.id === 'procedural:water')!;
+    const swapped = applyContentChoice(scene, white.id, water);
+    const after = swapped.layers[0]!;
+    expect(after.fillRole).toBe('panel');
+    expect(after.content['kind']).toBe('water');
+    expect(after.id).toBe(white.id);
+  });
+
+  it('every face carrying the role changes at once, because it is ONE layer', () => {
+    resetRoleLog();
+    const provider = new RecordingProvider();
+    const c = compositorFor(room(quad('path-1'), quad('path-2', 0.5, 0.5)), provider);
+    const scene = addWhiteFill(createScene({ id: 'empty' }), 'panel');
+    const recorded = {
+      ...scene,
+      layers: scene.layers.map((l) => ({ ...l, providerId: 'recording' })),
+    };
+    c.setScene(recorded);
+    c.update(FRAME);
+    expect(provider.creates).toBe(2);
+
+    const water = choices.find((c2) => c2.id === 'procedural:water')!;
+    const swapped = applyContentChoice(recorded, recorded.layers[0]!.id, water);
+    c.setScene({
+      ...swapped,
+      layers: swapped.layers.map((l) => ({ ...l, providerId: 'recording' })),
+    });
+    c.update(FRAME);
+    // Both faces rebuilt from the one layer — there is no per-face content to
+    // fall out of step, which is what makes "do all five change at once" a
+    // property of the design rather than of five edits.
+    expect(provider.creates).toBe(4);
+    expect(c.roleMisses()).toEqual([]);
+    c.destroy();
+  });
+
+  it('a swap to a bundled asset keeps the role too', () => {
+    const scene = addWhiteFill(createScene({ id: 'empty' }), 'box-left');
+    const video = choices.find((c) => c.id === 'bundled:test.video.seamless')!;
+    const swapped = applyContentChoice(scene, scene.layers[0]!.id, video);
+    expect(swapped.layers[0]!.fillRole).toBe('box-left');
+    expect(swapped.layers[0]!.content['assetId']).toBe('test.video.seamless');
   });
 });

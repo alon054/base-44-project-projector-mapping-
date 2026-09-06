@@ -358,11 +358,19 @@ describe('P5-B — layer removal disposes, as a mechanism rather than a call sit
       }
     };
     walk(SRC);
-    // `forceLog.ts` and `ForcePanel.tsx` filter to COUNT, never to produce a
-    // scene, so they are named here rather than excluded by a loose pattern.
+    // `forceLog.ts`, `ForcePanel.tsx` and `FillPanel.tsx` filter to READ — to
+    // count, or to list the layers a panel draws a row for — and never to
+    // produce a scene. They are named here rather than excluded by a loose
+    // pattern, because the moment the pattern is loosened this test stops being
+    // able to see the thing it exists for.
+    //
+    // The claim is unchanged: `core/sceneEdit.ts` is the only place a scene is
+    // produced by removing a layer, so there is one removal path and it is the
+    // one that disposes.
     expect(offenders.sort()).toEqual([
       'core/sceneEdit.ts',
       'debug/forceLog.ts',
+      'editor/FillPanel.tsx',
       'editor/ForcePanel.tsx',
     ]);
   });
