@@ -710,5 +710,35 @@
       96
     ],
     "meanLuminance": 0.274615
+  },
+  "fill-one-surface": {
+    "width": 1280,
+    "height": 720,
+    "hash": "9fda81ca",
+    "coverage": 0.165557,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.10994
+  },
+  "fill-two-surfaces-one-role": {
+    "width": 1280,
+    "height": 720,
+    "hash": "baddbdb2",
+    "coverage": 0.39249,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.260638
   }
 }

@@ -402,6 +402,55 @@ describe('A14 — the instrument is subject to its own budget', () => {
     expect(m.report().instrument.tickMs).toBe(0.42);
   });
 
+  it('B2/R3: the render-target count is a HUD row before it judges anything', () => {
+    // A14's clause, as a test. The counter is new, so it has to be VISIBLE —
+    // beside the instrument's own cost row, which already covers the tick it
+    // rides on — before any Done-when line is read off it.
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 0.4);
+    m.noteInstrumentCost(0.02);
+    m.setGpu({
+      valid: true,
+      invalidReason: '',
+      textureCount: 1,
+      textureBytesEstimate: 1024,
+      bufferCount: 2,
+      geometryCount: 3,
+      renderTargets: { valid: true, invalidReason: '', count: 1, gpuSlots: 2, gpuLive: 1 },
+    });
+    const text = formatReport(m.report(), false);
+    expect(text).toContain('rt     targets 1');
+    expect(text).toContain('never gated');
+    expect(text).toContain('instrument');
+  });
+
+  it('an invalid render-target census does not take the gpu row down with it', () => {
+    // The counter beside it has four gates of history. A version bump that
+    // hides `renderTarget` must cost this row and no other.
+    const m = new FrameMetrics(N60, { warmupMs: 0 });
+    feed(m, Array.from({ length: 100 }, () => N60), 0.4);
+    m.setGpu({
+      valid: true,
+      invalidReason: '',
+      textureCount: 7,
+      textureBytesEstimate: 1024,
+      bufferCount: 2,
+      geometryCount: 3,
+      renderTargets: {
+        valid: false,
+        invalidReason: 'renderer internals not found: renderTarget',
+        count: 0,
+        gpuSlots: 0,
+        gpuLive: 0,
+      },
+    });
+    const text = formatReport(m.report(), false);
+    expect(text).toContain('gpu    tex 7');
+    expect(text).toContain('rt     INVALID');
+    // And no confident zero anywhere on that row.
+    expect(text).not.toContain('rt     targets 0');
+  });
+
   it('the instrument cost surfaces in the HUD, not only in the payload', () => {
     const m = new FrameMetrics(N60, { warmupMs: 0 });
     feed(m, Array.from({ length: 100 }, () => N60), 0.4);

@@ -7,7 +7,14 @@
  * the renderer is worse than one that fails loudly.
  */
 import { describe, expect, it } from 'vitest';
-import { describeSoak, judgeSoak, readGpuResources, type GpuSample } from '../debug/gpu';
+import {
+  INVALID_RENDER_TARGETS,
+  describeSoak,
+  judgeSoak,
+  readGpuResources,
+  readRenderTargets,
+  type GpuSample,
+} from '../debug/gpu';
 
 const census = (
   buffers: number,
@@ -28,6 +35,10 @@ const census = (
   bufferSlots,
   geometryCount: geometries,
   geometrySlots,
+  // B2's counter is never part of the soak judgement, so every sample here
+  // carries the not-sampled census verbatim. If `judgeSoak` ever starts reading
+  // it, these fixtures say so by being obviously irrelevant.
+  renderTargets: INVALID_RENDER_TARGETS,
 });
 
 const series = (...c: ReturnType<typeof census>[]): GpuSample[] =>
@@ -139,6 +150,7 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         bufferSlots: g * 2,
         geometryCount: g,
         geometrySlots: g,
+        renderTargets: INVALID_RENDER_TARGETS,
       },
     }));
 
@@ -176,6 +188,7 @@ describe('steady state is reported alongside the verdict, never instead of it', 
         bufferSlots: g,
         geometryCount: g,
         geometrySlots: g,
+        renderTargets: INVALID_RENDER_TARGETS,
       },
     }));
     const v = judgeSoak(leak, 100);
@@ -330,6 +343,7 @@ describe('row 13 — buffers and geometries stop counting graves', () => {
       bufferSlots: slots * 2,
       geometryCount: live,
       geometrySlots: slots,
+      renderTargets: INVALID_RENDER_TARGETS,
     });
     const v = judgeSoak(
       [grave(37, 37), grave(37, 120), grave(37, 227)].map((gpu, i) => ({
@@ -378,6 +392,7 @@ describe('row 13 — K fails in both directions and passes in neither', () => {
         bufferSlots: n * 2,
         geometryCount: n,
         geometrySlots: n,
+        renderTargets: INVALID_RENDER_TARGETS,
       },
     }));
   };
@@ -411,6 +426,7 @@ describe('row 13 — K fails in both directions and passes in neither', () => {
         bufferSlots: n * 2,
         geometryCount: n,
         geometrySlots: n,
+        renderTargets: INVALID_RENDER_TARGETS,
       },
     }));
     const v = judgeSoak(resumes, 240, 1);

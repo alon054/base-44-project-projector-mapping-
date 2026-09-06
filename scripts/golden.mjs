@@ -46,6 +46,36 @@ const MIN_COVERAGE = 0.005;
  */
 const MAX_LAYOUT_DELTA = 0.08;
 
+/**
+ * B2. The cases that existed before role fills did.
+ *
+ * Every one of them must be byte-identical to its committed golden, asserted
+ * BY NAME rather than left to the general hash loop below. The general loop
+ * compares whatever is committed; this list is a statement about a specific set
+ * — "adding a second draw path to the compositor changed nothing for a layer
+ * that does not use it" — and it fails loudly if the set ever shrinks, which a
+ * loop over the file cannot notice.
+ */
+const PRE_FILL_CASES = 43;
+
+/**
+ * B2 / SPRINT.md R3. How far a clipped frame may sit from the polygon area it
+ * was clipped to.
+ *
+ * **Set from the measurement, not from taste**, and the first value written
+ * here was wrong in the way that matters. 0.12 was chosen as "generous enough
+ * for antialiasing" before the cases had ever run — and an unclipped
+ * `fill-one-surface` would light 0.2304 of the frame against a polygon area of
+ * 0.1656, a gap of 0.065, so a 0.12 tolerance would have passed the exact
+ * failure the check exists to catch. A threshold wide enough to admit the bug
+ * is a green line over nothing.
+ *
+ * Measured: both cases agree with their shoelace area to within 5e-5 of the
+ * frame. 0.01 is 200x that headroom and still 6x tighter than the gap it has to
+ * separate.
+ */
+const CLIP_TOLERANCE = 0.01;
+
 function fail(msg) {
   process.stderr.write(`${msg}\n`);
   app.exit(1);
@@ -240,6 +270,88 @@ app.whenReady().then(async () => {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // B2 — SPRINT.md R2 and R3, asserted in the runner rather than only stored.
+  //
+  // Three separate claims, and each is a thing a hash cannot say:
+  //   1. the fill is CLIPPED (a hash of an unclipped frame is just as stable);
+  //   2. clipping allocates NO render target (invisible in every pixel);
+  //   3. the pre-B2 cases are untouched (a re-bless would hide it).
+  // -------------------------------------------------------------------------
+  const fillCases = results.filter((r) => r.clip);
+  const baseline = results.find((r) => r.name === 'default');
+  if (fillCases.length === 0) {
+    problems.push('B2: the role-fill cases are missing from the harness');
+  }
+  for (const r of fillCases) {
+    const { polygon, box } = r.clip;
+    // The clip, in area. An unmasked fill lights its bounding box; a masked one
+    // lights the polygon. These two differ by 39% on the L face, so the
+    // measurement separates them with room to spare.
+    if (Math.abs(r.coverage - polygon) > CLIP_TOLERANCE) {
+      problems.push(
+        `${r.name}: lit ${(r.coverage * 100).toFixed(2)}% of the frame, but the faces carrying ` +
+          `"${r.clip.role}" enclose ${(polygon * 100).toFixed(2)}% (tolerance ${CLIP_TOLERANCE * 100}%). ` +
+          `Unclipped, their bounding boxes would light ${(box * 100).toFixed(2)}% — ` +
+          'if the lit share is near THAT number, the mask is not in the path.',
+      );
+    }
+    // The discriminator, stated directly rather than left to the tolerance: a
+    // frame closer to the UNCLIPPED area than to the clipped one is an
+    // unclipped frame, whatever the threshold above happens to be set to.
+    if (Math.abs(r.coverage - box) <= Math.abs(r.coverage - polygon)) {
+      problems.push(
+        `${r.name}: the lit share ${(r.coverage * 100).toFixed(2)}% is at least as close to the ` +
+          `UNCLIPPED bounding-box area ${(box * 100).toFixed(2)}% as to the clipped polygon area ` +
+          `${(polygon * 100).toFixed(2)}%. The mask is not cutting the fill.`,
+      );
+    }
+    // The negative control for the check above. If the box and the polygon were
+    // the same area, agreeing with one would mean agreeing with the other and
+    // the assertion would prove nothing. This is the reason `fill-one-surface`
+    // uses the L rather than a rectangle.
+    if (!(box > polygon * 1.1)) {
+      problems.push(
+        `${r.name}: NO CLIPPING TO MEASURE. The faces' bounding boxes (${box.toFixed(4)}) are not ` +
+          `meaningfully larger than their area (${polygon.toFixed(4)}), so a frame with no mask at ` +
+          'all would pass the coverage check above. This case cannot demonstrate what it is for.',
+      );
+    }
+  }
+
+  // R3. The count must not rise when a fill is added — and an INVALID census is
+  // not a pass. `undefined === undefined` reading as agreement is exactly how
+  // this project once printed a green line over a measurement that never ran.
+  if (baseline && fillCases.length > 0) {
+    const censuses = [baseline, ...fillCases];
+    const invalid = censuses.filter((r) => !r.renderTargets?.valid);
+    if (invalid.length > 0) {
+      problems.push(
+        `R3: the render-target census is INVALID on ${invalid.map((r) => r.name).join(', ')} — ` +
+          `${invalid[0].renderTargets?.invalidReason ?? 'no census at all'}. ` +
+          'This is not a pass: nothing was measured.',
+      );
+    } else {
+      const over = fillCases.filter((r) => r.renderTargets.count > baseline.renderTargets.count);
+      if (over.length > 0) {
+        problems.push(
+          `R3: adding a fill ALLOCATED A RENDER TARGET. default ${baseline.renderTargets.count}, ` +
+            over
+              .map((r) => `${r.name} ${r.renderTargets.count}`)
+              .join(', ') +
+            '. A mask must be a stencil, never a render texture — check that render/mask.ts still ' +
+            'returns a Graphics and that nothing wrapped the fill in a Sprite or a filter.',
+        );
+      } else {
+        process.stdout.write(
+          `R3: render targets ${baseline.renderTargets.count} with no fill, ` +
+            fillCases.map((r) => `${r.renderTargets.count} on ${r.name}`).join(', ') +
+            ` — clipping ${fillCases.length} face-fill case(s) allocated none\n`,
+        );
+      }
+    }
+  }
+
   if (BLESS || !existsSync(GOLDENS)) {
     if (problems.length > 0) {
       fail(`refusing to bless:\n  ${problems.join('\n  ')}`);
@@ -420,6 +532,23 @@ app.whenReady().then(async () => {
     }
   } else {
     problems.push('I-4: the reference-patch cases are missing from the harness');
+  }
+
+  // The 43 cases that predate B2, by name and by hash.
+  const preFill = Object.keys(expected).filter((n) => !n.startsWith('fill-'));
+  if (preFill.length !== PRE_FILL_CASES) {
+    problems.push(
+      `B2: ${preFill.length} pre-fill goldens are committed, expected ${PRE_FILL_CASES}. ` +
+        'The set a fill must not disturb changed size; if that was deliberate, update PRE_FILL_CASES ' +
+        'in a commit that says why.',
+    );
+  }
+  const drifted = preFill.filter((n) => observed[n] && observed[n].hash !== expected[n].hash);
+  if (drifted.length === 0 && preFill.length === PRE_FILL_CASES) {
+    process.stdout.write(
+      `B2: all ${preFill.length} pre-fill goldens byte-identical — a layer with no fillRole renders ` +
+        'exactly as it did before the compositor learned to draw one layer N times\n',
+    );
   }
 
   if (errors.length > 0) problems.push(`renderer logged errors:\n    ${errors.join('\n    ')}`);

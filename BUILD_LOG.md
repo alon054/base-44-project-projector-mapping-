@@ -6326,3 +6326,93 @@ is a two-line change made once rather than a second store made in a hurry.
 `writeSurfaces` copies the list and nothing else: the surfaces come back by
 reference, asserted by identity rather than by a timing test, because a timing
 assertion on a dev laptop is a flake waiting for the day it matters.
+
+## 2026-09-06 — Sprint (block B2) — the mask, the role fill, and the counter that proves the mask is free
+- DID: new `src/render/mask.ts` (I-17 Path → one Pixi `Graphics`, pixels only at
+  draw time). Compositor draws a `fillRole` layer once per surface carrying that
+  role, each instance stencil-masked to that face's path and handed that face's
+  pixel bounding box (I-3); `setSurfaces`, `roleMisses()`. New render-target
+  census in `debug/gpu.ts` with its own validity, printed as the HUD's `rt` row.
+  Two goldens: `fill-one-surface` (B1's six-point L, visibly clipped) and
+  `fill-two-surfaces-one-role`.
+- MEASURED: `npm test` 869 → 901 (37 files). `npm run test:render` 43 → 45.
+  Render targets: **1 with no fill, 1 with two masked fills**. Clip: predicted
+  polygon area 0.165557 of frame, measured lit fraction 0.165557; unclipped that
+  frame lights 0.2304. `readRenderTargets` costs 144 ns at one target, 397 ns at
+  eight (200k iterations, hrtime).
+- BLOCKER: -
+- NEXT: B3 — the wall loop: mark a face in the editor, persist surfaces.json to
+  disk, and get `setSurfaces` onto the live output path.
+
+### A14, on the counter this block added
+
+The Done-when line is judged by a number the block also built, so the clause was
+checked before the number was used, not after:
+
+- **Nothing per frame on the render thread.** `readRenderTargets` rides the
+  existing 250 ms metrics tick in `output/main.ts`, inside the `performance.now()`
+  bracket that already produces the `instrument` row. No frame path calls it. The
+  golden harness calls it once per case, after the render.
+- **No synchronous I/O.** Two property reads and one `Object.values` over a small
+  hash.
+- **It reports its own cost.** As a HUD row — `rt targets N (gpu live L / slots S)
+  reported, never gated` — and its tick cost is already inside the `instrument`
+  row above it. Measured at 144 ns per read (one target) and 397 ns (eight); at
+  4 Hz that is under 0.0002% of a 250 ms tick.
+- **It allocates one small array per tick**, from `Object.values`. Stated rather
+  than glossed: A14's clause is "nothing per-frame on the render thread", which
+  this satisfies, and a claim of "allocates nothing" would have been false.
+- **It cannot invalidate the counters beside it.** `RenderTargetCensus` carries
+  its own `valid`, so a PixiJS version bump that moves `renderTarget` costs this
+  row alone. The textures/buffers/geometries census has four gates of history and
+  a new counter must not be able to take it down. `mask.test.ts` asserts exactly
+  that, and `hud.test.ts` asserts the gpu row still prints while `rt` reads
+  INVALID.
+
+The instrument is also shown to be able to FAIL, which is the part this project
+has been burned on: swapping the `Graphics` mask for a `Sprite` — PixiJS v8's
+alpha-mask path, a render target per masked container — moves the count from 1
+to 2 and trips the runner with `R3: adding a fill ALLOCATED A RENDER TARGET`.
+
+### A threshold that would have passed the bug it was written for
+
+`CLIP_TOLERANCE` in `scripts/golden.mjs` was first written as 0.12, picked as
+"generous enough for antialiasing" before either case had been rendered. An
+unclipped `fill-one-surface` lights 0.2304 of the frame against a clipped
+polygon area of 0.1656 — a gap of 0.065 — so the check would have passed the
+exact failure it exists to catch. The measurement, once run, agreed with the
+shoelace area to 5e-5. Committed at 0.01, with the reasoning in the constant's
+comment, and with a second check beside it that needs no threshold at all: a
+frame closer to the unclipped bounding-box area than to the clipped polygon area
+is an unclipped frame whatever the tolerance says.
+
+Recorded because the guessed-first-measure-later order is how a tolerance
+becomes taste, and this file already carries seven instruments that were the bug.
+
+### Why the golden harness holds its own copy of the room
+
+`GoldenCase.surfaces` is a literal in `src/golden/main.ts`, copied once from
+`calibration/surfaces.json`, and the harness does not read that file. The
+committed room is the BUILDER's and is replaced the first evening anybody marks
+a real box (B3/W1); goldens that read it would re-bless themselves on every
+marking session, and the regression net would vanish in a commit that looked
+like an evening at the wall. This is A8's rule about `GOLDEN_RESOLUTION` applied
+to a second input. `mask.test.ts` reads the actual file and asserts that one
+`panel` layer fills every `panel` face in it — phrased against the file's own
+count, so re-marking cannot turn it red for the wrong reason.
+
+### One layer drawing N times did not add a failure mode
+
+The whole fill stack is a single `LayerView`, so `resilience.ts` sees one layer.
+A throw in any instance — at create or in a frame — disables that layer and not
+the frame, which is I-13 unchanged rather than I-13 re-implemented. Two details
+were not free and are worth the next session's attention: instances built before
+a create throws are destroyed before the error is handed on (otherwise a failure
+leaks the GPU geometry the soak check watches), and when a fill layer becomes a
+placeholder the holder's identity transform is restored to the layer's own, or
+the magenta box lands in the frame's corner at the size of a face.
+
+Force modulation on a fill is written INSIDE the mask, on each instance's
+content container, never on the holder. A holder write would move the mask with
+the content and slide the lit shape off the box — on camera that is a re-shoot,
+not a bug, so it has a test with a real wind field behind it.

@@ -548,6 +548,18 @@ export interface GpuResources {
   textureBytesEstimate: number;
   bufferCount: number;
   geometryCount: number;
+  /**
+   * SPRINT.md R3. Reported, never gated — and carrying its own validity,
+   * because a counter added in the sprint must not be able to invalidate the
+   * four counters beside it that four gates were read from.
+   */
+  renderTargets: {
+    valid: boolean;
+    invalidReason: string;
+    count: number;
+    gpuSlots: number;
+    gpuLive: number;
+  };
 }
 
 /**

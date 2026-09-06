@@ -587,6 +587,18 @@ export function formatReport(r: MetricsReport, uncapped: boolean): string {
           `buffers ${g.bufferCount}  geometries ${g.geometryCount}`
         : `gpu    INVALID — ${g.invalidReason}`,
     );
+    // SPRINT.md R3, on its own row and with its own validity. A fill clipped
+    // to a face must not move this number: a stencil mask allocates no target,
+    // an alpha mask allocates one PER MASKED CONTAINER, and on the wall the two
+    // are the same picture. This row is the only place the difference is
+    // visible, which is why it is printed whether or not anything is masked.
+    const rt = g.renderTargets;
+    lines.push(
+      rt.valid
+        ? `rt     targets ${rt.count}  (gpu live ${rt.gpuLive} / slots ${rt.gpuSlots})  ` +
+          'reported, never gated'
+        : `rt     INVALID — ${rt.invalidReason}`,
+    );
   }
 
   if (r.scale) {

@@ -51,6 +51,9 @@ import { BundledProvider, BUNDLED_PROVIDER_ID } from '../providers/bundled/Bundl
 import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manifest';
 import { ensureLottie } from '../providers/bundled/LottieView';
 import { Compositor } from '../render/compositor';
+import { createPath } from '../core/paths';
+import { createSurface, type SurfaceTree } from '../core/surfaces';
+import { readRenderTargets, type RenderTargetCensus } from '../debug/gpu';
 import { WarpStage } from '../render/warp';
 import {
   createCalibration,
@@ -211,6 +214,26 @@ interface GoldenCase {
    * of its own would pass every pure test and fail here.
    */
   timeSeconds?: number;
+  /**
+   * B2. The room this case is rendered against (I-15).
+   *
+   * A LITERAL here, exactly like `GOLDEN_RESOLUTION`, and for the same reason
+   * spelled out at the top of this file: `calibration/surfaces.json` is the
+   * BUILDER's room and is replaced the first evening anybody marks a real box.
+   * A golden that read it would re-bless itself every time the wall changed,
+   * which is the regression net quietly disappearing in a commit that looks
+   * like a marking session. The coordinates below were copied from B1's file
+   * once; they are the harness's now.
+   */
+  surfaces?: SurfaceTree;
+  /**
+   * B2. Check the lit area of this case against the geometry it should have
+   * been clipped to — see `clipExpectation`.
+   *
+   * A hash says the frame did not change; it cannot say the frame is clipped,
+   * and a mask that silently stopped working would hash consistently forever.
+   */
+  clipRole?: string;
   /**
    * Asset URLs to load before rendering.
    *
@@ -635,7 +658,143 @@ function cases(): GoldenCase[] {
       size: { width: 640, height: 360 },
       compareTo: 'phase4-wind-max-no-rain',
     },
+    // -----------------------------------------------------------------------
+    // B2 — SPRINT.md R2 and R3. One layer, clipped to marked faces.
+    //
+    // `rect` on purpose: it fills its whole pixel box at alpha 1, so the shape
+    // in the frame is the MASK's shape and nothing else. Any provider that drew
+    // something smaller than its box would make a clip and a small drawing
+    // indistinguishable, which is the one thing these two cases exist to tell
+    // apart. `add` on black is what the reel is shot with (I-6).
+    //
+    // The first case is the block: an L with a reflex corner, filled by a
+    // provider that can only draw rectangles. If the frame shows a rectangle,
+    // the mask is not in the path — and the runner measures that rather than
+    // leaving it to the eye, see `clipExpectation`.
+    // -----------------------------------------------------------------------
+    {
+      name: 'fill-one-surface',
+      scene: fillScene('panel', 0x40c0ff),
+      surfaces: [GOLDEN_FACE_L],
+      clipRole: 'panel',
+    },
+    {
+      name: 'fill-two-surfaces-one-role',
+      scene: fillScene('panel', 0x40c0ff),
+      // Both faces carry `panel`, so ONE layer draws twice — R2's "leave it
+      // alone and every face shares one layer", which is beat 7 of the reel.
+      surfaces: [GOLDEN_FACE_QUAD, GOLDEN_FACE_L],
+      clipRole: 'panel',
+    },
   ];
+}
+
+/**
+ * The harness's room. Copied from B1's `calibration/surfaces.json` and frozen
+ * here — see `GoldenCase.surfaces` for why it is not read from that file.
+ *
+ * `GOLDEN_FACE_L` is the one that matters: six points with a reflex corner at
+ * (0.74, 0.5), so its bounding box is 39% larger than its area. A fill that
+ * ignored the mask would light that whole box.
+ */
+const GOLDEN_FACE_QUAD = createSurface({
+  id: 'surface-1',
+  name: 'face 1',
+  role: 'panel',
+  path: createPath({
+    id: 'surface-1-path',
+    closed: true,
+    points: [
+      { x: 0.08, y: 0.18 },
+      { x: 0.44, y: 0.12 },
+      { x: 0.44, y: 0.74 },
+      { x: 0.08, y: 0.82 },
+    ],
+  }),
+});
+
+const GOLDEN_FACE_L = createSurface({
+  id: 'surface-2',
+  name: 'face 2',
+  role: 'panel',
+  path: createPath({
+    id: 'surface-2-path',
+    closed: true,
+    points: [
+      { x: 0.56, y: 0.16 },
+      { x: 0.92, y: 0.22 },
+      { x: 0.92, y: 0.52 },
+      { x: 0.74, y: 0.5 },
+      { x: 0.74, y: 0.78 },
+      { x: 0.56, y: 0.8 },
+    ],
+  }),
+});
+
+/** One layer, no transform of its own, bound to a role. SPRINT.md R2. */
+function fillScene(role: string, tint: number): Scene {
+  return createScene({
+    id: `golden-fill-${role}`,
+    seed: 0x5eed,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'fill',
+        name: 'Fill',
+        providerId: PROVIDER_ID,
+        content: { kind: 'rect', tint },
+        // Deliberately the full frame. A fill is placed by its FACE, so this
+        // transform must have no effect at all — and if it ever did, these two
+        // cases would light the entire frame and say so.
+        transform: { x: 0.5, y: 0.5, width: 1, height: 1, rotation: 0 },
+        zOrder: 0,
+        blendMode: 'add',
+        fillRole: role,
+      }),
+    ],
+  });
+}
+
+/**
+ * What fraction of the frame this case's fill SHOULD light, and what fraction
+ * it would light if the mask were not in the path.
+ *
+ * `polygon` is the shoelace area of every matching face; `box` is the area of
+ * their bounding boxes, which is what an unmasked fill covers. The two differ
+ * by 39% on the L, so the runner can tell a clipped frame from an unclipped one
+ * arithmetically instead of by eye.
+ *
+ * Both assume the faces do not overlap, which is true of the two above and is
+ * asserted by neither — a room where they did would report a `box` fraction
+ * that double-counts, and the check would only ever be too strict.
+ */
+function clipExpectation(
+  surfaces: SurfaceTree,
+  role: string,
+): { polygon: number; box: number } {
+  let polygon = 0;
+  let box = 0;
+  for (const surface of surfaces) {
+    if (surface.role !== role) continue;
+    const pts = surface.path.points;
+    let sum = 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i]!;
+      const b = pts[(i + 1) % pts.length]!;
+      sum += a.x * b.y - b.x * a.y;
+      if (a.x < minX) minX = a.x;
+      if (a.y < minY) minY = a.y;
+      if (a.x > maxX) maxX = a.x;
+      if (a.y > maxY) maxY = a.y;
+    }
+    polygon += Math.abs(sum) / 2;
+    box += (maxX - minX) * (maxY - minY);
+  }
+  return { polygon, box };
 }
 
 /** See `phase4-wind-max-no-rain` for why the rain layer is hidden. */
@@ -943,6 +1102,23 @@ export interface GoldenResult {
   excluded: { rects: { x: number; y: number; width: number; height: number }[]; pixels: number } | null;
   /** Live proof the narrowed hash can still fail. Null when nothing is excluded. */
   excludeControl: { tripped: boolean; at: [number, number] | null; note: string | null } | null;
+  /**
+   * SPRINT.md R3. The renderer's live render-target count for THIS case,
+   * measured after the frame is drawn.
+   *
+   * Reported to the runner and deliberately NOT written into
+   * `test/golden/frames.json`. The absolute number depends on the GL driver
+   * that happened to run; the CLAIM is relative — a case with a fill must hold
+   * the same count as a case without one — and committing a machine-dependent
+   * absolute would turn the first run on another laptop into a false failure,
+   * which is exactly how an instrument stops being believed.
+   */
+  renderTargets: RenderTargetCensus;
+  /**
+   * B2. What fraction of the frame this case's fill should light, and what it
+   * would light unclipped. Null on every case with no `clipRole`.
+   */
+  clip: { role: string; polygon: number; box: number } | null;
   /** PNG data URL, written to disk by the runner for eyeballing. */
   png: string;
 }
@@ -1108,6 +1284,10 @@ async function run(): Promise<GoldenResult[]> {
       ...(c.forces === undefined ? {} : { forces: c.forces }),
     };
 
+    // B2. The room, before the scene: role binding is resolved at mount, and a
+    // fill mounted against an empty room would light nothing and hash black.
+    if (c.surfaces) compositor.setSurfaces(c.surfaces);
+
     if (c.afterScene) {
       // Mount one scene, run a frame, then replace it — the editor's path.
       compositor.setScene(c.afterScene);
@@ -1186,6 +1366,15 @@ async function run(): Promise<GoldenResult[]> {
       regionHash: c.region
         ? hashRegion(pixels.pixels, size.width, size.height, c.region)
         : null,
+      // R3, read AFTER the frame is drawn: a mask that allocated a target would
+      // have allocated it during that render and not before it. A14 — the
+      // counter is a probe over two small collections, it runs once per case
+      // here and on the 250 ms metrics tick live, never on a frame path.
+      renderTargets: readRenderTargets(app.renderer),
+      clip:
+        c.clipRole && c.surfaces
+          ? { role: c.clipRole, ...clipExpectation(c.surfaces, c.clipRole) }
+          : null,
     });
 
     compositor.destroy();

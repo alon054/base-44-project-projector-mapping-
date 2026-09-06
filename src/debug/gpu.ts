@@ -103,7 +103,68 @@ export interface GpuResourceReport {
   geometryCount: number;
   /** `Object.keys(_managedGeometries.items).length`, tombstones included. INFORMATION. */
   geometrySlots: number;
+  /**
+   * SPRINT.md §3 R3's counter. **Reported, never gated** — like every other
+   * number in this file.
+   *
+   * Carried as its own census with its own `valid` flag rather than as three
+   * more fields beside the textures. That is the A14 lesson stated as
+   * structure: a NEW counter that cannot find its subsystem must report itself
+   * INVALID and must not be able to drag the four counters beside it — which
+   * have four phases of history — into INVALID with it. The census that judges
+   * a soak and the census that judges a mask fail independently or they are one
+   * instrument pretending to be two.
+   */
+  renderTargets: RenderTargetCensus;
 }
+
+/**
+ * How many render targets the renderer is holding (SPRINT.md §3 R3).
+ *
+ * The question it answers is exactly one: **does putting content on a face
+ * allocate a target?** A stencil mask does not; a sprite/alpha mask does, once
+ * per masked container, and on a wall the two look identical. So this is the
+ * only instrument that can tell them apart, and the golden runner reads it
+ * either side of a fill.
+ *
+ * Two numbers, for the reason `textureCount` and `textureSlots` are two
+ * numbers. They come from different structures with different removal
+ * semantics, and reporting one would repeat Phase 3's tombstone fault in a
+ * fresh counter:
+ *
+ *   - `count` is `_renderSurfaceToRenderTargetHash.size`. That is a real `Map`
+ *     and `destroyRenderTarget` calls `.delete` on it
+ *     (`RenderTargetSystem.mjs`), so it has no graves and it is the live
+ *     number.
+ *   - `gpuSlots` / `gpuLive` come from `_gpuRenderTargetHash`, a null-prototype
+ *     object whose destroy path assigns `null` rather than deleting the key —
+ *     the SAME tombstone shape as `managedTextures`, twelve lines from a
+ *     comment about it. Both are reported so the difference is visible instead
+ *     of inferred.
+ *
+ * A14: read on the existing 250 ms metrics tick, inside the timing that already
+ * produces the `instrument` HUD row. It allocates nothing per frame, touches no
+ * frame path, and does no I/O.
+ */
+export interface RenderTargetCensus {
+  /** False when the renderer internals moved. Then no number here means anything. */
+  valid: boolean;
+  invalidReason: string;
+  /** **Live** render targets: `_renderSurfaceToRenderTargetHash.size`. The number R3 is about. */
+  count: number;
+  /** Keys in `_gpuRenderTargetHash`, tombstones included. INFORMATION. */
+  gpuSlots: number;
+  /** Non-null values in `_gpuRenderTargetHash`. INFORMATION. */
+  gpuLive: number;
+}
+
+export const INVALID_RENDER_TARGETS: RenderTargetCensus = {
+  valid: false,
+  invalidReason: 'not sampled',
+  count: 0,
+  gpuSlots: 0,
+  gpuLive: 0,
+};
 
 export const INVALID_GPU_REPORT: GpuResourceReport = {
   valid: false,
@@ -115,6 +176,7 @@ export const INVALID_GPU_REPORT: GpuResourceReport = {
   bufferSlots: 0,
   geometryCount: 0,
   geometrySlots: 0,
+  renderTargets: INVALID_RENDER_TARGETS,
 };
 
 function subsystem(renderer: unknown, name: string): unknown {
@@ -149,6 +211,59 @@ function countManagedHash(
   let live = 0;
   for (const v of values) if (v) live++;
   return { slots: values.length, live };
+}
+
+/**
+ * SPRINT.md §3 R3 — the live render-target count.
+ *
+ * Its own function with its own validity, deliberately: see
+ * `RenderTargetCensus`. A new counter that could not find its subsystem must
+ * say so about ITSELF and leave the census beside it alone.
+ *
+ * Both structures are renderer internals with a leading underscore, so every
+ * lookup is a probe. That is not defensive style — it is the honest shape of
+ * reading a private field, and the alternative is a confident zero, which is
+ * the failure A14 lists first.
+ */
+export function readRenderTargets(renderer: unknown): RenderTargetCensus {
+  const system = subsystem(renderer, 'renderTarget');
+  if (system === null || typeof system !== 'object') {
+    return {
+      ...INVALID_RENDER_TARGETS,
+      invalidReason: 'renderer internals not found: renderTarget (PixiJS version change?)',
+    };
+  }
+  const missing: string[] = [];
+
+  // A real `Map`, and `destroyRenderTarget` deletes from it — no tombstones,
+  // so `.size` is the live count rather than a high-water mark.
+  const live = (system as Record<string, unknown>)['_renderSurfaceToRenderTargetHash'];
+  const isMap = live instanceof Map;
+  if (!isMap) missing.push('renderTarget._renderSurfaceToRenderTargetHash');
+
+  // A null-prototype object whose destroy path assigns null. Counted BOTH ways
+  // for the reason `textureSlots` exists twelve lines above the fault it names.
+  let gpuSlots = 0;
+  let gpuLive = 0;
+  const gpuHash = (system as Record<string, unknown>)['_gpuRenderTargetHash'];
+  if (gpuHash !== null && typeof gpuHash === 'object') {
+    const values = Object.values(gpuHash as Record<string, unknown>);
+    gpuSlots = values.length;
+    for (const v of values) if (v) gpuLive++;
+  } else {
+    missing.push('renderTarget._gpuRenderTargetHash');
+  }
+
+  return {
+    valid: missing.length === 0,
+    invalidReason:
+      missing.length === 0
+        ? ''
+        : `renderer internals not found: ${missing.join(', ')} (PixiJS version change?)`,
+    count: isMap ? (live as Map<unknown, unknown>).size : 0,
+    gpuSlots,
+    gpuLive,
+  };
 }
 
 /**
@@ -217,6 +332,9 @@ export function readGpuResources(renderer: unknown): GpuResourceReport {
     bufferSlots: buffers?.slots ?? 0,
     geometryCount: geometries?.live ?? 0,
     geometrySlots: geometries?.slots ?? 0,
+    // Sampled here so the whole census is one call on one tick, but judged on
+    // its own `valid` — the four counters above cannot be invalidated by it.
+    renderTargets: readRenderTargets(renderer),
   };
 }
 
