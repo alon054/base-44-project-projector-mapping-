@@ -52,6 +52,7 @@ import {
   type PathToolState,
 } from './pathTool';
 import type { Path } from '../core/paths';
+import { reconcileSurfaces, type SurfaceTree } from '../core/surfaces';
 import {
   HANDLES,
   aspectOf,
@@ -67,6 +68,30 @@ import type { BlendMode } from '../core/layer';
 import { gridLines, type GridWeight } from './grid';
 
 export const PREVIEW_SIZE = { width: 480, height: 270 } as const;
+
+/**
+ * The room a preview mounted without one has: none. A stable reference, so the
+ * default does not look like a new room on every render and re-push an empty
+ * tree to the host each pass.
+ */
+const EMPTY_ROOM: SurfaceTree = [];
+
+/** A `PathSession` minus the banked paths — see `RegionSurface`. */
+type DrawingState = Omit<PathSession, 'paths'>;
+
+/**
+ * Split a session's editor half off from the room half.
+ *
+ * A rest destructure rather than four named fields, so a field added to
+ * `PathSession` later travels with the drawing state automatically instead of
+ * being silently dropped by a copy that was written out by hand. `grabPoint`
+ * arrived exactly that way in this block.
+ */
+function drawingOf(session: PathSession): DrawingState {
+  const { paths, ...rest } = session;
+  void paths;
+  return rest;
+}
 
 interface Props {
   speed: number;
@@ -86,6 +111,28 @@ interface Props {
    * `scene:set` channel by `App`'s effect. No new channel; no pixels (I-7).
    */
   setScene?: (update: (prev: Scene) => Scene) => void;
+  /**
+   * I-15, B3. The room — every marked face, held by `App` and written to
+   * `calibration/surfaces.json` on every change.
+   *
+   * A PROP, not state here, and that is the block's central decision. The path
+   * tool used to bank its paths into its own `useState` and P5-D's comment said
+   * so: "paths belong to the surface tree, which is calibration and is Phase 6".
+   * That is now. The banked list IS the room, so it is held once, in the place
+   * that can persist it and send it to the wall, and this component draws it and
+   * edits it rather than owning a second copy.
+   */
+  surfaces?: SurfaceTree;
+  /**
+   * The room after an edit. Called on **every** change — bank, point drag,
+   * point delete, whole-face move, delete — because the builder is at the wall
+   * and there is no save button to find in the dark (SPRINT.md §3 R1).
+   *
+   * Called with the whole tree rather than a patch, for the reason the scene
+   * crosses whole: a partial update makes the wall's room depend on having
+   * received every previous one in order.
+   */
+  onSurfaces?: (tree: SurfaceTree) => void;
 }
 
 export function PreviewCanvas({
@@ -95,6 +142,8 @@ export function PreviewCanvas({
   clockState,
   onClockReady,
   setScene,
+  surfaces = EMPTY_ROOM,
+  onSurfaces,
 }: Props): React.JSX.Element {
   const mount = useRef<HTMLDivElement | null>(null);
   const host = useRef<RenderHost | null>(null);
@@ -105,6 +154,11 @@ export function PreviewCanvas({
   clockStateRef.current = clockState;
   const onClockReadyRef = useRef(onClockReady);
   onClockReadyRef.current = onClockReady;
+  // Same reason as `sceneRef`: the mount effect runs once, and a room that was
+  // already loaded from disk before the host finished initialising must not be
+  // the one thing the preview never hears about.
+  const surfacesRef = useRef(surfaces);
+  surfacesRef.current = surfaces;
 
   useEffect(() => {
     let disposed = false;
@@ -135,6 +189,7 @@ export function PreviewCanvas({
       host.current = h;
       h.setSpeed(speed);
       h.setScene(sceneRef.current);
+      h.setSurfaces(surfacesRef.current);
       h.setClock(clockStateRef.current);
       onClockReadyRef.current?.(h.clock);
     });
@@ -161,6 +216,20 @@ export function PreviewCanvas({
     host.current?.setScene(scene);
   }, [scene]);
 
+  /**
+   * I-15. The preview shows the fills too.
+   *
+   * Not decoration: the builder marks a face here and has to see it light HERE,
+   * because the projector is behind them and a preview that showed the marks
+   * but not what lands on them would make every drag a guess checked over one
+   * shoulder. It is the same `Compositor.setSurfaces` the output window runs,
+   * at preview resolution, from the same tree — I-7's "approximation, not a
+   * mirror", applied to the room exactly as it already is to the scene.
+   */
+  useEffect(() => {
+    host.current?.setSurfaces(surfaces);
+  }, [surfaces]);
+
   // I-2. The preview's clock is a real clock; this applies the operator's
   // intent to it, which is what makes a pause visible in the editor without a
   // round trip to the output window.
@@ -169,7 +238,12 @@ export function PreviewCanvas({
   }, [clockState]);
 
   return (
-    <RegionSurface scene={scene} setScene={setScene}>
+    <RegionSurface
+      scene={scene}
+      setScene={setScene}
+      surfaces={surfaces}
+      {...(onSurfaces ? { onSurfaces } : {})}
+    >
       <div
         ref={mount}
         style={{
@@ -205,10 +279,14 @@ export function PreviewCanvas({
 function RegionSurface({
   scene,
   setScene,
+  surfaces,
+  onSurfaces,
   children,
 }: {
   scene: Scene;
   setScene: ((update: (prev: Scene) => Scene) => void) | undefined;
+  surfaces: SurfaceTree;
+  onSurfaces?: (tree: SurfaceTree) => void;
   children: React.ReactNode;
 }): React.JSX.Element {
   const surface = useRef<HTMLDivElement | null>(null);
@@ -227,11 +305,57 @@ function RegionSurface({
    * reach the output.
    */
   const [showGrid, setShowGrid] = useState(true);
-  const [session, setSession] = useState<PathSession>(emptyPathSession());
+  /**
+   * The half of a `PathSession` that is genuinely the editor's: the path being
+   * drawn, which face is selected, and the gesture in flight.
+   *
+   * The other half — the banked paths — is the ROOM, and it lives in `App` and
+   * on disk. Splitting the session this way rather than mirroring the tree into
+   * a second `useState` is the whole point: there is one list of marked faces,
+   * so there is no copy to fall out of step with the file, and every function in
+   * `pathTool.ts` still sees the `PathSession` it was written against.
+   */
+  const [drawing, setDrawing] = useState<DrawingState>(() => drawingOf(emptyPathSession()));
   const [hover, setHover] = useState<NormalizedPoint | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
 
   const aspect = aspectOf(PREVIEW_SIZE.width, PREVIEW_SIZE.height);
+
+  /**
+   * The session the path tool operates on, assembled from the room and the
+   * drawing state. Rebuilt per render rather than stored, because a stored copy
+   * is the second source of truth this split exists to remove.
+   */
+  const session: PathSession = useMemo(
+    () => ({ ...drawing, paths: surfaces.map((s) => s.path) }),
+    [drawing, surfaces],
+  );
+
+  /**
+   * **The one place a path-tool result becomes a room.** Every gesture — down,
+   * move, up, Enter, Delete, the buttons — ends here.
+   *
+   * `reconcileSurfaces` does the matching (see its header): a path the room has
+   * not seen is a bank, a path that moved is an edit that keeps its role and
+   * name, a path that vanished is a delete. So SPRINT.md §3 R1's "written on
+   * every change" is true because there is one funnel, not because six handlers
+   * each remember to call a writer.
+   *
+   * Computed against THIS render's `surfaces`, and the write is issued outside
+   * any state updater — `addLayer`'s ruling three functions down, for its
+   * reason: an updater runs twice under StrictMode, and a side effect that
+   * crosses a process boundary must not.
+   *
+   * The identity check is not an optimisation. Holding the pointer still
+   * mid-drag produces the same room every frame, and without it that would be
+   * an IPC message and a `surfaces.json` write per frame for a hand that is not
+   * moving.
+   */
+  const applySession = (next: PathSession): void => {
+    setDrawing(drawingOf(next));
+    const tree = reconcileSurfaces(surfaces, next.paths);
+    if (tree !== surfaces) onSurfaces?.(tree);
+  };
 
   /**
    * The one place a pointer event becomes normalized. Reads the element's live
@@ -247,6 +371,14 @@ function RegionSurface({
   }, []);
 
   const selected = selectedId === null ? undefined : scene.layers.find((l) => l.id === selectedId);
+  /**
+   * The marked face under selection, resolved against the room on every render
+   * rather than stored resolved — `App`'s ruling for the panel's layer
+   * selection, for the same reason: a face deleted from the surface list leaves
+   * a selection that names nothing, and resolving it here means that reads as
+   * "no face" instead of as a stale name on a button.
+   */
+  const selectedFace = surfaces.find((sf) => sf.path.id === session.selectedId);
 
   const onPointerDown = (e: React.PointerEvent): void => {
     if (!setScene) return;
@@ -257,7 +389,7 @@ function RegionSurface({
     surface.current?.focus();
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
-      setSession((prev) => pathSessionDown(prev, p, aspect, e.shiftKey));
+      applySession(pathSessionDown(session, p, aspect, e.shiftKey));
       return;
     }
     const start = beginGesture(scene, selectedId, p, aspect);
@@ -271,7 +403,13 @@ function RegionSurface({
     if (tool === 'path') {
       setShiftHeld(e.shiftKey);
       setHover(p);
-      if (p) setSession((prev) => pathSessionMove(prev, p, aspect, e.shiftKey));
+      // **The room is written on every pointer sample**, which is the opposite
+      // of the region gesture below and is deliberate (SPRINT.md §3 R1): a
+      // builder dragging a face's corner needs the wall to answer while their
+      // finger is down. It is affordable because `Compositor.setSurfaces`
+      // reshapes the masks it has instead of rebuilding the layer stack — see
+      // its header, which is where the reasoning for both halves lives.
+      if (p) applySession(pathSessionMove(session, p, aspect, e.shiftKey));
       return;
     }
     if (!gesture || !p) return;
@@ -298,7 +436,7 @@ function RegionSurface({
     if (tool === 'path') {
       const p = pointOf(e);
       // Simplification happens inside this call, once, on release (D19).
-      setSession((prev) => pathSessionUp(prev, p, aspect, e.shiftKey));
+      applySession(pathSessionUp(session, p, aspect, e.shiftKey));
       return;
     }
     const g = gesture;
@@ -339,15 +477,20 @@ function RegionSurface({
     // mark the next.
     if (tool === 'path' && e.key === 'Enter') {
       e.preventDefault();
-      setSession((prev) => commitActivePath(prev, aspect));
+      // Enter banks the active path, which `applySession` turns into a marked
+      // face. Closing a path banks it too — that decision is in
+      // `pathSessionDown` so both gestures reach the same `commitActivePath`.
+      applySession(commitActivePath(session, aspect));
       return;
     }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     if (tool === 'path') {
       e.preventDefault();
       // The point under the pointer, or the last one placed when the pointer is
-      // nowhere near a point — which is what "undo that click" means here.
-      setSession((prev) => deleteFromPathSession(prev, hover, aspect));
+      // nowhere near a point — which is what "undo that click" means here. On a
+      // banked face the same rule trims a corner, and only a press away from
+      // every point deletes the face (see `deleteFromPathSession`).
+      applySession(deleteFromPathSession(session, hover, aspect));
       return;
     }
     if (selectedId === null || !setScene) return;
@@ -510,7 +653,7 @@ function RegionSurface({
           <>
             <button
               type="button"
-              onClick={() => setSession(discardActivePath)}
+              onClick={() => applySession(discardActivePath(session))}
               style={SELECT_STYLE}
             >
               discard
@@ -518,34 +661,39 @@ function RegionSurface({
             <button
               type="button"
               onClick={() =>
-                setSession((prev) =>
-                  prev.selectedId !== null
-                    ? removePath(prev, prev.selectedId)
-                    : prev.paths.length === 0
-                      ? prev
-                      : removePath(prev, prev.paths[prev.paths.length - 1]!.id),
+                applySession(
+                  session.selectedId !== null
+                    ? removePath(session, session.selectedId)
+                    : session.paths.length === 0
+                      ? session
+                      : removePath(session, session.paths[session.paths.length - 1]!.id),
                 )
               }
               disabled={session.paths.length === 0}
               style={SELECT_STYLE}
             >
-              {session.selectedId === null ? 'undo last' : `delete ${session.selectedId}`}
+              {session.selectedId === null
+                ? 'undo last'
+                : `delete ${selectedFace?.name ?? session.selectedId}`}
             </button>
             <span>
-              {`${session.paths.length} path${session.paths.length === 1 ? '' : 's'} · ` +
+              {`${surfaces.length} face${surfaces.length === 1 ? '' : 's'} · ` +
                 `${session.active.points.length} point${
                   session.active.points.length === 1 ? '' : 's'
                 } in this one` +
-                (session.active.closed ? ' · closed' : '') +
                 (session.active.lastSimplification
                   ? ` · last stroke ${session.active.lastSimplification.before} → ${session.active.lastSimplification.after}`
                   : '') +
                 (session.selectedId !== null && session.active.points.length === 0
-                  ? ` · ${session.selectedId} selected — drag to move it, Delete removes it`
+                  ? ` · ${selectedFace?.name ?? session.selectedId} (${selectedFace?.role ?? '?'}) — ` +
+                    'drag a point to adjust, drag the face to move it, ' +
+                    'Delete on a point trims it, Delete elsewhere removes the face'
                   : ' — click adds, drag draws, shift squares, Delete removes') +
-                (session.active.points.length >= 2 ? ', Enter finishes and starts the next' : '') +
+                (session.active.points.length >= 2
+                  ? ', Enter finishes it and banks it as a face'
+                  : '') +
                 (session.active.points.length >= CLOSE_MIN_POINTS && !session.active.closed
-                  ? ', first point closes it into a loop'
+                  ? ', first point closes AND banks it'
                   : '')}
             </span>
           </>

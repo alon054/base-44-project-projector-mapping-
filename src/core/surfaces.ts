@@ -214,3 +214,72 @@ export function describeSurfaces(tree: SurfaceTree): string {
     .join(' | ');
   return `[surfaces] ${tree.length}: ${each}`;
 }
+
+/**
+ * The surface tree brought into step with a list of paths — B3's single write.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THIS IS THE ONE FUNCTION THE WHOLE WALL LOOP GOES THROUGH.
+ *
+ * Banking a face, dragging one of its points, deleting a point, moving the
+ * whole face and deleting the face are five gestures in `pathTool.ts` and they
+ * all produce the same thing: a new list of paths. Rather than five call sites
+ * each remembering to write `surfaces.json`, the editor hands the new list here
+ * and the result IS the room — so "rewritten on every change" (SPRINT.md §3 R1)
+ * is a property of having one path to the file rather than of five call sites
+ * being careful. CLAUDE.md's "ship a fix as a mechanism, not as an edit".
+ *
+ * Matching is **by path id**, which is what carries a face's identity through a
+ * drag. `role` and `name` are the operator's and survive every geometric edit:
+ * dragging a point of a face tagged `box-left` must not silently retag it
+ * `panel`, and this is where that is guaranteed rather than in each handler.
+ *
+ * A path the tree has never seen is a **bank** — a newly marked face, given the
+ * next free id and `face N`. A surface whose path is gone has been deleted.
+ * Order follows `paths`, which is marking order, because that is the order
+ * faces light in (see this file's header).
+ *
+ * **Returns the tree unchanged, by identity, when nothing moved.** A pointer
+ * that has not travelled far enough to move a clamped path produces the same
+ * list, and the editor tests that identity to decide whether to write the file
+ * and cross the process boundary at all. Without it, holding the mouse still
+ * mid-drag would write `surfaces.json` sixty times a second.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export function reconcileSurfaces(tree: SurfaceTree, paths: readonly Path[]): SurfaceTree {
+  const byPath = new Map<string, Surface>();
+  for (const s of tree) byPath.set(s.path.id, s);
+
+  const out: Surface[] = [];
+  let changed = paths.length !== tree.length;
+  for (const path of paths) {
+    const existing = byPath.get(path.id);
+    if (existing) {
+      // Same path object: this face was not touched, and keeping the SAME
+      // surface object is what lets the compositor's reshape skip it.
+      if (existing.path === path) {
+        out.push(existing);
+      } else {
+        out.push({ ...existing, path });
+        changed = true;
+      }
+      continue;
+    }
+    // A bank. Ids are allocated against the tree AND everything produced so
+    // far, so marking two faces in one reconciliation cannot hand out one id
+    // twice — and neither can a delete that freed a suffix earlier in the list.
+    const known: Surface[] = [...tree, ...out];
+    out.push(
+      createSurface({
+        id: nextSurfaceId(known),
+        name: nextSurfaceName(known),
+        role: DEFAULT_SURFACE_ROLE,
+        path,
+      }),
+    );
+    changed = true;
+  }
+
+  if (!changed && out.every((s, i) => s === tree[i])) return tree;
+  return out;
+}

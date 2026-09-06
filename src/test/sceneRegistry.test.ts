@@ -78,6 +78,11 @@ describe('the registry is bound to every parameter the panel draws', () => {
     expect(groups.layer.sort()).toEqual([
       'entity.sea.blendMode',
       'entity.sea.depth',
+      // B3. Grouped with the LAYER family, not with content — `contentKeysOf`
+      // is what decides whether a layer's subtree needs rebuilding, and a
+      // `fillRole` counted as content would never match any provider's spec
+      // list, so every layer would be torn down and rebuilt on every sync.
+      'entity.sea.fillRole',
       'entity.sea.opacity',
       'entity.sea.visible',
     ]);

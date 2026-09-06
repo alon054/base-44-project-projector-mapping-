@@ -73,6 +73,30 @@ export const CH = {
   calibrationSet: 'calibration:set',
   /** renderer -> main (invoke): the stored calibration, or null. Read at launch. */
   calibrationGet: 'calibration:get',
+  /**
+   * I-15, B3. editor -> main -> output: the whole surface tree, as JSON.
+   *
+   * A THIRD channel rather than a field on `calibration:set`, and the reason is
+   * the same one that separated the warp from the scene: the room and the warp
+   * are edited by different gestures at different moments, and sharing a
+   * channel would make "re-marking a face leaves the warp alone" a property of
+   * message ordering. They are both calibration and they are both persisted in
+   * `calibration/`, which is I-5 satisfied — I-5 says calibration is kept apart
+   * from scenes, not that it is one file.
+   *
+   * The whole tree every time, never a delta. A per-face message would make the
+   * output's room depend on having received every previous one in order, and a
+   * dropped one would leave a face lit on the wall that the editor believes it
+   * deleted — with nothing in either log to say so.
+   *
+   * **This channel carries a pointer drag**, which no other channel here does.
+   * That is affordable because the payload is a handful of normalized points
+   * (I-1, no pixels — I-7) and because the receiving compositor reshapes rather
+   * than rebuilds; see `Compositor.setSurfaces`.
+   */
+  surfacesSet: 'surfaces:set',
+  /** renderer -> main (invoke): the stored surface tree, or null. Read at launch. */
+  surfacesGet: 'surfaces:get',
   /** output -> main -> editor: HUD numbers, for the editor's always-on text mirror (C4). */
   metrics: 'metrics:report',
   /** editor -> main (invoke): enumerate displays. */
@@ -237,6 +261,22 @@ export interface CalibrationSet {
   viewportId: string;
   enabled: boolean;
   corners: { x: number; y: number }[];
+}
+
+/**
+ * I-15, B3. The room on the wire — the `surfaces.json` envelope exactly as it
+ * is stored, so what crosses the boundary and what lands on disk are the same
+ * bytes rather than two shapes that have to be kept in step.
+ *
+ * Structurally typed and deliberately vague about a surface: main relays this
+ * without understanding it and the receiving renderer canonicalizes on receipt
+ * (`readSurfaces` with `canonicalizeSurface`), exactly as it does for a scene
+ * and a calibration. A `path` is normalized points (I-1); no pixels cross here
+ * either (I-7).
+ */
+export interface SurfacesSet {
+  version: number;
+  surfaces: unknown[];
 }
 
 /**

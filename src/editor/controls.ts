@@ -117,7 +117,18 @@ export interface EntityParamGroups {
 }
 
 /** What `defineLayerParameters` registers. Content is everything else flat. */
-const LAYER_LEVEL = new Set(['opacity', 'depth', 'visible', 'blendMode']);
+/**
+ * The suffixes that belong to the LAYER rather than to its content.
+ *
+ * `fillRole` is here and it has to be. `entityParamGroups` sorts every
+ * unqualified suffix into `layer` or `content` by this set, and `contentKeysOf`
+ * is what `syncEntityParameters` compares against the provider's declared specs
+ * to decide whether a layer's registry subtree is still correct. A `fillRole`
+ * that fell through to `content` would never match any provider's spec list, so
+ * every layer would be unregistered and rebuilt on every sync — a real cost on
+ * an ordinary edit, arriving from a one-word omission in a Set.
+ */
+const LAYER_LEVEL = new Set(['opacity', 'depth', 'visible', 'blendMode', 'fillRole']);
 
 /**
  * A layer's registered CONTENT keys, by suffix — what the provider declared

@@ -27,11 +27,18 @@ import {
   type RunConditions,
   type SceneFailure,
   type CalibrationSet,
+  type SurfacesSet,
   type ClockSet,
   type SceneSet,
 } from './ipc';
 import { fingerprint, loadSettings, pickOutputDisplay, saveSettings } from './config';
-import { calibrationFilePath, loadCalibrationRaw, saveCalibrationRaw } from './calibration';
+import {
+  calibrationFilePath,
+  loadCalibrationRaw,
+  loadSurfacesRaw,
+  saveCalibrationRaw,
+  saveSurfacesRaw,
+} from './calibration';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
 
@@ -400,6 +407,9 @@ function openOutputWindow(why: string): void {
     // interpret the scene; it is an opaque JSON blob on this path.
     if (lastScene !== null) send(win, CH.sceneSet, lastScene);
     if (lastClock !== null) send(win, CH.clockSet, lastClock);
+    // I-15. The room, for the same reason as the scene: a reopened output
+    // window that came back without it would draw every fill layer nowhere.
+    if (lastSurfaces !== null) send(win, CH.surfacesSet, lastSurfaces);
     if (!goFullscreen) {
       send(win, CH.warning, {
         level: 'warn',
@@ -536,6 +546,17 @@ let lastClock: ClockSet | null = null;
  * survives every scene change, because nothing on the scene path touches it.
  */
 let lastCalibration: CalibrationSet | null = null;
+/**
+ * I-15, B3. The last room the editor sent, replayed to an output window that
+ * opens later — the same contract the scene, the clock and the warp already
+ * have, and it matters more here than for any of them: an output window that
+ * reopened without the room would show a scene whose fill layers match no
+ * surface, which is a black wall with the editor insisting four faces are lit.
+ *
+ * Held as the opaque JSON it arrived as. Main is a relay on this path and does
+ * not know what a face is; the validation boundary is the receiving renderer.
+ */
+let lastSurfaces: SurfacesSet | null = null;
 
 // ---------------------------------------------------------------------------
 // IPC relay. Every payload passes the I-7 guard on the way through.
@@ -603,6 +624,26 @@ function wireIpc(): void {
   });
 
   ipcMain.handle(CH.calibrationGet, (): unknown => lastCalibration ?? loadCalibrationRaw());
+
+  /**
+   * I-15, B3. Persist first, then forward — `calibration:set`'s ruling, for its
+   * reason: if the write fails the builder still sees the face move on the
+   * wall, because losing the file is recoverable in a minute and refusing to
+   * light a face because a disk write failed is the wrong trade in a dark room
+   * (I-13).
+   *
+   * This handler runs on **every pointer sample of a point drag**. It writes a
+   * small JSON file each time, which is the deliberate trade SPRINT.md §3 R1
+   * makes: no save button, because there is no save button to find at a wall.
+   */
+  ipcMain.on(CH.surfacesSet, (_e: IpcMainEvent, payload: SurfacesSet) => {
+    const room = assertJsonOnly(payload);
+    lastSurfaces = room;
+    saveSurfacesRaw(room);
+    send(outputWin, CH.surfacesSet, room);
+  });
+
+  ipcMain.handle(CH.surfacesGet, (): unknown => lastSurfaces ?? loadSurfacesRaw());
 
   ipcMain.on(CH.sceneFailures, (_e: IpcMainEvent, payload: SceneFailure[]) => {
     send(editorWin, CH.sceneFailures, assertJsonOnly(payload));

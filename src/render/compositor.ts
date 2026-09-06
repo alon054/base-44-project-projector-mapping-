@@ -199,6 +199,39 @@ function tintFromAxes(m: Modulation): number {
   return (to8(m.tintR) << 16) | (to8(m.tintG) << 8) | to8(m.tintB);
 }
 
+/**
+ * The room's SHAPE, as a string — what `setSurfaces` compares to decide between
+ * reshaping the masks it has and rebuilding the stack (B3).
+ *
+ * Three fields per face and no geometry, which is the whole idea:
+ *
+ *  - **`id`** — a face added, removed or reordered changes which instances
+ *    exist and in what order, and marking order is render order.
+ *  - **`role`** — re-tagging a face moves it from one layer's fill list to
+ *    another's, or out of every list. No amount of mask redrawing expresses
+ *    that.
+ *  - **maskable** — a face crossing `MASK_MIN_POINTS` in either direction
+ *    gains or loses its instance, and gains or loses an I-13 role-miss flag
+ *    with it. This is the one that is easy to forget, and forgetting it would
+ *    leave a face that was dragged down to two points still drawing the mask it
+ *    had when it was a triangle.
+ *
+ * Point POSITIONS are deliberately absent. Moving a point is precisely the edit
+ * the reshape path exists to serve, and putting coordinates in this key would
+ * make every drag a rebuild — which is the defect, not the fix.
+ *
+ * A string rather than a structural comparison because it is compared, never
+ * read: `\u0000` and `\u0001` separate the fields and the entries, so a role
+ * containing a comma or a colon cannot forge a boundary. `role` is a free
+ * string typed by an operator in the dark (SPRINT.md §3 R2), so that is a real
+ * input and not a hypothetical one.
+ */
+export function surfacesShapeKey(tree: SurfaceTree): string {
+  return tree
+    .map((s) => `${s.id}\u0000${s.role}\u0000${isMaskable(s.path) ? '1' : '0'}`)
+    .join('\u0001');
+}
+
 export class Compositor {
   /** Add this to a stage. The compositor never touches the stage itself. */
   readonly view = new Container();
@@ -226,17 +259,94 @@ export class Compositor {
   }
 
   /**
-   * Re-mark the room (I-15).
+   * Re-mark the room (I-15). **Two paths, and which one runs is decided by the
+   * room's SHAPE, never by how the call arrived.**
    *
-   * Rebuilds the stack, because role binding is resolved at mount and a face
-   * that just gained the role has to light itself — SPRINT.md's beat 7 is
-   * exactly this call arriving while the scene is already running. Scene edits
-   * already rebuild for the same reason, and marking is operator-paced, so this
-   * is the honest implementation rather than a diff nobody can debug at a wall.
+   * ───────────────────────────────────────────────────────────────────────────
+   * WHY THIS IS NOT ONE REBUILD.
+   *
+   * B2 shipped this as an unconditional `setScene`, which tears down and
+   * rebuilds every layer in the stack. That was right for the call B2 could
+   * make — marking a face is operator-paced — and it is wrong for the call B3
+   * makes, which is *every pointer-move of a point drag*. A rebuild per pointer
+   * sample destroys and re-creates every provider view in the scene sixty times
+   * a second: for a video layer that is a decoder torn down and rebuilt per
+   * frame, which is the failure `PreviewCanvas`'s pointer-up comment describes
+   * for scene edits and refuses to make.
+   *
+   * The alternative — debouncing the drag — was rejected: it makes the wall lag
+   * behind the finger, and the whole point of writing the room on every change
+   * is that a builder standing at the projector gets an answer while the point
+   * is still under their hand.
+   *
+   * So: when the room's shape is unchanged and only its GEOMETRY moved, each
+   * live fill instance is reshaped in place — mask redrawn, box recomputed,
+   * provider resized. That is exactly what `resize()` already does to the same
+   * instances when the output resolution changes, and it is literally the same
+   * function (`reshapeFill`), so the two cannot drift apart.
+   *
+   * WHAT COUNTS AS A SHAPE CHANGE (`surfacesShapeKey`): a face added, removed,
+   * reordered, re-roled, or crossing the maskability threshold. Every one of
+   * those changes WHICH instances exist or which layer owns them, and none of
+   * them can be expressed by moving a mask — so they take the rebuild, which is
+   * also what makes SPRINT.md's beat 7 work: a face marked later gains the role
+   * at that moment and lights itself.
+   *
+   * The `misses` list is rebuilt on that path too, and only on that path. That
+   * is not a shortcut: every reason a fill can miss — no surface with the role,
+   * or a surface too small to enclose an area — is in the shape key, so a
+   * geometric edit cannot make the flags stale.
+   * ───────────────────────────────────────────────────────────────────────────
    */
   setSurfaces(tree: SurfaceTree): void {
+    const previous = this.surfaces;
     this.surfaces = tree;
-    if (this.scene) this.setScene(this.scene);
+    if (!this.scene) return;
+    if (surfacesShapeKey(previous) !== surfacesShapeKey(tree)) {
+      this.setScene(this.scene);
+      return;
+    }
+    for (const entry of this.entries) {
+      const mount = this.mounts.get(entry.layer.id);
+      if (!mount?.isFill) continue;
+      for (const instance of mount.fills) {
+        const surface = tree.find((s) => s.id === instance.surface.id);
+        // Identity, not deep equality: `reconcileSurfaces` hands back the SAME
+        // surface object for a face nothing touched, so a drag on one face of
+        // five reshapes one mask and leaves four alone.
+        if (!surface || surface.path === instance.surface.path) continue;
+        this.reshapeFill(instance, entry.layer, surface);
+      }
+    }
+  }
+
+  /**
+   * One fill instance re-cut to a face's current geometry.
+   *
+   * Shared by `resize()` and `setSurfaces()` because the two are the same
+   * operation seen from opposite sides — the frame changed size under a fixed
+   * path, or the path moved inside a fixed frame — and both end with the same
+   * four writes. Writing them twice is how the mask and the box would come to
+   * disagree about which pixels are the face.
+   *
+   * The mask geometry is REBUILT from the normalized path rather than scaled or
+   * translated (I-1): a mask is pixels and nothing else, and a mask that
+   * remembered where it used to be would put the clip half a face out.
+   */
+  private reshapeFill(instance: FillInstance, layer: Layer, surface: Surface): void {
+    instance.surface = surface;
+    instance.box = pathPixelBounds(surface.path, this.width, this.height);
+    drawMask(instance.mask, surface.path, this.width, this.height);
+    // Rebased against IDENTITY, exactly as a fresh instance is. The next frame's
+    // `writeFillModulation` re-derives the live modulation from the new box, so
+    // seeding it any other way would be a second definition of where an
+    // unmodulated fill sits.
+    instance.applied = this.appliedForBox(instance.box, layer, IDENTITY_MODULATION);
+    this.placeFill(instance);
+    instance.view.resize(
+      Math.max(1, Math.round(instance.box.width)),
+      Math.max(1, Math.round(instance.box.height)),
+    );
   }
 
   /**
@@ -584,14 +694,7 @@ export class Compositor {
         this.applyFillHolder(mount.holder, entry.layer);
         mount.applied = this.appliedFor(entry.layer, IDENTITY_MODULATION);
         for (const instance of mount.fills) {
-          instance.box = pathPixelBounds(instance.surface.path, this.width, this.height);
-          drawMask(instance.mask, instance.surface.path, this.width, this.height);
-          instance.applied = this.appliedForBox(instance.box, entry.layer, IDENTITY_MODULATION);
-          this.placeFill(instance);
-          instance.view.resize(
-            Math.max(1, Math.round(instance.box.width)),
-            Math.max(1, Math.round(instance.box.height)),
-          );
+          this.reshapeFill(instance, entry.layer, instance.surface);
         }
         continue;
       }

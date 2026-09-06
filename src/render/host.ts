@@ -32,13 +32,14 @@ import { Clock, type ClockTransport } from '../core/clock';
 import { evaluateForces, type ForceField } from '../core/forces';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
 import type { Scene } from '../core/scene';
+import type { SurfaceTree } from '../core/surfaces';
 import type { PlaceholderInfo } from '../core/resilience';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { ProceduralProvider } from '../providers/procedural/ProceduralProvider';
 import { BundledProvider } from '../providers/bundled/BundledProvider';
 import { createBundledLibrary } from '../providers/bundled/manifest';
 import { ensureLottie } from '../providers/bundled/LottieView';
-import { Compositor } from './compositor';
+import { Compositor, type RoleMiss } from './compositor';
 import { WarpStage } from './warp';
 import type { ViewportCalibration } from './calibration';
 
@@ -105,12 +106,29 @@ export interface RenderHost {
   setClock(state: ClockTransport): void;
   /** Replaces the whole layer stack. Operator-paced, never per-frame. */
   setScene(scene: Scene): void;
+  /**
+   * I-15, B3. The room, from `calibration/surfaces.json` by way of the editor.
+   *
+   * Unlike `setScene` this one IS on a pointer path — the builder at the wall
+   * drags a point and the projection has to answer while their finger is still
+   * down (SPRINT.md §3 R1). `Compositor.setSurfaces` is what makes that
+   * affordable: a geometric edit reshapes the masks it already has and rebuilds
+   * nothing. See its header.
+   */
+  setSurfaces(tree: SurfaceTree): void;
   /** I-5. No-op on a host built without a warp stage (the editor preview). */
   setCalibration(cal: ViewportCalibration): void;
   /** True when the composite is going through the warp mesh this frame. */
   warpActive(): boolean;
   /** I-13: layers currently showing a placeholder. */
   failures(): PlaceholderInfo[];
+  /**
+   * I-13's OTHER flag: fill layers whose role matched no surface, or matched a
+   * face too small to enclose an area. Separate from `failures()` on purpose —
+   * a failure draws magenta and a role miss draws nothing at all, and merging
+   * them would eventually put a magenta box on a wall for a mistyped role.
+   */
+  roleMisses(): RoleMiss[];
   markPending(token: number, t0: number): void;
   setNominalMs(ms: number): void;
   resize(width: number, height: number): void;
@@ -350,6 +368,9 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
       currentScene = scene;
       compositor.setScene(scene);
     },
+    setSurfaces(tree) {
+      compositor.setSurfaces(tree);
+    },
     forceField: () => forceField,
     setCalibration(cal) {
       warp?.setCalibration(cal);
@@ -365,6 +386,9 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     },
     failures() {
       return compositor.failures();
+    },
+    roleMisses() {
+      return compositor.roleMisses();
     },
     markPending(token, t0) {
       pending = { token, t0 };

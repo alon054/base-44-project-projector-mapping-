@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { CH, PARAM_TEST_PATTERN_SPEED, assertJsonOnly } from '@shared/ipc';
 import { createDefaultScene } from '../core/defaultScene';
 import { SceneFormatError, canonicalizeScene, deserializeScene, serializeScene } from '../core/scene';
+import { createSurface } from '../core/surfaces';
+import { createPath } from '../core/paths';
+import { writeSurfaces } from '../render/calibration';
 
 describe('assertJsonOnly — I-7, no pixel buffers over IPC', () => {
   it('passes a realistic parameter payload', () => {
@@ -155,6 +158,62 @@ describe('I-5 — calibration crosses on its own channel', () => {
     // frame buffer through on a channel that is supposed to carry eight floats.
     expect(() =>
       assertJsonOnly({ viewportId: 'main', enabled: true, corners: new Float32Array(8) }),
+    ).toThrow();
+  });
+});
+
+/**
+ * I-15 / B3 — the ROOM crosses on its own channel, and it is a third one.
+ *
+ * The same argument that separated the warp from the scene, applied once more:
+ * the room and the warp are edited by different gestures at different moments,
+ * so sharing a channel would make "re-marking a face leaves the warp alone" a
+ * property of message ordering. Both are calibration and both are persisted in
+ * `calibration/` — I-5 says calibration is kept apart from scenes, not that it
+ * is one file.
+ *
+ * This channel is also the only one in the app that carries a POINTER DRAG, so
+ * the I-7 guard on it is load-bearing rather than ceremonial: it is exercised
+ * sixty times a second while somebody's hand is on a face.
+ */
+describe('I-15 — the surface tree crosses on its own channel', () => {
+  it('is distinct from both the scene and the warp', () => {
+    expect(CH.surfacesSet).not.toBe(CH.sceneSet);
+    expect(CH.surfacesSet).not.toBe(CH.calibrationSet);
+    expect(CH.surfacesGet).not.toBe(CH.calibrationGet);
+    const values = Object.values(CH);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  it('a real room payload passes the guard', () => {
+    const payload = writeSurfaces([
+      createSurface({
+        id: 'surface-1',
+        name: 'face 1',
+        role: 'panel',
+        path: createPath({
+          id: 'path-1',
+          closed: true,
+          points: [
+            { x: 0.1, y: 0.2 },
+            { x: 0.4, y: 0.2 },
+            { x: 0.4, y: 0.5 },
+          ],
+        }),
+      }),
+    ]);
+    expect(assertJsonOnly(payload)).toBe(payload);
+  });
+
+  it('refuses a pixel buffer smuggled in as a path', () => {
+    // I-1 says a stored point is normalized and I-7 says no pixels cross. A
+    // typed array of coordinates would satisfy neither and is an object with
+    // numeric keys, which is exactly what the guard exists to catch.
+    expect(() =>
+      assertJsonOnly({
+        version: 1,
+        surfaces: [{ id: 'surface-1', path: { id: 'p', points: new Float32Array(8) } }],
+      }),
     ).toThrow();
   });
 });

@@ -21,41 +21,86 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-function calibrationPath(): string {
-  // Packaged: userData. Dev: the repo's calibration/ dir, so it is inspectable
-  // — same policy as config/, for the same reason.
+/**
+ * One named file in `calibration/`. **The only place that directory is
+ * spelled**, so the warp and the room cannot end up in different places.
+ *
+ * B3 is why this is a parameter rather than two functions with a literal in
+ * each: `surfaces.json` arrived beside `warp.json`, and a second copy of the
+ * packaged-vs-dev branch is a second thing to get wrong the first time this app
+ * is packaged. CLAUDE.md's "when you fix an instance, grep for the class" —
+ * here the class was reached before the second instance could diverge.
+ *
+ * Packaged: userData. Dev: the repo's calibration/ dir, so it is inspectable —
+ * same policy as config/, for the same reason.
+ */
+function calibrationDirFile(name: string): string {
   return app.isPackaged
-    ? join(app.getPath('userData'), 'calibration', 'warp.json')
-    : join(app.getAppPath(), 'calibration', 'warp.json');
+    ? join(app.getPath('userData'), 'calibration', name)
+    : join(app.getAppPath(), 'calibration', name);
 }
 
 /**
- * The stored calibration as raw JSON, or `null` if there is none or it cannot
- * be read. **Never throws.** A calibration that fails to load costs an
- * alignment; a main process that throws on boot costs the session (I-13).
+ * Raw JSON from a file in `calibration/`, or `null`. **Never throws.** A
+ * calibration that fails to load costs an alignment; a main process that throws
+ * on boot costs the session (I-13). The room degrades the same way and for the
+ * same reason: an evening of re-marking beats an app that will not start.
  */
-export function loadCalibrationRaw(): unknown {
-  const p = calibrationPath();
+function loadRaw(name: string): unknown {
+  const p = calibrationDirFile(name);
   try {
     if (!existsSync(p)) return null;
     return JSON.parse(readFileSync(p, 'utf8')) as unknown;
   } catch (err) {
-    console.error(`[calibration] unreadable, continuing without one: ${String(err)}`);
+    console.error(`[calibration] ${name} unreadable, continuing without it: ${String(err)}`);
     return null;
   }
 }
 
-/** Writes the calibration. Never throws; a failed write is logged, not fatal. */
-export function saveCalibrationRaw(data: unknown): void {
-  const p = calibrationPath();
+/** Writes one file in `calibration/`. Never throws; a failed write is logged. */
+function saveRaw(name: string, data: unknown): void {
+  const p = calibrationDirFile(name);
   try {
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
   } catch (err) {
-    console.error(`[calibration] could not persist: ${String(err)}`);
+    console.error(`[calibration] could not persist ${name}: ${String(err)}`);
   }
 }
 
+const WARP_FILE = 'warp.json';
+/**
+ * I-15, SPRINT.md §3 R1. The room — every marked face, its role and its path.
+ *
+ * Rewritten on **every** edit, including each pointer sample of a point drag,
+ * because the builder is at the wall and there is no save button to find in the
+ * dark. That is affordable precisely because main is dumb on this path: it
+ * stringifies a small JSON blob and writes it. It does not know what a face is
+ * and nothing here should teach it — the shape lives in `core/surfaces.ts` and
+ * the envelope in `src/render/calibration.ts`, exactly as the warp's does.
+ */
+const SURFACES_FILE = 'surfaces.json';
+
+export function loadCalibrationRaw(): unknown {
+  return loadRaw(WARP_FILE);
+}
+
+export function saveCalibrationRaw(data: unknown): void {
+  saveRaw(WARP_FILE, data);
+}
+
+export function loadSurfacesRaw(): unknown {
+  return loadRaw(SURFACES_FILE);
+}
+
+export function saveSurfacesRaw(data: unknown): void {
+  saveRaw(SURFACES_FILE, data);
+}
+
 export function calibrationFilePath(): string {
-  return calibrationPath();
+  return calibrationDirFile(WARP_FILE);
+}
+
+export function surfacesFilePath(): string {
+  return calibrationDirFile(SURFACES_FILE);
 }

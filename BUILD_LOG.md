@@ -6416,3 +6416,165 @@ Force modulation on a fill is written INSIDE the mask, on each instance's
 content container, never on the holder. A holder write would move the mask with
 the content and slide the lit shape off the box — on camera that is a re-shoot,
 not a bug, so it has a test with a real wind field behind it.
+
+## 2026-09-06 — Sprint (block B3) — the wall loop: mark, light, drag, adjust
+- DID: `reconcileSurfaces` — the one funnel every path gesture becomes a room
+  through; banked-face point editing in `pathTool.ts` (`grabPoint`,
+  `pointIndexOnPath`, `withPathPoint`, `withoutPathPoint`); closing a path now
+  banks it; `PreviewCanvas` derives its session from the room instead of owning
+  a banked list; `surfaces:set`/`surfaces:get` as a third channel, persisted and
+  replayed by main; `RenderHost.setSurfaces` + `roleMisses()`; the preview shows
+  fills too; `entity.<id>.fillRole` as a new registry `text` kind driving a
+  `<ParamControl>`; `applyLayerPatch` so an optional field can be cleared;
+  `SurfacePanel`; `addWhiteFill` one-click preset; `Compositor.setSurfaces`
+  reshapes in place instead of rebuilding.
+- MEASURED: npm test 901 → 952 (37 → 38 files, +51). test:render 45 → 45, and
+  the runner still prints "all 43 pre-fill goldens byte-identical" — nothing
+  re-blessed. Dragging a point of one of two lit faces: **0 provider views
+  created, 1 reshape issued**. 17 mutations, 17 caught (1–11 tests each).
+- BLOCKER: -
+- NEXT: W1 — the builder at the projector, 60 minutes, room dark.
+
+DECISION — `setSurfaces` stopped being one rebuild, and that was the block.
+
+B2 shipped `Compositor.setSurfaces` as an unconditional `setScene`. That was
+right for the call B2 could make — marking a face is operator-paced — and it is
+wrong for the call B3 makes, which is *every pointer sample of a point drag*.
+A rebuild there destroys and re-creates every provider view in the scene sixty
+times a second; with a video layer in the scene that is a decoder torn down and
+rebuilt per frame. It is the same failure `PreviewCanvas`'s pointer-up comment
+already refuses to make for scene edits, arriving on a path that comment does
+not cover.
+
+The handoff named the fix and named the wrong fix beside it, and both were
+right. Debouncing the drag puts the wall behind the finger, which is worse than
+the rebuild it saves — the whole reason the room is written on every change is
+that a builder standing at a projector needs an answer while the point is still
+under their hand. So: a surfaces-only reconciliation, keyed on the room's SHAPE.
+
+`surfacesShapeKey` is id + role + maskability per face and **no coordinates**.
+Same shape, different geometry → each live instance is reshaped in place: mask
+redrawn from the normalized path (I-1 — rebuilt, never translated), box
+recomputed, provider resized. Different shape → the rebuild, which is also what
+keeps beat 7 working, because a face marked later has to gain an instance and no
+amount of mask redrawing creates a provider view that was not there.
+
+Maskability is in that key and it is the one that was easy to leave out.
+Dragging a face down to two points has to lose its instance; without that field
+it would still be wearing the triangle's mask. The mutation confirms it: two
+tests fail.
+
+`reshapeFill` is not new code. `resize()` already did exactly those four writes
+to exactly those instances when the output resolution changed — the same
+operation seen from the other side, a path moving inside a fixed frame rather
+than a frame moving under a fixed path. It was factored out, not copied, because
+two copies is how the mask and the box come to disagree about which pixels are
+the face.
+
+DECISION — the banked list IS the room, so there is no second copy.
+
+P5-D's `PathSession` header said it: "paths belong to the surface tree, which is
+calibration and is Phase 6 (I-15) ... `commitActivePath` is the single call that
+block will re-point at the surface tree." The obvious implementation of B3 is to
+keep the session as it is and mirror it into a surface tree — and that is two
+sources of truth for one list, which this codebase argues against in four
+separate file headers.
+
+Instead the session is assembled per render from the room (a prop from `App`)
+plus the drawing state (local `useState`), and one function, `applySession`,
+splits a path-tool result back into the two. `reconcileSurfaces` does the
+matching **by path id**, which is what carries a face's identity through a drag:
+role and name are the operator's and survive every geometric edit. So SPRINT.md
+§3 R1's "written on every change" is true because there is one funnel, not
+because six handlers each remember to call a writer.
+
+The identity return is not an optimisation and is tested as such. A pointer
+held still produces the same room, `applySession` compares by identity, and
+nothing is written or sent. Without it, a motionless hand mid-drag is a
+`surfaces.json` write and an IPC message per frame.
+
+DECISION — closing a path banks it, and that was a live defect, not a feature.
+
+SPRINT.md says "Enter for an open path, clicking the first point for a closed
+one", and the prompt says both gestures already exist. Both gestures existed;
+only one of them banked. `pathToolDown` set `closed: true` and returned, leaving
+the path still taking pointer input — so an operator who drew a square, closed
+it, and clicked to start the next face appended a seventh point to the square
+they had just finished. Both now end in the same `commitActivePath`, so "what
+counts as a finished path" is still answered once, in `finishPath`. Eleven tests
+fail when that is undone, which is the largest number any mutation in this block
+produced.
+
+INVARIANT-TENSION — none. But two things were nearly one.
+
+`fillRole` needed a control, and the obvious control is an enum over the roles
+in the room. That would make the content tree ask the surface tree what values
+are legal, which is precisely the I-15 direction that must not exist — and it
+would be empty on a fresh install, refusing the first role anybody types. It is
+a free `text` kind whose coercion is "is it a string", and an unmatched role
+stays I-13's flag path. SPRINT.md §3 R2 already recorded that exception; this is
+it being spent rather than re-argued.
+
+The surface list edits `role` **outside** the registry, which looks like a
+second writer until you ask what a surface is. `render/calibration.ts` already
+records the argument for the warp corners: registering them would make them
+MIDI-mappable in Phase 11, and a knob that nudges a calibration mid-show is an
+evening destroyed with no undo. A face is the same kind of thing. A layer's
+`fillRole` is content, is registered, and is written through `<ParamControl>`
+like everything else — `controls.test.ts` still reports exactly two files
+containing `registry.write(`.
+
+SHORTCUT — `role` and `name` write on every keystroke.
+
+Each character typed in the surface list rewrites `surfaces.json` and crosses to
+the output. Correct would be to commit on blur or after a pause. On camera in
+three days, a field that lands its value when focus leaves is a face that lights
+when the builder clicks somewhere else, and that is the shot. The payload is a
+few hundred bytes and the receiving compositor takes the rebuild path only
+because a role change genuinely moves a face between layers.
+
+Three fixes the block was not asked for, taken under the suspended rule.
+
+`LAYER_LEVEL` in `controls.ts` had to learn `fillRole`. `contentKeysOf` is what
+`syncEntityParameters` compares against a provider's declared specs to decide
+whether a layer's registry subtree is still correct, and a `fillRole` sorted as
+*content* would never match any provider's list — so every layer would be
+unregistered and rebuilt on every sync. A one-word omission in a `Set`, costing
+a full registry rebuild on every ordinary edit. Three tests catch it.
+
+`Partial<Layer>` cannot express "clear this field" under
+`exactOptionalPropertyTypes`, and `{ ...layer, ...patch }` leaves the key
+present holding `undefined` — a layer that serializes identically to one that
+never had the field and is not deep-equal to it, which is exactly the trap
+`createLayer` spreads `motion` and `fillRole` to avoid, arriving from the other
+direction. `applyLayerPatch` plus a `LayerPatch` type is the mechanism; the
+editor's writer goes through it and so does the test that used to spread by hand.
+
+`electron/calibration.ts` hard-coded `warp.json` in one function. Rather than
+add a second copy of the packaged-vs-dev branch for `surfaces.json`, the
+filename became a parameter — the class reached before the second instance could
+diverge. `surfacesFilePath()` and `calibrationFilePath()` are asserted to be
+different files in the same directory, which is what makes W1's "commit both,
+that is the undo" one gesture.
+
+MEASURED — what the machine can and cannot say about this loop.
+
+It says: every gesture produces a room through one funnel; a face keeps its role
+and name through a drag; closing banks; a banked face's points are draggable and
+its corners trimmable; a point drag creates no provider view and reshapes only
+the face that moved; adding, deleting, re-roling and under-trimming all rebuild;
+the room round-trips through the envelope that crosses IPC; `saveSurfacesRaw` →
+`loadSurfacesRaw` → `readSurfaces` round-trips on disk through the stubbed
+`app.getAppPath()`; the room's channel is distinct from the scene's and the
+warp's and its payload is refused if a typed array is smuggled into a path; and
+`output/main.ts` and `golden/main.ts` still cannot reach `PreviewCanvas.tsx` or
+`interaction.ts`, so the grid, the outline and the live path preview cannot
+reach the projector.
+
+It cannot say that the app runs. No test drives `electron/main.ts`'s IPC
+handlers or two Electron windows, so the link between `ipcMain.on(surfaces:set)`
+and `saveSurfacesRaw`, and the link between main's forward and the output
+window's `applySurfaces`, are built on exactly the warp's shape and have not
+been executed. Those two checklist lines are deliberately left unticked. The
+suite says a value was written and a scene changed; it says nothing about
+whether light landed on a box.

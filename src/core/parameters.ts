@@ -15,7 +15,14 @@
  * exactly one. The registry is an *index* onto state, not a second store.
  */
 import { PARAM_TEST_PATTERN_SPEED } from '@shared/ipc';
-import { BLEND_MODES, isBlendMode, type JsonValue, type Layer, type Susceptibility } from './layer';
+import {
+  BLEND_MODES,
+  isBlendMode,
+  type JsonValue,
+  type Layer,
+  type LayerPatch,
+  type Susceptibility,
+} from './layer';
 import { CLOCK_MAX_MS, CLOCK_RATE_MAX, CLOCK_RATE_MIN } from './clock';
 import { clampSusceptibility, type ForceDefinition, type ParallaxState } from './forces';
 import {
@@ -57,7 +64,39 @@ export interface EnumParameterDef extends ParameterDefBase<string> {
   options: readonly string[];
 }
 
-export type ParameterDef = NumberParameterDef | BooleanParameterDef | EnumParameterDef;
+/**
+ * A free string — the fourth kind, added by B3 for exactly one subject: a
+ * layer's `fillRole`.
+ *
+ * **Why this is not an `enum` over the roles in the room.** A role is typed by
+ * a person standing in a dark room, and SPRINT.md §3 R2 makes it a free string
+ * on purpose: a layer may name a role before any face carries it — that IS beat
+ * 7, where a face marked later lights itself — so an enum built from the room's
+ * current roles would be empty on a fresh install and would refuse the very
+ * value the operator needs to type first. Worse, it would make the content tree
+ * ask the surface tree what values are legal, which is the I-15 direction that
+ * must not exist.
+ *
+ * So the coercion here is the weakest one in this file: it is a string. An
+ * unmatched role is not an error — it is I-13's flag path, reported by
+ * `Compositor.roleMisses()` and visible as a face that does not light. This is
+ * the one stated exception to "refuse what is wrong" (CLAUDE.md), and it is
+ * stated in SPRINT.md §3 R2 rather than invented here.
+ *
+ * `maxLength` is a guard against a paste, not a validation rule: a role is a
+ * word, and a control that will accept a novel is a control that can put a
+ * novel in `scenes/`.
+ */
+export interface TextParameterDef extends ParameterDefBase<string> {
+  kind: 'text';
+  maxLength: number;
+}
+
+export type ParameterDef =
+  | NumberParameterDef
+  | BooleanParameterDef
+  | EnumParameterDef
+  | TextParameterDef;
 
 export class ParameterKeyError extends Error {
   constructor(message: string) {
@@ -205,6 +244,19 @@ function coerce(def: ParameterDef, value: ParameterValue): ParameterValue {
       }
       return value;
     }
+    case 'text': {
+      // A non-string here is a caller bug, not an operator typo, so it is
+      // refused like every other kind. The VALUE is not judged — see the
+      // definition's header for why a role is not an enum.
+      if (typeof value !== 'string') {
+        throw new ParameterKeyError(`${def.key} expects a string, got ${String(value)}`);
+      }
+      // Clamped, not rejected: an over-long paste is drift, and the operator
+      // sees what was kept (CLAUDE.md's "clamp what drifts, refuse what is
+      // wrong"). Trimmed, because a trailing space in a role is a face that
+      // silently never lights and a difference nobody can see.
+      return value.trim().slice(0, def.maxLength);
+    }
   }
 }
 
@@ -281,7 +333,9 @@ export function defineTestPatternSpeed(onChange?: (v: number) => void): NumberPa
 export function defineLayerParameters(
   layerId: string,
   read: () => Layer,
-  write: (patch: Partial<Layer>) => void,
+  // `LayerPatch`, not `Partial<Layer>`: `fillRole` below clears itself by
+  // patching `undefined`, which `Partial` forbids and `LayerPatch` means.
+  write: (patch: LayerPatch) => void,
 ): ParameterDef[] {
   return [
     {
@@ -324,6 +378,35 @@ export function defineLayerParameters(
       set: (v: string) => {
         if (isBlendMode(v)) write({ blendMode: v });
       },
+    },
+    /**
+     * I-15 / SPRINT.md §3 R2, B3. The role this layer fills.
+     *
+     * Registered like every other parameter (I-8, CLAUDE.md rule 5) and in the
+     * same commit as the control that writes it, so the panel's `fillRole`
+     * field is a `<ParamControl>` pointed at a key rather than a second writer
+     * — three source tests say `ParamControl` is the only editor component that
+     * writes a parameter, and this is what keeps that true while adding a
+     * control for a brand-new field.
+     *
+     * **Empty clears it.** A layer whose role is deleted has no `fillRole` KEY,
+     * not a `fillRole` of `''`: it goes back to drawing at its own transform,
+     * which is a different layer, not a layer with an empty name. Absent is a
+     * value here and `applyLayerPatch` is what makes it expressible.
+     *
+     * The default is `''` and not `'panel'`. A layer is content and knows
+     * nothing about the room until somebody binds it (I-15) — defaulting every
+     * layer into the room's default role would light every face with everything
+     * the moment a face was marked.
+     */
+    {
+      key: `entity.${layerId}.fillRole`,
+      label: 'Fill role',
+      kind: 'text',
+      maxLength: 64,
+      default: '',
+      get: () => read().fillRole ?? '',
+      set: (v: string) => write({ fillRole: v === '' ? undefined : v }),
     },
   ];
 }

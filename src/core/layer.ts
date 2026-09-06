@@ -248,6 +248,45 @@ export interface LayerInit {
   fillRole?: string;
 }
 
+/**
+ * A patch that can CLEAR a field.
+ *
+ * `Partial<Layer>` cannot, under `exactOptionalPropertyTypes`: it means "this
+ * key may be absent", not "this key may be present holding `undefined`", so
+ * `{ fillRole: undefined }` is a type error against it — correctly, because for
+ * every other patch mechanism in this codebase it would be a bug. This type is
+ * the deliberate opposite, and `applyLayerPatch` is the only thing that reads
+ * it: `undefined` here means *remove the key*, and the type is what says so at
+ * the call site instead of in a comment.
+ */
+export type LayerPatch = { [K in keyof Layer]?: Layer[K] | undefined };
+
+/**
+ * Apply a patch to a layer, where a key set to `undefined` REMOVES it.
+ *
+ * `{ ...layer, ...patch }` cannot express "this layer no longer has a fill
+ * role": it leaves the key present holding `undefined`, which serializes to
+ * nothing but is not deep-equal to a layer that never had one — the exact trap
+ * `createLayer` spreads `motion` and `fillRole` to avoid, arriving from the
+ * other direction. A round-trip check on deep equality fails on it, and so does
+ * the compositor, which asks `layer.fillRole !== undefined` and would be right
+ * either way while the two layers disagreed about whether they were equal.
+ *
+ * So this is the one place a layer is patched, and clearing an optional field
+ * is a value the patch can carry rather than a special case each caller writes.
+ * The parameter registry's writers go through it, which is what lets a free-text
+ * control clear a field by being emptied instead of needing a delete button
+ * beside it.
+ */
+export function applyLayerPatch(layer: Layer, patch: LayerPatch): Layer {
+  const next: Record<string, unknown> = { ...layer };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  return next as unknown as Layer;
+}
+
 export function createLayer(init: LayerInit): Layer {
   return {
     id: init.id,

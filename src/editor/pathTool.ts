@@ -222,8 +222,37 @@ export function pointIndexAt(
   aspect: number,
   radius: number = POINT_HIT_RADIUS,
 ): number | null {
-  for (let i = state.points.length - 1; i >= 0; i--) {
-    if (squareDistance(state.points[i]!, p, aspect) <= radius) return i;
+  return pointIndexIn(state.points, p, aspect, radius);
+}
+
+/**
+ * The same question asked of a BANKED path — a face already marked, already in
+ * `calibration/surfaces.json` and already lit on the wall (B3).
+ *
+ * One body, two callers, deliberately. "Which point is under the pointer" has
+ * to mean the same thing before and after a path is banked, or the handle the
+ * operator is looking at moves when they grab it — and two copies of a
+ * backwards loop with a radius in it is exactly the pair of counters CLAUDE.md's
+ * "a fix to one counter is not a fix to the counter beside it" is about.
+ */
+export function pointIndexOnPath(
+  path: Path,
+  p: NormalizedPoint,
+  aspect: number,
+  radius: number = POINT_HIT_RADIUS,
+): number | null {
+  return pointIndexIn(path.points, p, aspect, radius);
+}
+
+/** Walks backwards, so the MOST RECENT point wins an overlap. See above. */
+function pointIndexIn(
+  points: readonly PathPoint[],
+  p: NormalizedPoint,
+  aspect: number,
+  radius: number,
+): number | null {
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (squareDistance(points[i]!, p, aspect) <= radius) return i;
   }
   return null;
 }
@@ -551,10 +580,21 @@ export interface PathSession {
    * mid-drag ends the move instead of resurrecting itself.
    */
   move: { id: string; grab: NormalizedPoint } | null;
+  /**
+   * B3. One point of one banked path, being dragged.
+   *
+   * A separate field from `move` rather than a variant of it, because the two
+   * are different gestures on the same path and collapsing them would make
+   * "which one is in flight" a question about the shape of a payload. It holds
+   * an id and an INDEX — never a copy of the point — for the reason `move`
+   * holds no copy of the path: a face deleted mid-drag ends the drag instead of
+   * resurrecting the point that was on it.
+   */
+  grabPoint: { id: string; index: number } | null;
 }
 
 export function emptyPathSession(): PathSession {
-  return { paths: [], active: emptyPathTool(), selectedId: null, move: null };
+  return { paths: [], active: emptyPathTool(), selectedId: null, move: null, grabPoint: null };
 }
 
 /** How near a banked path's outline the pointer must be to hit it. Square space. */
@@ -678,6 +718,45 @@ export function translatePath(path: Path, dx: number, dy: number): Path {
 }
 
 /**
+ * Move one point of a **banked** path — B3's point drag, after the face is
+ * marked, written to `calibration/surfaces.json` and lit on the wall.
+ *
+ * The counterpart of `pathToolMove`'s grab branch, and it writes the same
+ * thing: the pointer's position, already clamped to the frame by
+ * `toNormalizedPoint`. Unlike `translatePath` there is nothing to clamp as a
+ * whole — one point moving to the edge is a shape the operator drew, not a
+ * shape that got deformed on the way.
+ *
+ * **Returns the path itself when the point did not move.** That identity is
+ * what `reconcileSurfaces` reads to decide whether the room changed, and it is
+ * what stops a still pointer from rewriting the room file every frame.
+ */
+export function withPathPoint(path: Path, index: number, p: NormalizedPoint): Path {
+  const current = path.points[index];
+  if (!current) return path;
+  if (current.x === p.x && current.y === p.y) return path;
+  const points = path.points.slice();
+  points[index] = { x: p.x, y: p.y };
+  return { ...path, points };
+}
+
+/**
+ * Remove one point from a banked path. `deletePointAt`'s counterpart, and it
+ * makes the same two rulings for the same reasons: `closed` is not touched when
+ * the path drops below `CLOSE_MIN_POINTS`, and an out-of-range index returns
+ * the path unchanged rather than throwing.
+ *
+ * A face taken below three points stops being maskable, which is the compositor's
+ * I-13 flag path (B2): it is skipped, it draws nothing, its siblings still light,
+ * and one more click puts it back. It is not an error and must not be refused —
+ * the operator is deleting points on purpose and can see the result.
+ */
+export function withoutPathPoint(path: Path, index: number): Path {
+  if (!Number.isInteger(index) || index < 0 || index >= path.points.length) return path;
+  return { ...path, points: path.points.filter((_, i) => i !== index) };
+}
+
+/**
  * The next free `path-N`, picked the way `addLayer` picks a layer id: the first
  * suffix nothing is using, not a counter.
  *
@@ -725,10 +804,13 @@ export function removePath(session: PathSession, id: string): PathSession {
   return {
     ...session,
     paths: session.paths.filter((q) => q.id !== id),
-    // A selection and a move that name a path no longer in the list are
-    // dangling references, cleared here rather than checked for at every read.
+    // A selection, a move and a point grab that name a path no longer in the
+    // list are dangling references, cleared here rather than checked for at
+    // every read. All three, because the third arrived after the first two and
+    // this is the class, not the instance.
     selectedId: session.selectedId === id ? null : session.selectedId,
     move: session.move?.id === id ? null : session.move,
+    grabPoint: session.grabPoint?.id === id ? null : session.grabPoint,
   };
 }
 
@@ -739,15 +821,43 @@ export function removePath(session: PathSession, id: string): PathSession {
  *
  *  1. **A path is being drawn** — every press goes to it. Mid-path, a click is
  *     always the next point, so a stroke that happens to cross a banked path
- *     cannot select it out from under the operator.
- *  2. **A banked path under the pointer** — select it and move it, in one
+ *     cannot select it out from under the operator. **A press that closes the
+ *     path also BANKS it** — see below.
+ *  2. **A point of the SELECTED banked path** — grab that point (B3). Before
+ *     rule 3, necessarily: every point lies on its own path, so a hit test that
+ *     ran first would answer "the path" to every press aimed at a corner and
+ *     the points would be undraggable the moment the face was banked.
+ *  3. **A banked path under the pointer** — select it and move it, in one
  *     press. P5-B's ruling, for its reason: two gestures to move an unselected
  *     thing is the affordance nobody finds.
- *  3. **Empty space** — deselect and start a new path.
+ *  4. **Empty space** — deselect and start a new path.
+ *
+ * Rule 2 is restricted to the SELECTED path, which is exactly the path
+ * `BankedPath` draws handles on. An affordance that fires where nothing is
+ * drawn is an affordance the operator finds by accident, in the dark, with the
+ * projector on; and clicking an unselected face still selects it in one press,
+ * so its points are one click away rather than unreachable.
  *
  * There is no mode here either. What decides is whether a path is in progress,
  * which is a fact about the session rather than a switch the operator sets —
  * and Enter, which banks the active path, is the same key that ends rule 1.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * B3 — CLOSING A PATH BANKS IT.
+ *
+ * SPRINT.md's loop is "finishing a path banks it as a Surface: Enter for an
+ * open path, clicking the first point for a closed one". Enter already did
+ * that, through `commitActivePath`. Closing did not: it set `closed` and left
+ * the path taking clicks, so an operator who drew a square, closed it, and
+ * clicked to start the next face appended a seventh point to the square they
+ * had just finished.
+ *
+ * Both gestures now end in `commitActivePath` — the SAME call, not a second
+ * banking path — so "what counts as a finished path" is still answered once, in
+ * `finishPath`. Closing a path is terminal because a closed face is finished by
+ * definition; there is nothing an operator can add to a loop they have already
+ * joined up.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 export function pathSessionDown(
   session: PathSession,
@@ -756,7 +866,18 @@ export function pathSessionDown(
   shift = false,
 ): PathSession {
   if (session.active.points.length > 0) {
-    return { ...session, active: pathToolDown(session.active, p, aspect, shift) };
+    const closing = wouldClose(session.active, p, aspect);
+    const active = pathToolDown(session.active, p, aspect, shift);
+    const next = { ...session, active };
+    return closing ? commitActivePath(next, aspect) : next;
+  }
+  const selected =
+    session.selectedId === null
+      ? undefined
+      : session.paths.find((q) => q.id === session.selectedId);
+  if (selected) {
+    const index = pointIndexOnPath(selected, p, aspect);
+    if (index !== null) return { ...session, grabPoint: { id: selected.id, index } };
   }
   const hit = pathHitTest(session.paths, p, aspect);
   if (hit !== null) {
@@ -789,6 +910,17 @@ export function pathSessionMove(
   aspect: number,
   shift = false,
 ): PathSession {
+  const grab = session.grabPoint;
+  if (grab) {
+    const path = session.paths.find((q) => q.id === grab.id);
+    if (!path) return { ...session, grabPoint: null };
+    const moved = withPathPoint(path, grab.index, p);
+    // Identity all the way up: an unmoved point returns the same path, which
+    // returns the same session, which leaves `reconcileSurfaces` returning the
+    // same room and the editor writing no file. See `withPathPoint`.
+    if (moved === path) return session;
+    return { ...session, paths: session.paths.map((q) => (q.id === grab.id ? moved : q)) };
+  }
   const move = session.move;
   if (move) {
     const path = session.paths.find((q) => q.id === move.id);
@@ -801,13 +933,21 @@ export function pathSessionMove(
   return { ...session, active: pathToolMove(session.active, p, aspect, shift) };
 }
 
-/** Pointer-up on the session. Ends a move, or releases the active path's press. */
+/**
+ * Pointer-up on the session. Ends a point drag or a move, or releases the
+ * active path's press.
+ *
+ * The point drag is checked first for the same reason `pathSessionDown` places
+ * it first: the two cannot both be in flight, and reading them in the order
+ * they were decided means the release cannot end the wrong one.
+ */
 export function pathSessionUp(
   session: PathSession,
   p: NormalizedPoint | null,
   aspect: number,
   shift = false,
 ): PathSession {
+  if (session.grabPoint) return { ...session, grabPoint: null };
   if (session.move) return { ...session, move: null };
   return { ...session, active: pathToolUp(session.active, p, aspect, shift) };
 }
@@ -832,5 +972,26 @@ export function deleteFromPathSession(
     };
   }
   if (session.selectedId === null) return session;
+  const selected = session.paths.find((q) => q.id === session.selectedId);
+  // B3. The pointer is ON one of this face's points: delete THAT point, not the
+  // face. The same rule the active path already follows one branch above, and
+  // it has to be the same rule — an operator who has marked four faces and is
+  // tidying the corners of one of them must not lose the whole face to the key
+  // that trims a corner. Away from every point, Delete still removes the face,
+  // which is P5-D's behaviour unchanged.
+  if (selected && hover) {
+    const index = pointIndexOnPath(selected, hover, aspect);
+    if (index !== null) {
+      const trimmed = withoutPathPoint(selected, index);
+      if (trimmed === selected) return session;
+      return {
+        ...session,
+        paths: session.paths.map((q) => (q.id === selected.id ? trimmed : q)),
+        // The grab holds an index into the list this call is reindexing —
+        // `deletePointAt`'s ruling, restated here because it is the same fault.
+        grabPoint: null,
+      };
+    }
+  }
   return removePath(session, session.selectedId);
 }

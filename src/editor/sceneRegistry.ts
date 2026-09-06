@@ -16,7 +16,7 @@
  * that answers "which content keys does this layer expose", and the editor
  * hands it one backed by the real provider registry.
  */
-import type { Layer } from '../core/layer';
+import { applyLayerPatch, type Layer, type LayerPatch } from '../core/layer';
 import {
   ParameterRegistry,
   defineContentParameters,
@@ -160,10 +160,15 @@ export function syncEntityParameters(
       registry.unregisterPrefix(`entity.${id}`);
     }
 
-    const patchLayer = (patch: Partial<Layer>): void => {
+    // `applyLayerPatch`, not a spread: a patch that clears an optional field
+    // carries `undefined`, and a spread would leave the KEY behind holding it.
+    // See that function — the layer this produces has to be deep-equal to one
+    // that never had the field, or P5-F's round-trip gate is measuring a
+    // difference that does not exist.
+    const patchLayer = (patch: LayerPatch): void => {
       setScene((prev) => ({
         ...prev,
-        layers: prev.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        layers: prev.layers.map((l) => (l.id === id ? applyLayerPatch(l, patch) : l)),
       }));
     };
 

@@ -27,7 +27,9 @@ import {
   canonicalizeCalibrationFile,
   createCalibration,
   type ViewportCalibration,
+  readSurfaces,
 } from '../render/calibration';
+import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core/surfaces';
 import { createOutputs, primaryViewport } from '../render/outputs';
 import { canonicalizeScene, deepEqual, layersInDrawOrder, type Scene } from '../core/scene';
 import { sceneById } from '../core/defaultScene';
@@ -86,6 +88,15 @@ const pendingScene: { v: Scene | null } = { v: null };
  * with Pixi init, and an editor edit can land before either finishes.
  */
 const pendingCalibration: { v: ViewportCalibration | null } = { v: null };
+/**
+ * I-15, B3. The room, and the same race a third time: main replays the last
+ * surface tree at `did-finish-load`, which is reliably earlier than
+ * `await createRenderHost`. Without this a reopened output window comes back
+ * with an empty room and every fill layer lands nowhere — the wall goes black
+ * while the editor still shows four faces lit, which is the single most
+ * confusing state this loop can reach at a projector.
+ */
+const pendingSurfaces: { v: SurfaceTree | null } = { v: null };
 
 /**
  * I-9: the one place v1 is allowed to assume a single output. Calibration is
@@ -93,6 +104,41 @@ const pendingCalibration: { v: ViewportCalibration | null } = { v: null };
  * file rather than a migration of it.
  */
 const VIEWPORT_ID = primaryViewport(createOutputs(DEV_RESOLUTION.width, DEV_RESOLUTION.height)).id;
+
+/**
+ * I-15. The validation boundary for the room, on the receiving side — the same
+ * shape `applyScene` and `applyCalibration` have, and for the same reason: main
+ * relays these bytes without understanding them, so this is the first code that
+ * has an opinion about whether they describe a room.
+ *
+ * Tolerant rather than refusing (I-13, SPRINT.md §3 R2): `readSurfaces` drops
+ * an entry this build cannot read and keeps the rest, so one bad face is not a
+ * lost room. A tree that comes back empty is an ordinary state — it is what a
+ * first launch has before anything is marked — and is applied as such.
+ */
+function applySurfaces(raw: unknown): void {
+  const tree = readSurfaces(raw, canonicalizeSurface);
+  if (!host) {
+    pendingSurfaces.v = tree;
+    return;
+  }
+  host.setSurfaces(tree);
+  // The `[surfaces]` line, beside `[scene] applied` and `[warp]`. Those two
+  // between them made eleven of this project's defects findable, and the room
+  // is strictly harder to read off a projection than draw order is: a face that
+  // did not light and a face that lit in the wrong place look the same from
+  // across a dark room. Operator-paced — a drag prints one line per sample and
+  // that is the point, because that log IS the record of what the wall was
+  // asked to do while somebody's hand was on it.
+  console.log(describeSurfaces(tree));
+  // A role that now matches nothing is I-13's flag, and it is reported here
+  // rather than only logged inside the compositor: re-marking the room is
+  // exactly when a layer's `fillRole` stops matching, and that is the moment
+  // the builder needs to be told, not the moment they notice a dark face.
+  for (const miss of host.roleMisses()) {
+    console.warn(`[surfaces] ${miss.layerName} (${miss.layerId}): ${miss.reason}`);
+  }
+}
 
 function applyCalibration(cal: ViewportCalibration): void {
   if (!host) {
@@ -330,6 +376,8 @@ window.engine.onClock((c) => {
 
 window.engine.onCalibration((c) => applyCalibration(canonicalizeCalibration(c, VIEWPORT_ID)));
 
+window.engine.onSurfaces((s) => applySurfaces(s));
+
 window.engine.onWarning((w) => {
   banner.textContent = w.text;
   banner.style.display = w.level === 'info' ? 'none' : 'block';
@@ -350,6 +398,20 @@ const storedCalibration: Promise<ViewportCalibration> = window.engine
   .catch((err: unknown) => {
     console.error(`[warp] could not read stored calibration: ${String(err)}`);
     return createCalibration(VIEWPORT_ID);
+  });
+
+/**
+ * The stored room, fetched before the await for the same reason the calibration
+ * is: the read and Pixi's init overlap rather than queue. A rejected read is
+ * not fatal — the session opens with no faces marked, which is visible and
+ * correctable in the room rather than a window that will not start (I-13).
+ */
+const storedSurfaces: Promise<SurfaceTree> = window.engine
+  .getSurfaces()
+  .then((raw) => readSurfaces(raw, canonicalizeSurface))
+  .catch((err: unknown) => {
+    console.error(`[surfaces] could not read the stored room: ${String(err)}`);
+    return [] as SurfaceTree;
   });
 
 host = await createRenderHost({
@@ -392,6 +454,14 @@ if (pendingScene.v) {
 void storedCalibration.then((stored) => {
   applyCalibration(pendingCalibration.v ?? stored);
   pendingCalibration.v = null;
+});
+// The room, on the same rule and in the same order. A point the builder dragged
+// while this window was coming up is newer than the file it was reading.
+void storedSurfaces.then((stored) => {
+  const tree = pendingSurfaces.v ?? stored;
+  pendingSurfaces.v = null;
+  host?.setSurfaces(tree);
+  console.log(describeSurfaces(tree));
 });
 reportFailures();
 

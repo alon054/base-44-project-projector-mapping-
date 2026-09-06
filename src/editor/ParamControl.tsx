@@ -75,6 +75,29 @@ export function ParamControl({ registry, paramKey, label }: Props): React.JSX.El
           onChange={(e) => write(e.currentTarget.checked)}
         />
       )}
+      {/*
+        B3. A free string, for `fillRole` (SPRINT.md §3 R2).
+
+        `onChange` and not `onBlur`: the builder is at the wall typing a role,
+        and a value that lands only when focus leaves the field is a face that
+        lights when they click somewhere else. Every keystroke is a
+        `registry.write`, which is a scene edit, which crosses to the output —
+        the same path a slider drag already takes, at a fraction of the rate.
+
+        `def.default` as the placeholder, so an empty field shows what empty
+        MEANS rather than looking like a field that failed to load.
+      */}
+      {def.kind === 'text' && (
+        <input
+          type="text"
+          value={registry.read(paramKey) as string}
+          placeholder={def.default === '' ? 'none' : def.default}
+          maxLength={def.maxLength}
+          spellCheck={false}
+          style={textStyle}
+          onChange={(e) => write(e.currentTarget.value)}
+        />
+      )}
       {def.kind === 'enum' && (
         <select
           value={registry.read(paramKey) as string}
@@ -130,6 +153,16 @@ const valueStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   textAlign: 'right',
   overflow: 'hidden',
+};
+
+const textStyle: React.CSSProperties = {
+  padding: '3px 6px',
+  borderRadius: 4,
+  border: '1px solid #2b2f34',
+  background: '#15181b',
+  color: 'inherit',
+  font: '12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace',
+  minWidth: 0,
 };
 
 const selectStyle: React.CSSProperties = {

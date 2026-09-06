@@ -19,6 +19,7 @@ import {
   type NormalizedTransform,
 } from './layer';
 import { layersInDrawOrder, reindexZOrder, type Scene } from './scene';
+import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
 
 /**
  * The smallest a region may be made, in normalized units (I-1).
@@ -70,6 +71,15 @@ export interface AddLayerSpec {
    * place. A region drawn on the preview names one, and it wins.
    */
   rect?: NormalizedRect;
+  /**
+   * I-15 / SPRINT.md §3 R2. Bind the layer to a ROLE rather than to a place: it
+   * renders once into every surface carrying this role, clipped to each.
+   *
+   * A free string, and one this file has no opinion about — the surface tree is
+   * the other half of I-15 and `core/` is forbidden from importing it. A role
+   * naming nothing is I-13's flag path, not an error.
+   */
+  fillRole?: string;
 }
 
 /**
@@ -125,8 +135,46 @@ export function addLayer(scene: Scene, spec: AddLayerSpec): Scene {
               rotation: 0,
             },
         ...(spec.blendMode ? { blendMode: spec.blendMode } : {}),
+        // Spread, not assigned, for `createLayer`'s reason: absent must stay
+        // absent or the deep-equal round-trip fails on a key that serializes
+        // to nothing.
+        ...(spec.fillRole === undefined ? {} : { fillRole: spec.fillRole }),
       }),
     ],
+  });
+}
+
+/**
+ * SPRINT.md's opening beat, as one call: a flat white layer bound to a role.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * This is the calibration aid and the reel's first shot at the same time, which
+ * is why it is a preset rather than six fields the builder fills in with a
+ * projector running: mark a face, it lights white, drag its points until the
+ * white sits exactly on the face. Every later beat is that one with the fill
+ * swapped.
+ *
+ * `rect`, not `tint`, is the reason this is a function rather than a comment.
+ * `addLayer` assigns a staggered colour to any layer whose content omits
+ * `tint`, so a "white" preset that forgot to name white would come out one of
+ * six pastels — and on a dark box, judged by eye at three metres, a pale green
+ * fill reads as white until the moment it does not.
+ *
+ * The transform is half-frame and centred even though **a fill layer's own
+ * transform is inert** — the face places it. It exists for the state where the
+ * role is cleared: the layer becomes an ordinary rect, and a FULL-frame white
+ * one would flood the projector white in a dark room with somebody looking at
+ * it. Half-frame is visible, obviously wrong, and harmless.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export function addWhiteFill(scene: Scene, role: string): Scene {
+  return addLayer(scene, {
+    idPrefix: 'whitefill',
+    name: `white fill (${role})`,
+    providerId: PROCEDURAL_PROVIDER_ID,
+    content: { kind: 'rect', tint: 0xffffff },
+    rect: { x: 0.5, y: 0.5, width: 0.5, height: 0.5 },
+    fillRole: role,
   });
 }
 

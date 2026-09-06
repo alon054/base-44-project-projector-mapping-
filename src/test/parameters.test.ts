@@ -26,7 +26,7 @@ import {
   PROCEDURAL_KINDS,
   ProceduralProvider,
 } from '../providers/procedural/ProceduralProvider';
-import { createLayer, type Layer } from '../core/layer';
+import { applyLayerPatch, createLayer, type Layer } from '../core/layer';
 import { createDefaultScene } from '../core/defaultScene';
 
 const num = (key: string, def = 0) =>
@@ -162,8 +162,12 @@ describe('layer parameters are an index onto scene state, not a copy', () => {
       defineLayerParameters(
         'l1',
         () => layer,
+        // `applyLayerPatch`, not a spread — B3. A `fillRole` cleared to
+        // `undefined` must REMOVE the key, and a spread leaves it present
+        // holding undefined, which is a layer that serializes the same and is
+        // not deep-equal. The editor's writer goes through the same function.
         (patch) => {
-          layer = { ...layer, ...patch };
+          layer = applyLayerPatch(layer, patch);
         },
       ),
     );
@@ -195,8 +199,10 @@ describe('layer parameters are an index onto scene state, not a copy', () => {
     const r = new ParameterRegistry();
     r.registerAll(defineLayerParameters('a', () => a, () => {}));
     expect(() => r.registerAll(defineLayerParameters('b', () => b, () => {}))).not.toThrow();
-    expect(r.keys('entity.a')).toHaveLength(4);
-    expect(r.keys('entity.b')).toHaveLength(4);
+    // Five layer-level keys since B3 registered `fillRole` (I-8, CLAUDE.md
+    // rule 5: a new parameter is in the registry in the commit that adds it).
+    expect(r.keys('entity.a')).toHaveLength(5);
+    expect(r.keys('entity.b')).toHaveLength(5);
   });
 });
 
@@ -340,8 +346,11 @@ describe('rule 9 — every content key a provider reads is registered', () => {
     r.registerAll(
       defineContentParameters('g1', provider.contentParameters(layer.content), () => layer, () => {}),
     );
-    expect(r.keys('entity.g1')).toHaveLength(6);
-    expect(r.unregisterPrefix('entity.g1')).toBe(6);
+    // Five layer-level + two content. `fillRole` is one of the five, and it
+    // must come back on delete like every other key or re-adding a layer with
+    // the same id collides (I-8).
+    expect(r.keys('entity.g1')).toHaveLength(7);
+    expect(r.unregisterPrefix('entity.g1')).toBe(7);
     expect(r.keys('entity.g1')).toEqual([]);
   });
 });

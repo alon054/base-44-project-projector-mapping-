@@ -50,8 +50,13 @@ import {
   canonicalizeCalibration,
   canonicalizeCalibrationFile,
   createCalibration,
+  readSurfaces,
+  writeSurfaces,
   type ViewportCalibration,
 } from '../render/calibration';
+import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core/surfaces';
+import { SurfacePanel } from './SurfacePanel';
+import { addWhiteFill } from '../core/sceneEdit';
 
 
 export function App(): React.JSX.Element {
@@ -111,6 +116,16 @@ export function App(): React.JSX.Element {
   const [calibration, setCalibration] = useState<ViewportCalibration>(() =>
     createCalibration(CALIBRATION_VIEWPORT),
   );
+  /**
+   * I-15, B3. The room, held beside the warp and never inside the scene.
+   *
+   * Both halves of `calibration/` live here for the same reason and take the
+   * same route out: their own channel, persisted by main on the way through,
+   * untouched by every scene switch. That is what makes "re-marking a face
+   * leaves the warp alone, and loading a different scene leaves both alone" a
+   * property of the design rather than of message ordering.
+   */
+  const [surfaces, setSurfaces] = useState<SurfaceTree>([]);
 
   /**
    * True once the config has been consulted, so the FIRST scene this editor
@@ -200,6 +215,54 @@ export function App(): React.JSX.Element {
         console.error(`[warp] could not read stored calibration: ${String(err)}`);
       });
   }, []);
+
+  // I-15: read the stored room once at launch, exactly as the warp is read
+  // above. A read that fails leaves an empty room — visible as nothing lit, and
+  // correctable by marking a face, which beats an editor that will not start
+  // (I-13).
+  useEffect(() => {
+    void window.engine
+      .getSurfaces()
+      .then((raw) => {
+        const tree = readSurfaces(raw, canonicalizeSurface);
+        if (tree.length > 0) setSurfaces(tree);
+        console.log(describeSurfaces(tree));
+      })
+      .catch((err: unknown) => {
+        console.error(`[surfaces] could not read the stored room: ${String(err)}`);
+      });
+  }, []);
+
+  /**
+   * **The one place the room is written.** Every edit — a point dragged in the
+   * preview, a role typed in the list, a face deleted — arrives here, and here
+   * is where it becomes a file and a message.
+   *
+   * Not on a save button, and not debounced (SPRINT.md §3 R1). The builder is
+   * standing at the wall with a point under their finger and needs the
+   * projection to answer; a debounce would put the wall behind the hand, which
+   * is worse than the write it saves. Main persists before it forwards, so a
+   * failed disk write still moves the face on the wall (I-13).
+   *
+   * `writeSurfaces` builds the same envelope that lands on disk, so what
+   * crosses the boundary and what is stored are the same bytes rather than two
+   * shapes to keep in step. Normalized points only — no pixels cross (I-1, I-7).
+   */
+  const applySurfaces = useCallback((next: SurfaceTree) => {
+    setSurfaces(next);
+    window.engine.setSurfaces(writeSurfaces(next));
+  }, []);
+
+  /**
+   * Which roles the scene is actually filling, for the surface list's "is this
+   * face lit" column. Derived from the scene on every change rather than
+   * tracked, because a `fillRole` edited in the layer panel must move this
+   * column with it and a second copy would be a second thing to update.
+   */
+  const filledRoles = useMemo(
+    () => [...new Set(scene.layers.flatMap((l) => (l.fillRole ? [l.fillRole] : [])))],
+    [scene],
+  );
 
   const applyCalibration = useCallback((next: ViewportCalibration) => {
     setCalibration(next);
@@ -493,7 +556,31 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
             clockState={clockTransport.state}
             onClockReady={setPreviewClock}
             setScene={setScene}
+            surfaces={surfaces}
+            onSurfaces={applySurfaces}
           />
+        </Panel>
+
+        <Panel title="Room — I-15, marked faces in calibration/surfaces.json">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+            <button
+              type="button"
+              style={{ ...buttonStyle, marginTop: 0 }}
+              title={
+                'Adds a flat white layer bound to role "panel" — every face tagged panel ' +
+                'lights white. Mark a face, drag its points until the white sits on it.'
+              }
+              onClick={() => setScene((prev) => addWhiteFill(prev, WHITE_FILL_ROLE))}
+            >
+              White fill → {WHITE_FILL_ROLE}
+            </button>
+            <span style={{ fontSize: 12, color: '#8b939b' }}>
+              {filledRoles.length === 0
+                ? 'no layer fills a role — nothing will land on a face'
+                : `filling: ${filledRoles.join(', ')}`}
+            </span>
+          </div>
+          <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
         </Panel>
 
         <Panel title="Transport — I-2, one clock for everything">
@@ -609,6 +696,20 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
 
 /** I-9: the single viewport v1 drives. Calibration is keyed by it. */
 const CALIBRATION_VIEWPORT = 'main';
+
+/**
+ * The role the one-click white fill binds to — the same default a newly marked
+ * face gets, which is the entire trick. Mark a face and it lights, with no
+ * second step and nothing to type. SPRINT.md calls that beat 7 and it is the
+ * reel's opening shot.
+ *
+ * A literal here rather than `DEFAULT_SURFACE_ROLE` imported from the surface
+ * tree, and that is I-15 rather than sloppiness: content binds to a role by
+ * NAME, and a scene that imported the room's constant would be a scene that
+ * cannot be loaded in a room it has never seen. The two halves agree on a
+ * string, which is the only thing they are allowed to agree on.
+ */
+const WHITE_FILL_ROLE = 'panel';
 
 const buttonStyle: React.CSSProperties = {
   marginTop: 8,

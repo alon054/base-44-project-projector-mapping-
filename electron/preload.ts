@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CH, assertJsonOnly } from './ipc';
 import type {
   CalibrationSet,
+  SurfacesSet,
   ClockSet,
   DisplayInfo,
   MetricsReport,
@@ -130,6 +131,21 @@ const api = {
   /** The stored calibration file as raw JSON, or null. Canonicalized by the caller. */
   getCalibration(): Promise<unknown> {
     return ipcRenderer.invoke(CH.calibrationGet) as Promise<unknown>;
+  },
+  // I-15, B3: editor -> main -> output. Main persists it on the way through,
+  // exactly as it does the warp — the room and the warp take the same route
+  // through this file for the same reason, and neither is a scene.
+  setSurfaces(s: SurfacesSet): void {
+    ipcRenderer.send(CH.surfacesSet, assertJsonOnly(s));
+  },
+  onSurfaces(cb: (s: SurfacesSet) => void): () => void {
+    const h = (_e: unknown, s: SurfacesSet) => cb(s);
+    ipcRenderer.on(CH.surfacesSet, h);
+    return () => ipcRenderer.off(CH.surfacesSet, h);
+  },
+  /** The stored surface tree as raw JSON, or null. Canonicalized by the caller. */
+  getSurfaces(): Promise<unknown> {
+    return ipcRenderer.invoke(CH.surfacesGet) as Promise<unknown>;
   },
   // output -> editor: I-13 flags for the layer list
   reportSceneFailures(f: SceneFailure[]): void {
