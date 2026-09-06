@@ -6818,3 +6818,88 @@ checking, so it could not fail. CLAUDE.md's "a new test that cannot fail is not 
 test", caught by the discipline that exists for it. Rewritten to pin the literal
 32, which is the specified number; the mutation now fails one test. Seventeen
 other mutations were caught first time.
+
+## 2026-09-06 — Sprint (block B3, addendum 3) — the grid came back on and did not appear
+- DID: fixed `Compositor.setWallGrid` — it drew into the grid `Graphics` BEFORE
+  making it visible, and PixiJS v8 drops a geometry update made to an invisible
+  view. Moved the last live-room coupling out of `mask.test.ts`.
+- MEASURED: npm test 1001 → 1006 (40 files), green against an EMPTY room, a
+  two-face room, and a room where no face carries `panel`. test:render 45/45,
+  43 pre-fill goldens byte-identical. Both mutations of the ordering caught.
+- BLOCKER: -
+- NEXT: W1 — the builder at the projector, room dark.
+
+The operator reported it exactly: the wall grid appears the first time it is
+switched on, and after an off/on cycle it does not come back. Everything else in
+the loop worked.
+
+The cause is upstream and worth writing down, because it is a trap this codebase
+will meet again. `ViewContainer.onViewUpdate` latches:
+
+    onViewUpdate() {
+      this._didViewChangeTick++;
+      this._boundsDirty = true;
+      if (this.didViewUpdate) return;        // <-- early return while latched
+      this.didViewUpdate = true;
+      ...renderGroup.onChildViewUpdate(this);
+    }
+
+and `RenderGroup.updateRenderable` is the thing that clears the latch — except
+when the view is not fully displayable:
+
+    updateRenderable(renderable) {
+      if (renderable.globalDisplayStatus < 7) return;   // invisible: bail...
+      ...
+      renderable.didViewUpdate = false;                 // ...without clearing it
+    }
+
+So a `Graphics` that is redrawn while hidden can queue an update that is
+discarded, and the GPU keeps the geometry from before. `setWallGrid` was written
+draw-then-show, which survived the first toggle — the view had never been
+skipped at that point — and failed afterwards. Show-then-draw makes every draw
+land on a view the render group will actually process, so the stale state is
+unreachable rather than merely unlikely.
+
+Reading the source answered this in one sitting; guessing at it would not have,
+because the geometry rebuilds perfectly in a unit test. `mask.test.ts` and
+`wallGrid.test.ts` both counted instructions and both stayed green through the
+whole bug. The instructions were never the problem. That is the same lesson
+`GCManagedHash` taught in Phase 3, in a different subsystem.
+
+The upstream behaviour now has its own test, so a PixiJS upgrade that changes it
+says so rather than silently making the ordering rule pointless.
+
+I grepped for the class, as the rule says. The other place this codebase redraws
+a possibly-hidden, already-uploaded view is `Compositor.resize`, which walks
+every layer including hidden ones. It is benign today and the reason is worth
+recording rather than trusting: a layer's `visible` is written only by
+`applyTransform`, which runs at mount and at resize, and toggling
+`entity.<id>.visible` goes through `patchLayer` -> a scene change -> `setScene`,
+which tears down and rebuilds every view from scratch. So there is no path that
+shows a hidden layer without rebuilding it, and no stale geometry can survive
+into view. If a future block ever writes `visible` per frame the way
+`writeModulation` writes alpha and tint, this becomes live and this paragraph is
+the warning.
+
+RISK-TRIGGERED — the live room broke the build a second time, and I had missed
+an instance.
+
+Addendum 2 moved the suite's geometry fixtures off `calibration/surfaces.json`.
+One test survived that pass: mask.test.ts's "one `panel` layer fills every
+`panel` face", which B2 wrote against the real file on purpose and adapted to
+its face COUNT. Adapting to the count was not enough — it still required at
+least one `panel` face, and the operator emptied their room, which is a
+completely legitimate state. It is what a first launch has and what deleting the
+last face leaves.
+
+Split, the way the others were: the compositor claim now runs against
+`roomFixture.ts`, and the live file gets a check that is true of ANY room — it
+is filled exactly as many times as it has faces carrying the role, which is
+vacuously true at zero and asserts an I-13 role miss there instead. Verified by
+running the whole suite three times over three different rooms: empty, two
+faces, and two faces carrying a role nothing fills. 1006 green in all three.
+
+Twice now the operator's ordinary use of the tool has turned the build red. Both
+times the fault was a test reaching into their working state. The rule that
+comes out of it: `calibration/` is the operator's, and a test may assert its
+FORMAT and never its CONTENTS.

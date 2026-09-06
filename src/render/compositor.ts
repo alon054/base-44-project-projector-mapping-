@@ -279,8 +279,23 @@ export class Compositor {
    * it is off by default at every launch.
    */
   setWallGrid(on: boolean): void {
-    if (on) drawWallGrid(this.wallGrid, this.width, this.height);
+    // VISIBLE FIRST, THEN DRAW. The order is the fix, and it is not cosmetic.
+    //
+    // PixiJS v8 drops a geometry update made to an invisible view:
+    // `RenderGroup.updateRenderable` returns early when
+    // `globalDisplayStatus < 7` and does NOT clear `didViewUpdate` on the way
+    // out, while `ViewContainer.onViewUpdate` early-returns for as long as that
+    // latch is set. So drawing into a hidden `Graphics` can queue an update that
+    // is discarded, leaving the GPU holding the geometry from before.
+    //
+    // Written the other way round, this worked the first time — the draw
+    // happened before the view had ever been skipped — and then failed after an
+    // off/on cycle, which is exactly how it was reported from the projector.
+    // Making it visible first means every draw happens to a view the render
+    // group will actually process, so there is no state in which the grid is
+    // on and the geometry is stale.
     this.wallGrid.visible = on;
+    if (on) drawWallGrid(this.wallGrid, this.width, this.height);
   }
 
   /** Whether the grid is currently on the projection. For the log and the HUD. */

@@ -38,7 +38,7 @@ import { createSurface, canonicalizeSurface, type Surface } from '../core/surfac
 import { resetRoleLog } from '../core/roles';
 import { readSurfaces } from '../render/calibration';
 import { createLayer } from '../core/layer';
-import { FIXTURE_L } from './roomFixture';
+import { FIXTURE_L, fixtureRoom } from './roomFixture';
 import { createScene } from '../core/scene';
 import { EMPTY_FORCE_FIELD, evaluateForces } from '../core/forces';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
@@ -76,7 +76,7 @@ const square = (id = 'p'): Path =>
     ],
   });
 
-/** The committed room from B1, read through the loader that ships. */
+/** The live room on disk, read through the loader that ships. */
 function committedRoom(): Surface[] {
   const raw = JSON.parse(
     readFileSync(join(new URL('../../', import.meta.url).pathname, 'calibration', 'surfaces.json'), 'utf8'),
@@ -401,13 +401,18 @@ describe('R2 — a layer with a fillRole renders once into every matching face',
   });
 });
 
-describe('B1’s committed room, filled by one layer', () => {
-  it('one `panel` layer fills every `panel` face in calibration/surfaces.json', () => {
-    // The Done-when line, against the actual file rather than against a copy of
-    // it. Written to survive B3: it asserts the count MATCHES the room, not
-    // that the room has two faces, so an evening of re-marking cannot turn this
-    // red for a reason that has nothing to do with the compositor.
-    const room = committedRoom();
+describe('one layer fills every face carrying its role', () => {
+  it('one `panel` layer fills every `panel` face', () => {
+    // Against the FROZEN fixture. This was written against the live
+    // `calibration/surfaces.json` and adapted to its face COUNT, which was not
+    // enough: it still required at least one `panel` face, and an EMPTY room is
+    // a legitimate state — it is what a first launch has, and what deleting the
+    // last face leaves. The operator emptied their room and the build went red
+    // on a claim that has nothing to do with the compositor.
+    //
+    // The claim is about the compositor, so it is tested against a room this
+    // file controls. What the live file is checked for is one describe down.
+    const room = fixtureRoom();
     const panels = room.filter((s) => s.role === 'panel');
     expect(panels.length).toBeGreaterThan(0);
 
@@ -666,5 +671,35 @@ describe('A14 — the render-target counter reports on itself', () => {
     expect(report.valid).toBe(true);
     expect(report.renderTargets.valid).toBe(false);
     expect(INVALID_RENDER_TARGETS.count).toBe(0);
+  });
+});
+
+/**
+ * The LIVE room, checked for what is true of any room — never for its contents.
+ *
+ * `calibration/surfaces.json` is the operator's working state: it can hold four
+ * faces, or none, and both are correct. So the only thing asserted here is that
+ * whatever it holds, the compositor agrees with it — vacuously true for an empty
+ * room, which is the point. Geometry claims live against `roomFixture.ts`.
+ */
+describe('the live room, whatever is currently in it', () => {
+  it('is filled exactly as many times as it has faces carrying the role', () => {
+    resetRoleLog();
+    const room = committedRoom();
+    const panels = room.filter((s) => s.role === 'panel');
+    const provider = new RecordingProvider();
+    const c = compositorWith(room, provider);
+    c.setScene(
+      createScene({
+        id: 's',
+        seed: 1,
+        layers: [createLayer({ id: 'fill', providerId: 'recording', fillRole: 'panel' })],
+      }),
+    );
+    // Zero faces means zero instances AND an I-13 role miss — a layer that
+    // lights nothing, flagged, which is exactly right for an empty room.
+    expect(provider.calls).toHaveLength(panels.length);
+    expect(c.roleMisses().length).toBe(panels.length === 0 ? 1 : 0);
+    c.destroy();
   });
 });

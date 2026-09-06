@@ -115,6 +115,81 @@ describe('drawWallGrid — normalized positions become pixels here and nowhere e
   });
 });
 
+/**
+ * The bug the projector found, and the upstream behaviour behind it.
+ *
+ * Reported from the wall: the grid appears the first time it is switched on and
+ * never again after an off/on cycle. The cause is in PixiJS v8, not in the
+ * grid — see `Compositor.setWallGrid` — and these two tests pin both halves, so
+ * neither the fix nor its reason can be quietly lost.
+ */
+describe('a geometry update made to an INVISIBLE view is dropped by v8', () => {
+  it('upstream: onViewUpdate latches, and updateRenderable will not clear it while hidden', () => {
+    // `RenderGroup.updateRenderable` returns early when `globalDisplayStatus < 7`
+    // WITHOUT clearing `didViewUpdate`, and `ViewContainer.onViewUpdate`
+    // early-returns for as long as that latch is set. This test is the reason the
+    // fix is an ordering rule rather than a guess; if a PixiJS upgrade changes
+    // the behaviour, this is what says so.
+    const g = new Graphics() as Graphics & { didViewUpdate: boolean };
+    new Container().addChild(g);
+    g.visible = false;
+    // A view that has been rendered at least once: the renderer clears the latch
+    // when it processes a VISIBLE view (`ViewContainer.collectRenderables` and
+    // `RenderGroup.updateRenderable` both do). Modelled by hand, because there is
+    // no GPU here and that is the state the projector was in.
+    g.didViewUpdate = false;
+
+    drawWallGrid(g, W, H);
+    // The draw latches an update...
+    expect(g.didViewUpdate).toBe(true);
+
+    // ...and nothing clears it while the view is hidden, so a SECOND draw
+    // cannot register one. That is the dropped update, exactly.
+    const before = g.context.instructions.length;
+    drawWallGrid(g, W / 2, H / 2);
+    expect(g.didViewUpdate).toBe(true);
+    // The instructions really did change underneath — it is the notification
+    // that was lost, not the geometry, which is why it is invisible to a test
+    // that only counts instructions.
+    expect(g.context.instructions.length).toBe(before);
+    // Redrawn at half the size — the geometry moved, only the notification was
+    // lost. (Not an exact figure: the frame edge's stroke extends outward past
+    // the inset rect, and this test is about the latch, not about bounds.)
+    expect(g.context.bounds.maxX).toBeLessThan(W * 0.75);
+  });
+
+  it('so the compositor makes the grid visible BEFORE it draws into it', () => {
+    // The mechanism, read at the source — the same shape as sceneEdit.test.ts's
+    // "setScene tears the stack down BEFORE it rebuilds". Swapping these two
+    // lines is the entire bug, and it is invisible to every behavioural test
+    // that does not have a GPU.
+    const body = readFileSync(join(SRC, 'render', 'compositor.ts'), 'utf8')
+      .match(/setWallGrid\(on: boolean\): void \{([\s\S]*?)\n  \}/)![1]!;
+    const visibleAt = body.indexOf('this.wallGrid.visible = on');
+    const drawAt = body.indexOf('drawWallGrid(');
+    expect(visibleAt, 'setWallGrid stopped setting visible').toBeGreaterThanOrEqual(0);
+    expect(drawAt, 'setWallGrid stopped drawing').toBeGreaterThanOrEqual(0);
+    expect(drawAt, 'the grid is drawn BEFORE it is made visible — v8 drops that update').toBeGreaterThan(visibleAt);
+  });
+
+  it('turning it off and on again leaves it on, with current geometry', () => {
+    const c = compositor();
+    c.setWallGrid(true);
+    c.setWallGrid(false);
+    c.setWallGrid(true);
+    expect(c.wallGridOn()).toBe(true);
+    c.destroy();
+  });
+
+  it('the resize path only redraws a grid that is already visible', () => {
+    // The same hazard from the other side: redrawing a hidden grid on resize
+    // would latch an update nothing clears. It is skipped instead, and turning
+    // the grid on redraws it at the current size anyway.
+    const body = readFileSync(join(SRC, 'render', 'compositor.ts'), 'utf8');
+    expect(body).toMatch(/if \(this\.wallGrid\.visible\) drawWallGrid/);
+  });
+});
+
 describe('the grid is off until somebody turns it on', () => {
   it('a fresh compositor has no grid', () => {
     const c = compositor();
