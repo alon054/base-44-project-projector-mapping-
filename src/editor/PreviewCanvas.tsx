@@ -45,6 +45,8 @@ import {
   pathSessionDown,
   pathSessionMove,
   pathSessionUp,
+  bankedHitAt,
+  nextPathId,
   previewPoints,
   removePath,
   wouldClose,
@@ -53,6 +55,16 @@ import {
 } from './pathTool';
 import type { Path } from '../core/paths';
 import { reconcileSurfaces, type SurfaceTree } from '../core/surfaces';
+import {
+  SURFACE_MODES,
+  SURFACE_MODE_LABELS,
+  draftBounds,
+  generateShape,
+  isDraftPlaceable,
+  isGeneratedMode,
+  type ShapeDraft,
+  type SurfaceMode,
+} from './shapeTool';
 import {
   HANDLES,
   aspectOf,
@@ -372,6 +384,14 @@ function RegionSurface({
    * `pathTool.ts` still sees the `PathSession` it was written against.
    */
   const [drawing, setDrawing] = useState<DrawingState>(() => drawingOf(emptyPathSession()));
+  /**
+   * How the NEXT face gets drawn. Editor state, and it is not stored anywhere:
+   * once `generateShape` has run its output is a plain `Path`, and no surface
+   * remembers which mode made it (see `shapeTool.ts`).
+   */
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>('rect');
+  /** A face being dragged out. Null except between press and release. */
+  const [shapeDraft, setShapeDraft] = useState<ShapeDraft | null>(null);
   const [hover, setHover] = useState<NormalizedPoint | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
 
@@ -445,6 +465,25 @@ function RegionSurface({
     surface.current?.focus();
     if (activeTool === 'path') {
       setShiftHeld(e.shiftKey);
+      /**
+       * The ordering IS the decision again, one level up from `pathSessionDown`.
+       *
+       * In a generated mode, a press on something already banked EDITS it —
+       * select it, grab a point, insert an anchor — and a press on empty space
+       * drags out a new face. That is what makes the shape modes usable as a
+       * default rather than as a mode you have to leave to fix anything: the
+       * builder never switches back to `Pen` to nudge a corner.
+       *
+       * `bankedHitAt` is the same hit test `pathSessionDown` runs, asked here
+       * rather than repeated — so "is the pointer over a face" cannot get two
+       * different answers on one press.
+       */
+      if (isGeneratedMode(surfaceMode) && session.active.points.length === 0) {
+        if (bankedHitAt(session, p, aspect) === null) {
+          setShapeDraft({ mode: surfaceMode, origin: p, current: p });
+          return;
+        }
+      }
       applySession(pathSessionDown(session, p, aspect, e.shiftKey));
       return;
     }
@@ -459,6 +498,13 @@ function RegionSurface({
     if (activeTool === 'path') {
       setShiftHeld(e.shiftKey);
       setHover(p);
+      if (shapeDraft) {
+        // The room is NOT written while a shape is being dragged out — there is
+        // no face yet, only a rubber band. One write, on release, when the
+        // generator has actually produced something.
+        if (p) setShapeDraft({ ...shapeDraft, current: p });
+        return;
+      }
       // **The room is written on every pointer sample**, which is the opposite
       // of the region gesture below and is deliberate (SPRINT.md §3 R1): a
       // builder dragging a face's corner needs the wall to answer while their
@@ -491,6 +537,25 @@ function RegionSurface({
   const onPointerUp = (e: React.PointerEvent): void => {
     if (activeTool === 'path') {
       const p = pointOf(e);
+      if (shapeDraft) {
+        /**
+         * **The generator runs here, once, and then it is out of the picture.**
+         *
+         * What comes back is a plain I-17 `Path` that goes through the SAME
+         * funnel a pen-drawn one does — `applySession` hands it to
+         * `reconcileSurfaces`, which banks it as a face with the default role
+         * and name. Nothing downstream can tell it was a rectangle, because
+         * nothing records that it was.
+         */
+        const settled = p ? { ...shapeDraft, current: p } : shapeDraft;
+        setShapeDraft(null);
+        const path = generateShape(settled.mode, settled, nextPathId(session.paths));
+        // A drag too small to have been meant produces nothing. Refused rather
+        // than clamped up to a minimum: silently inventing a face the builder
+        // did not draw is a face they then have to find and delete.
+        if (path) applySession({ ...session, paths: [...session.paths, path] });
+        return;
+      }
       // Simplification happens inside this call, once, on release (D19).
       applySession(pathSessionUp(session, p, aspect, e.shiftKey));
       return;
@@ -646,6 +711,13 @@ function RegionSurface({
                 px={px}
                 py={py}
               />
+              {/*
+                The shape being dragged out, drawn from `generateShape` — the
+                SAME call the release will bank. The outline the builder watches
+                is therefore the face they get, not a second drawing of the same
+                idea; `previewPoints` makes the identical promise for the pen.
+              */}
+              <ShapeDraftOverlay draft={shapeDraft} px={px} py={py} />
             </>
           )}
           {/* Handles only on a settled selection: mid-gesture they would be
@@ -721,6 +793,37 @@ function RegionSurface({
         )}
         {activeTool === 'path' ? (
           <>
+            {/*
+              New Surface. Buttons and not a dropdown, deliberately: the last
+              control that mattered here WAS a dropdown, and it was missed
+              entirely at a projector. Four things the builder can see and hit.
+
+              These pick how the NEXT face is drawn and nothing else — there is
+              no mode to leave. A press on an existing face always edits it,
+              whichever button is lit (see `onPointerDown`), so `Pen` is for
+              drawing an outline point by point rather than for repairing one.
+            */}
+            <span style={{ color: '#8b939b' }}>new</span>
+            {SURFACE_MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setSurfaceMode(m)}
+                title={
+                  m === 'pen'
+                    ? 'Click each corner; Enter banks it, or click the first point to close and bank it'
+                    : `Press and drag to size a ${SURFACE_MODE_LABELS[m].toLowerCase()}, release to bank it`
+                }
+                style={{
+                  ...SELECT_STYLE,
+                  borderColor: surfaceMode === m ? '#40e0ff' : '#2b2f34',
+                  background: surfaceMode === m ? '#16323a' : '#15181b',
+                  color: surfaceMode === m ? '#e6f9ff' : 'inherit',
+                }}
+              >
+                {SURFACE_MODE_LABELS[m]}
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => applySession(discardActivePath(session))}
@@ -747,7 +850,10 @@ function RegionSurface({
                 : `delete ${selectedFace?.name ?? session.selectedId}`}
             </button>
             <span>
-              {`${surfaces.length} face${surfaces.length === 1 ? '' : 's'} · ` +
+              {(surfaceMode === 'pen'
+                ? 'Pen: click each corner, Enter banks it. '
+                : `${SURFACE_MODE_LABELS[surfaceMode]}: press and drag on empty space to size one. `) +
+                `${surfaces.length} face${surfaces.length === 1 ? '' : 's'} · ` +
                 `${session.active.points.length} point${
                   session.active.points.length === 1 ? '' : 's'
                 } in this one` +
@@ -756,9 +862,10 @@ function RegionSurface({
                   : '') +
                 (session.selectedId !== null && session.active.points.length === 0
                   ? ` · ${selectedFace?.name ?? session.selectedId} (${selectedFace?.role ?? '?'}) — ` +
-                    'drag a point to adjust, drag the face to move it, ' +
-                    'Delete on a point trims it, Delete elsewhere removes the face'
-                  : ' — click adds, drag draws, shift squares, Delete removes') +
+                    'drag a point to adjust, click an edge to add a point there, ' +
+                    'drag the face to move it, Delete on a point trims it, ' +
+                    'Delete elsewhere removes the face'
+                  : ' — click a face to select and edit it') +
                 (session.active.points.length >= 2
                   ? ', Enter finishes it and banks it as a face'
                   : '') +
@@ -865,6 +972,70 @@ const GRID_STROKE: Record<GridWeight | 'major', string> = {
  * drawn is the one that looks live — the operator needs to see the faces they
  * have marked without those marks competing with the stroke in their hand.
  */
+/**
+ * The rubber-banded face, mid-drag.
+ *
+ * Dashed and dimmed while it is not yet a face, matching `PathOverlay`'s rule
+ * that a dashed outline is one still taking input — so "is this mine to let go
+ * of yet" is answerable at a glance rather than by releasing and finding out.
+ */
+function ShapeDraftOverlay({
+  draft,
+  px,
+  py,
+}: {
+  draft: ShapeDraft | null;
+  px: (v: number) => number;
+  py: (v: number) => number;
+}): React.JSX.Element | null {
+  if (!draft) return null;
+  const path = generateShape(draft.mode, draft, 'draft');
+  const placeable = isDraftPlaceable(draft);
+  if (!path) {
+    // Too small to be meant — show the box that is being dragged, so the
+    // builder can see the tool is alive and that it has not reached a size that
+    // would make a face yet.
+    const b = draftBounds(draft);
+    return (
+      <rect
+        x={px(b.minX)}
+        y={py(b.minY)}
+        width={px(b.maxX - b.minX)}
+        height={py(b.maxY - b.minY)}
+        fill="none"
+        stroke="#6f767d"
+        strokeWidth={1}
+        strokeDasharray="2 3"
+      />
+    );
+  }
+  const d = path.points.map((q) => `${px(q.x)},${py(q.y)}`).join(' ');
+  return (
+    <g>
+      <polygon
+        points={d}
+        fill="rgba(64,224,255,0.10)"
+        stroke="#40e0ff"
+        strokeWidth={1}
+        strokeDasharray={placeable ? undefined : '4 3'}
+      />
+      {path.points.map((q, i) => (
+        <rect
+          key={i}
+          x={px(q.x) - 2}
+          y={py(q.y) - 2}
+          width={4}
+          height={4}
+          fill="#40e0ff"
+          stroke="#06202a"
+          strokeWidth={1}
+        />
+      ))}
+    </g>
+  );
+}
+
+
 function BankedPath({
   path,
   selected,

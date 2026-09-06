@@ -9,7 +9,12 @@
  * forwarded from that moment without this file being touched, and a key removed
  * there stops being forwarded for the same reason.
  */
-import { outputShortcutFor, type OutputShortcut } from '@shared/ipc';
+import {
+  OUTPUT_SHORTCUTS,
+  outputShortcutFor,
+  type OutputShortcut,
+  type OutputShortcutAction,
+} from '@shared/ipc';
 
 /** Structural, so a test can pass a literal and a listener can pass a real event. */
 export interface EventTargetLike {
@@ -50,4 +55,26 @@ export function forwardedShortcut(e: KeyEventLike): OutputShortcut | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   if (isTypingTarget(e.target)) return null;
   return outputShortcutFor(e.key);
+}
+
+
+/**
+ * The key that performs an action, for a BUTTON rather than a keystroke.
+ *
+ * The editor's wall-mode grid toggle is a button, and a button has to name
+ * something. It names the ACTION and asks the table for the key, so the letter
+ * still lives in exactly one place — press `g` at either window or click the
+ * button, and all three reach the same handler. A button that sent a hardcoded
+ * letter would be the second list this module exists to prevent.
+ *
+ * Only the key crosses the boundary (I-7); the action is resolved here, in the
+ * process that has the table.
+ */
+export function shortcutFor(action: OutputShortcutAction): OutputShortcut {
+  const found = OUTPUT_SHORTCUTS.find((s) => s.action === action);
+  // Unreachable while `OutputShortcutAction` is derived from the table itself —
+  // the compiler rejects an action that is not in it. Thrown rather than
+  // returned as null so a caller never has to branch on an impossibility.
+  if (!found) throw new Error(`no shortcut for action "${action}"`);
+  return found;
 }

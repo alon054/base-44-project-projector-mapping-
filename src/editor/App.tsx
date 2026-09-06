@@ -25,7 +25,7 @@ import {
   percentile,
 } from '../debug/hud';
 import { PREVIEW_SIZE, PreviewCanvas } from './PreviewCanvas';
-import { forwardedShortcut } from './outputKeys';
+import { forwardedShortcut, shortcutFor } from './outputKeys';
 import { LayerPanel } from './LayerPanel';
 import { EntityPanel } from './EntityPanel';
 import { createPanelUi, selectedLayerId, type PanelUi } from './controls';
@@ -441,6 +441,26 @@ export function App(): React.JSX.Element {
         >
           {wallMode ? 'WALL MODE — show everything' : 'Back to wall mode'}
         </button>
+        {/*
+          The wall reference grid, toggled from here because the projector
+          display runs `cursor: none` and is usually not focused — the same
+          reason P5-E built key forwarding at all. It sends the KEY the table
+          names for the action, so the button, `g` at the editor and `g` at the
+          output window all reach one handler.
+
+          The editor cannot show whether the grid is currently on: the output
+          window owns that state and does not report it. Deliberate for now —
+          the grid is a grid, it is unmissable on the wall, and the output logs
+          `[grid] ON` so a run record can answer it. Noted rather than plumbed.
+        */}
+        <button
+          type="button"
+          onClick={() => window.engine.sendOutputKey({ key: shortcutFor('wallGrid').key })}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="White reference grid on the projection. Toggle — press again to clear it. NOT for a take."
+        >
+          Wall grid ⇄
+        </button>
         <span style={{ fontSize: 12, color: '#8b939b' }}>
           {selectedDisplay
             ? `output → ${selectedDisplay.label} ${selectedDisplay.size.width}×${selectedDisplay.size.height}`
@@ -608,20 +628,27 @@ frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
         {wallMode && (
           <ol style={stepsStyle}>
             <li>
-              Click the corners of one face of the box, on the preview below.
-            </li>
-            <li>
-              Press <kbd style={kbdStyle}>Enter</kbd> — or click the first point again — to
-              bank it. It becomes <strong>face 1</strong>, role <code>panel</code>.
+              Pick <strong>Rect</strong>, <strong>Triangle</strong> or{' '}
+              <strong>Ellipse</strong> under the preview, then <strong>press and drag</strong>{' '}
+              on empty space to size a face. Release and it is banked as{' '}
+              <strong>face 1</strong>, role <code>panel</code>. <strong>Pen</strong> instead
+              clicks corner by corner — <kbd style={kbdStyle}>Enter</kbd>, or click the
+              first point, to close it.
             </li>
             <li>
               Hit <strong>White fill → panel</strong> once. Every face tagged{' '}
               <code>panel</code> lights white, including ones you mark later.
             </li>
             <li>
+              Hit <strong>Wall grid</strong> to put a white reference grid on the
+              projection while you place things. Press it again to clear it —{' '}
+              <strong>it must be off for a take.</strong>
+            </li>
+            <li>
               Click a face to select it, then drag its points until the white sits on the
-              real box. <kbd style={kbdStyle}>Delete</kbd> over a point trims that corner;
-              away from a point it removes the face.
+              real box. <strong>Click one of its edges to add a point there</strong> when a
+              quad will not fit the face. <kbd style={kbdStyle}>Delete</kbd> over a point
+              trims that corner; away from a point it removes the face.
             </li>
           </ol>
         )}

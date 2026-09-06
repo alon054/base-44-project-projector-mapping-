@@ -169,6 +169,13 @@ export const OUTPUT_SHORTCUTS = [
   { key: 'h', action: 'hud', label: 'HUD' },
   { key: 'r', action: 'resetMetrics', label: 'reset metrics window' },
   { key: 'k', action: 'probeK', label: 'k probe' },
+  // The operator's wall reference grid. Deliberately a SHORTCUT and not a
+  // registry parameter: it is calibration, not content, and `render/calibration.ts`
+  // already records why the room and the warp stay out of the registry — a knob
+  // that can be MIDI-mapped in Phase 11 is a knob that can put guide lines on a
+  // projection mid-show. Off at every launch, never persisted; see
+  // `src/render/wallGrid.ts`.
+  { key: 'g', action: 'wallGrid', label: 'wall grid' },
 ] as const;
 
 export type OutputShortcut = (typeof OUTPUT_SHORTCUTS)[number];

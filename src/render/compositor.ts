@@ -61,6 +61,7 @@ import type { Surface, SurfaceTree } from '../core/surfaces';
 import type { ContentProvider, LayerFrame, LayerView, ProviderRegistry } from '../providers/ContentProvider';
 import { toPixiBlendMode } from './blend';
 import { buildMask, drawMask, isMaskable, pathPixelBounds, type PixelBox } from './mask';
+import { drawWallGrid } from './wallGrid';
 import { createPlaceholderGraphic } from './placeholder';
 
 /** Frozen: the compositor reads it every mount and must never mutate it. */
@@ -238,6 +239,16 @@ export class Compositor {
 
   private readonly background = new Graphics();
   private readonly layerRoot = new Container();
+  /**
+   * The operator's wall reference grid (`render/wallGrid.ts`). A sibling ABOVE
+   * every layer, so it is readable over content, and INSIDE the composite, so it
+   * goes through the warp exactly as content does.
+   *
+   * `visible = false` at construction and nothing turns it on but an explicit
+   * `setWallGrid(true)`. The golden harness never calls that, which is why no
+   * blessed frame can contain it — structural, not a promise.
+   */
+  private readonly wallGrid = new Graphics();
   private readonly providers: ProviderRegistry;
   private readonly onLayerFailed: (info: PlaceholderInfo, error: unknown) => void;
 
@@ -255,7 +266,26 @@ export class Compositor {
     this.width = opts.width;
     this.height = opts.height;
     this.surfaces = opts.surfaces ?? [];
-    this.view.addChild(this.background, this.layerRoot);
+    this.wallGrid.visible = false;
+    this.view.addChild(this.background, this.layerRoot, this.wallGrid);
+  }
+
+  /**
+   * Show or hide the wall grid. Operator-paced; never per frame.
+   *
+   * The geometry is rebuilt on the way ON rather than kept up to date while
+   * hidden, so a grid that is off costs one invisible empty `Graphics` and no
+   * redraws at all (A14). See `render/wallGrid.ts` for why this exists and why
+   * it is off by default at every launch.
+   */
+  setWallGrid(on: boolean): void {
+    if (on) drawWallGrid(this.wallGrid, this.width, this.height);
+    this.wallGrid.visible = on;
+  }
+
+  /** Whether the grid is currently on the projection. For the log and the HUD. */
+  wallGridOn(): boolean {
+    return this.wallGrid.visible;
   }
 
   /**
@@ -684,6 +714,9 @@ export class Compositor {
     this.width = width;
     this.height = height;
     this.drawBackground();
+    // Rebuilt from normalized positions at the new size (I-1), not scaled — the
+    // same ruling the masks take four lines down, for the same reason.
+    if (this.wallGrid.visible) drawWallGrid(this.wallGrid, this.width, this.height);
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
       if (mount?.isFill) {

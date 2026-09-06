@@ -38,6 +38,7 @@ import { createSurface, canonicalizeSurface, type Surface } from '../core/surfac
 import { resetRoleLog } from '../core/roles';
 import { readSurfaces } from '../render/calibration';
 import { createLayer } from '../core/layer';
+import { FIXTURE_L } from './roomFixture';
 import { createScene } from '../core/scene';
 import { EMPTY_FORCE_FIELD, evaluateForces } from '../core/forces';
 import { FORCE_DEFINITIONS } from '../core/forceDefs';
@@ -171,10 +172,16 @@ describe('I-1 — a path becomes pixels at draw time and nowhere else', () => {
   });
 
   it('a reflex corner does not shrink the box below the outermost point', () => {
-    // B1's six-point L. Its box is the full extent; the notch is the mask's
-    // job, not the box's, and a box that followed the notch would starve the
-    // provider of the pixels it has to draw into.
-    const l = committedRoom()[1]!;
+    // B1's six-point L, from the FROZEN fixture rather than from
+    // `calibration/surfaces.json`. That file is the room a builder marks, and a
+    // test asserting its exact coordinates goes red the first time the tool is
+    // used for its purpose — see `roomFixture.ts`. The claim here is about the
+    // arithmetic, not about anybody's room.
+    //
+    // The box is the full extent; the notch is the mask's job, not the box's,
+    // and a box that followed the notch would starve the provider of the pixels
+    // it has to draw into.
+    const l = FIXTURE_L;
     const box = pathPixelBounds(l.path, W, H);
     expect(box.x).toBeCloseTo(0.56 * W, 6);
     expect(box.y).toBeCloseTo(0.16 * H, 6);

@@ -16,6 +16,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { fixtureRoom } from './roomFixture';
 import { join } from 'node:path';
 import {
   DEFAULT_SURFACE_ROLE,
@@ -325,16 +326,21 @@ describe('calibration/surfaces.json — versioned, through the one loader', () =
   });
 });
 
-describe('the committed room file', () => {
-  const raw = JSON.parse(readFileSync(ROOM_FILE, 'utf8')) as unknown;
-  const tree = readSurfaces(raw, canonicalizeSurface);
+/**
+ * Geometry claims go against the FROZEN fixture, never against the live room.
+ *
+ * `calibration/surfaces.json` is what a builder writes when they mark a face.
+ * Asserting its coordinates made four tests fail the first time the tool was
+ * used for its actual purpose — a red suite that means "you marked your room",
+ * which at a wall at 1am is worse than no suite at all. See `roomFixture.ts`;
+ * the golden harness already made this ruling and these tests had not followed
+ * it.
+ */
+describe('the fixture room', () => {
+  const tree = fixtureRoom();
 
-  it('loads through the loader and holds two surfaces', () => {
+  it('holds two surfaces and resolves both by role, in marking order', () => {
     expect(tree).toHaveLength(2);
-    expect((raw as { version: number }).version).toBe(SURFACES_VERSION);
-  });
-
-  it('resolveRole("panel", tree) returns both, in marking order', () => {
     const r = resolveRole('panel', tree);
     expect(r.unmatched).toBe(false);
     expect(r.surfaces.map((s) => s.id)).toEqual(['surface-1', 'surface-2']);
@@ -347,6 +353,30 @@ describe('the committed room file', () => {
     expect(second.path.points.length).toBeGreaterThan(4);
     expect(second.path.closed).toBe(true);
     expect(hasReflexCorner(second.path.points)).toBe(true);
+  });
+});
+
+/**
+ * Against the LIVE file, only what is true of ANY room.
+ *
+ * These are properties of the FORMAT — they hold after an evening of marking,
+ * and they are exactly what a corrupted or half-written file would break. That
+ * is the difference between a check worth running at a wall and a check that
+ * reports yesterday's fixture.
+ */
+describe('the committed room file', () => {
+  const raw = JSON.parse(readFileSync(ROOM_FILE, 'utf8')) as unknown;
+  const tree = readSurfaces(raw, canonicalizeSurface);
+
+  it('parses, at a version this build reads', () => {
+    expect((raw as { version: number }).version).toBe(SURFACES_VERSION);
+    // Not "has N faces": an empty room is a legitimate state — it is what a
+    // first launch has, and what deleting the last face leaves.
+    expect(Array.isArray((raw as { surfaces: unknown }).surfaces)).toBe(true);
+  });
+
+  it('every face has a unique id, so two faces cannot be one face', () => {
+    expect(new Set(tree.map((s) => s.id)).size).toBe(tree.length);
   });
 
   it('every stored point is normalized (I-1)', () => {

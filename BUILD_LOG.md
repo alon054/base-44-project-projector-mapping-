@@ -6671,3 +6671,150 @@ claim about the wall.
 Still owed to the wall: everything about light landing on a box. The app running
 on a desk says the chain works. It says nothing about whether a fill lands inside
 a real face and stops at its edge.
+
+## 2026-09-06 — Sprint (block B3, addendum 2) — New Surface, Add Anchor Point, and a grid on the wall
+- DID: `shapeTool.ts` — four creation modes, one generator, drag-to-create, no
+  stored shape kind. `nearestSegment` + `insertPointOnSegment` + `bankedHitAt`
+  (one hit test, three consumers) so clicking an edge inserts an anchor and
+  grabs it. `render/wallGrid.ts` + `Compositor.setWallGrid` + the `g` shortcut:
+  a white reference grid on the projection, off at every launch. Decoupled the
+  unit suite's geometry fixtures from the live `calibration/surfaces.json`.
+- MEASURED: npm test 957 → 1001 (38 → 40 files). test:render 45/45, 43 pre-fill
+  goldens byte-identical, no blessed frame contains a grid line. 18 mutations,
+  18 caught after one was rewritten.
+- BLOCKER: -
+- NEXT: W1 — the builder at the projector, room dark.
+
+CORRECTION — the 231 writes were a hand, not a bug, and the previous entry
+overstated it.
+
+The previous addendum reported `saveSurfacesRaw` firing 231 times in an
+"untouched" 15-second launch and called it a defect that would have cost the
+wall session. The launch was not untouched. The operator had the app open and
+was dragging a face throughout — `pgrep` later showed their own
+`npm start` still running, and `surfaces.json` changing under it while this
+session was reading it. Writing on every change is the design (SPRINT.md §3 R1),
+so 231 writes during a deliberate drag is expected behaviour and not a fault.
+The "0 writes after the fix" is equally worthless as evidence: nobody was
+touching it in that window either. Neither number was a controlled measurement
+and neither should be read as one.
+
+What survives is smaller and still worth having. `pathSessionDown` did install a
+`move` record on the same event that selected a face, so the first pointer
+sample after mouse-down translated it — a click that drifts a pixel nudged a
+calibration that has no undo. `DRAG_SLOP` is the right guard for that and it
+stays. It is a papercut guard, not a catastrophe averted, and the earlier entry
+is wrong where it says otherwise. Recorded here rather than edited there, because
+this log is append-only and a corrected number that quietly replaced a wrong one
+would leave nothing to learn from.
+
+The lesson is procedural: **this session measured a machine that a person was
+using at the same time.** Every precondition list in this project is about
+keeping other software off the machine during a run; none of them says "check
+whether the operator is holding the mouse". A15 territory, and cheap to avoid —
+`pgrep` before attributing anything to an untouched launch.
+
+DECISION — a generator, not four shape kinds, and that is what buys the missing
+transform stack.
+
+`generateShape` runs once, at release, and returns a plain I-17 `Path`. Nothing
+downstream records how a face was drawn: no `kind` on `Surface`, none on `Path`,
+none in `surfaces.json`. A dragged rect and the same four points drawn with the
+pen are `toEqual`, and a banked surface still has exactly `id / name / path /
+role`.
+
+That is not tidiness, it is what makes "no bounding box, no scale handles, no
+rotation" affordable. A STORED rect would mean a rect that must stay
+rectangular, which needs bounds, which needs an anchor, which needs handles,
+which needs a rotation grip, which then has to be hit-tested against the point
+handles that already exist — a transform stack in the one file that must never
+grow one. A generated rect is four points, and points are already fully editable
+by the three gestures the block shipped.
+
+Drag-to-create is the other half of the same argument: a shape born at the right
+size never needs resizing. The alternative — drop a fixed shape, then scale it —
+is exactly the path that requires everything above.
+
+Ellipse is 32 points and that is a decision. 32 segments put the worst-case chord
+error under a tenth of a percent of the radius, inside a projector pixel at
+1280x720, while still being a list a builder can drag anchors out of. Stored as
+32 literal points because I-17 has ONE representation; a circle that stored a
+centre and a radius would need its own mask path, its own hit test and its own
+editing rules.
+
+DECISION — one hit test, asked in the only order geometry allows.
+
+`bankedHitAt` answers point, then edge, then face, and returns which. The order
+is forced rather than chosen: every point lies on its own edges and every edge
+lies on its own face, so asking coarser-first makes the finer questions
+unreachable. Inverting it fails ten tests.
+
+Three callers now share it — the point grab, the anchor insert, and the shape
+tool deciding whether a press starts a new face or edits an existing one. Before
+this the component would have needed its own copy of "is the pointer over a
+face", which is the pair-of-counters fault this project keeps naming.
+
+Inserting also GRABS the new point, so one press adds it and starts placing it.
+That is the same one-gesture ruling as select-and-move, and it is safe here in a
+way select-and-move was not: inserting a point on a segment moves nothing that
+was already correct.
+
+SPEC-CHANGE-PROPOSED — hard rule 9's spirit, not its mechanism.
+
+The operator asked for a MadMapper-style white grid on the projection, in the
+same message that restated rule 9. Both were built, and they do not actually
+collide, but the distinction is worth stating rather than assuming:
+
+- **Rule 9's mechanism is untouched.** `output/main.ts` and `golden/main.ts`
+  still cannot reach `PreviewCanvas.tsx` or `interaction.ts`; the import-graph
+  test passes. The grid could not have been the preview's overlay arriving on the
+  wall in any case — an SVG sibling of the preview canvas is not in the Pixi
+  scene graph and there is no path along which it becomes one. Whatever put a
+  grid on the wall was always going to be new drawing code in the output.
+- **I-7 is not touched at all.** Separate render targets, and a boolean crosses,
+  not pixels.
+- **What changes is rule 9's spirit**: "a guide line on the projection is a
+  re-shoot" now has a deliberate exception the operator controls. Every
+  projection-mapping tool has one, because aligning a normalized frame to a
+  physical box by eye with no reference is guesswork.
+
+Three things make that safe, and each is tested rather than promised: off at
+every launch and **never persisted** (deliberately unlike the HUD, which
+`config/` remembers — a grid remembered from yesterday is a grid in tomorrow's
+first take); it **logs** `[grid] ON`, beside `[scene] applied` and `[warp]`, so a
+take shot with guide lines up is answerable from the run log instead of from an
+argument about a video; and the **golden harness never enables it**, checked at
+the source, so no blessed frame can contain one. All 45 goldens still match.
+
+Drawn pre-warp, inside the composite, so it goes through the warp exactly as
+content does — the grid then says where SCENE SPACE lands on the wall, which is
+the question being asked. A grid drawn after the warp would describe the
+projector's raster and answer a question nobody has.
+
+CLAUDE.md is the operator's file and is not edited here. Rule 9's wording should
+gain the exception; this entry is the proposal.
+
+RISK-TRIGGERED — the test fixture and the live room were the same file.
+
+Four tests asserted exact coordinates of `calibration/surfaces.json`. The moment
+the operator used the tool for its purpose, the suite went red — on numbers that
+had changed *because it worked*. At a wall that is worse than an inconvenience:
+`npm test` is how this project decides whether it is safe to shoot, and a red
+suite meaning "you marked your room" is a red suite nobody reads carefully at 1am.
+
+`src/test/roomFixture.ts` now holds the frozen two-face fixture, which is the
+ruling `src/golden/main.ts` already made and explained — its `GOLDEN_FACE_QUAD`
+and `GOLDEN_FACE_L` are literals "so re-marking at the wall cannot re-bless
+goldens". The unit suite simply had not followed it. Against the live file only
+FORMAT invariants remain: it parses, its version is readable, ids are unique,
+every point is normalized, no content field leaked in. Those hold after an
+evening of marking and are exactly what a corrupted write would break.
+
+MEASURED — a mutation that survived, and the test it condemned.
+
+`ELLIPSE_POINTS` halved from 32 to 16: **zero tests failed.** The test asserted
+`toHaveLength(ELLIPSE_POINTS)` — against the constant it was supposed to be
+checking, so it could not fail. CLAUDE.md's "a new test that cannot fail is not a
+test", caught by the discipline that exists for it. Rewritten to pin the literal
+32, which is the specified number; the mutation now fails one test. Seventeen
+other mutations were caught first time.

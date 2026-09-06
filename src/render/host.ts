@@ -116,6 +116,19 @@ export interface RenderHost {
    * nothing. See its header.
    */
   setSurfaces(tree: SurfaceTree): void;
+  /**
+   * The operator's wall reference grid, on or off (`render/wallGrid.ts`).
+   *
+   * **Only the output window calls this.** The editor preview deliberately does
+   * not: it already draws D11's scene-space grid as an SVG sibling, at the same
+   * divisions, so turning this on there would double every line. The two grids
+   * agree because they read the same `gridLines()`, not because one is the
+   * other — and rule 9's guard is untouched, since the SVG one still has no path
+   * to the projector.
+   */
+  setWallGrid(on: boolean): void;
+  /** Whether the grid is currently drawn. For the log and the run record. */
+  wallGridOn(): boolean;
   /** I-5. No-op on a host built without a warp stage (the editor preview). */
   setCalibration(cal: ViewportCalibration): void;
   /** True when the composite is going through the warp mesh this frame. */
@@ -370,6 +383,12 @@ export async function createRenderHost(opts: RenderHostOptions): Promise<RenderH
     },
     setSurfaces(tree) {
       compositor.setSurfaces(tree);
+    },
+    setWallGrid(on) {
+      compositor.setWallGrid(on);
+    },
+    wallGridOn() {
+      return compositor.wallGridOn();
     },
     forceField: () => forceField,
     setCalibration(cal) {

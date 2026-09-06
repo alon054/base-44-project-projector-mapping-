@@ -24,8 +24,8 @@ const src = (rel: string): string =>
   readFileSync(new URL(`../../${rel}`, import.meta.url).pathname, 'utf8');
 
 describe('the shortcut table', () => {
-  it('carries the three keys the block names', () => {
-    expect(OUTPUT_SHORTCUTS.map((s) => s.key)).toEqual(['h', 'r', 'k']);
+  it('carries the keys the blocks name — P5-E\'s three, plus B3\'s wall grid', () => {
+    expect(OUTPUT_SHORTCUTS.map((s) => s.key)).toEqual(['h', 'r', 'k', 'g']);
   });
 
   it('is well formed: single lowercase keys, unique keys, unique actions', () => {

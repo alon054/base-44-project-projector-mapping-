@@ -1054,6 +1054,24 @@ const SHORTCUT_HANDLERS: Record<OutputShortcutAction, () => void> = {
         '(metrics window reset — probe hitch excluded)',
     );
   },
+  /**
+   * The operator's wall reference grid (`render/wallGrid.ts`).
+   *
+   * It LOGS, and that is the safety feature rather than a nicety: a take shot
+   * with guide lines up is a re-shoot, and this line makes "was the grid on?"
+   * answerable from the run log instead of from an argument about a video. It
+   * sits beside `[scene] applied`, `[warp]` and `[surfaces]`, which between them
+   * made most of this project's defects findable.
+   *
+   * Not persisted to `config/`, deliberately unlike the HUD one line up: a grid
+   * remembered from yesterday is a grid in tomorrow's first take.
+   */
+  wallGrid: () => {
+    if (!host) return;
+    const on = !host.wallGridOn();
+    host.setWallGrid(on);
+    console.log(`[grid] ${on ? 'ON — guide lines are on the projection, not for a take' : 'off'}`);
+  },
 };
 
 function runShortcut(action: OutputShortcutAction): void {

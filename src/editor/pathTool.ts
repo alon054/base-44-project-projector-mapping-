@@ -664,13 +664,71 @@ export function distanceToPath(path: Path, p: NormalizedPoint, aspect: number): 
     const s = square(p, aspect);
     return Math.hypot(s.x - q.x, s.y - q.y);
   }
-  let best = Infinity;
+  return nearestSegment(path, p, aspect)?.distance ?? Infinity;
+}
+
+/**
+ * WHICH segment of the path is nearest, and how far — the same walk
+ * `distanceToPath` does, returning the index it already had to compute.
+ *
+ * This exists so "insert an anchor point on a segment" can reuse the hit test
+ * the tool already has rather than growing a second one beside it. `pathHitTest`
+ * answers *which face*; this answers *which edge of it*, out of one body, with
+ * `pathSegments` and `perpendicularDistance` doing the work exactly as before.
+ * Two walks that agreed today and drifted later is the pair of counters
+ * CLAUDE.md's "a fix to one counter is not a fix to the counter beside it" names.
+ *
+ * The index is the index of the segment's FIRST point, so the new anchor belongs
+ * at `index + 1` — see `insertPointOnSegment`. A closed path's last segment runs
+ * from the last point back to the first, and its index is `points.length - 1`,
+ * which is why the insert appends rather than splices in that one case.
+ */
+export function nearestSegment(
+  path: Path,
+  p: NormalizedPoint,
+  aspect: number,
+): { index: number; distance: number } | null {
+  const segments = pathSegments(path);
+  if (segments.length === 0) return null;
   const s = square(p, aspect);
-  for (const seg of segments) {
+  let bestIndex = 0;
+  let best = Infinity;
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = segments[i]!;
     const d = perpendicularDistance(s, square(seg.a, aspect), square(seg.b, aspect));
-    if (d < best) best = d;
+    if (d < best) {
+      best = d;
+      bestIndex = i;
+    }
   }
-  return best;
+  return { index: bestIndex, distance: best };
+}
+
+/**
+ * Split a segment and put an anchor at `p` — Photoshop's Add Anchor Point.
+ *
+ * This is the gesture the wall actually needs. A quad marked on a box that turns
+ * out not to be a quad — a bevelled edge, a panel with a step in it, a face
+ * whose corner is rounded — cannot be fixed by dragging four points, and
+ * deleting the face to redraw it loses the three corners that were already
+ * right. One click on the offending edge gives the builder the point they were
+ * missing, in the place they clicked.
+ *
+ * Inserted AFTER `index`, so the new point sits between the two it was drawn
+ * between and the winding is unchanged. `index + 1` on the closing segment of a
+ * closed path is `points.length`, which `splice` treats as an append — the
+ * correct answer, and the reason this does not special-case it.
+ *
+ * Out of range returns the path unchanged rather than throwing: the index comes
+ * from a hit test on a list the pointer can shorten mid-gesture, which is drift,
+ * not corruption (Block A's rule, and `deletePointAt`'s).
+ */
+export function insertPointOnSegment(path: Path, index: number, p: NormalizedPoint): Path {
+  const segments = pathSegments(path);
+  if (!Number.isInteger(index) || index < 0 || index >= segments.length) return path;
+  const points = path.points.slice();
+  points.splice(index + 1, 0, { x: p.x, y: p.y });
+  return { ...path, points };
 }
 
 /**
@@ -899,6 +957,50 @@ export function removePath(session: PathSession, id: string): PathSession {
  * joined up.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+export type BankedHit =
+  | { kind: 'point'; id: string; index: number }
+  | { kind: 'segment'; id: string; index: number }
+  | { kind: 'face'; id: string };
+
+/**
+ * What a press at `p` would land on, out of everything already banked.
+ *
+ * **One hit test, two callers.** `pathSessionDown` consumes this to decide what
+ * the press DOES, and the shape tool consumes it to decide whether a press is
+ * "edit that face" or "start dragging out a new one" — so the two can never
+ * disagree about whether the pointer is over a face, which is the pair-of-
+ * counters fault CLAUDE.md names. It composes `pointIndexOnPath`,
+ * `nearestSegment` and `pathHitTest`; there is no fourth walk over the points.
+ *
+ * The ORDER is the decision and it is forced by geometry: every point lies on
+ * its own edges, and every edge lies on its own face, so asking in any other
+ * order answers a coarser question first and the finer ones become unreachable.
+ *
+ * Points and segments are only offered on the SELECTED face — that is the one
+ * `BankedPath` draws handles on, and an affordance that fires where nothing is
+ * drawn is one the builder finds by accident, in the dark, with the projector on.
+ */
+export function bankedHitAt(
+  session: PathSession,
+  p: NormalizedPoint,
+  aspect: number,
+): BankedHit | null {
+  const selected =
+    session.selectedId === null
+      ? undefined
+      : session.paths.find((q) => q.id === session.selectedId);
+  if (selected) {
+    const index = pointIndexOnPath(selected, p, aspect);
+    if (index !== null) return { kind: 'point', id: selected.id, index };
+    const near = nearestSegment(selected, p, aspect);
+    if (near && near.distance <= PATH_HIT_TOLERANCE) {
+      return { kind: 'segment', id: selected.id, index: near.index };
+    }
+  }
+  const hit = pathHitTest(session.paths, p, aspect);
+  return hit === null ? null : { kind: 'face', id: hit };
+}
+
 export function pathSessionDown(
   session: PathSession,
   p: NormalizedPoint,
@@ -911,34 +1013,56 @@ export function pathSessionDown(
     const next = { ...session, active };
     return closing ? commitActivePath(next, aspect) : next;
   }
-  const selected =
-    session.selectedId === null
-      ? undefined
-      : session.paths.find((q) => q.id === session.selectedId);
-  if (selected) {
-    const index = pointIndexOnPath(selected, p, aspect);
-    if (index !== null) {
-      return { ...session, grabPoint: { id: selected.id, index, origin: p, live: false } };
+
+  const hit = bankedHitAt(session, p, aspect);
+
+  if (hit?.kind === 'point') {
+    return { ...session, grabPoint: { id: hit.id, index: hit.index, origin: p, live: false } };
+  }
+
+  // On an EDGE of the selected face but not on one of its points: insert an
+  // anchor there and grab it, so one press adds the point AND starts placing it.
+  // Two gestures for that is the affordance nobody finds — the same ruling as
+  // select-and-move, and it is safe here in a way that one is not, because
+  // inserting a point on a segment moves nothing that was already right.
+  //
+  // This is what the wall needs when a quad turns out not to be a quad: a
+  // bevelled edge, a panel with a step in it, a corner that is actually round.
+  // Dragging four points cannot fix that, and redrawing the face loses the three
+  // corners that were already right.
+  if (hit?.kind === 'segment') {
+    const face = session.paths.find((q) => q.id === hit.id)!;
+    const grown = insertPointOnSegment(face, hit.index, p);
+    if (grown !== face) {
+      return {
+        ...session,
+        paths: session.paths.map((q) => (q.id === hit.id ? grown : q)),
+        // The new point is at `index + 1` — where `insertPointOnSegment` put it.
+        // Grabbed but not live: the press still has to travel before it drags,
+        // exactly like every other press on a marked face (DRAG_SLOP).
+        grabPoint: { id: hit.id, index: hit.index + 1, origin: p, live: false },
+      };
     }
   }
-  const hit = pathHitTest(session.paths, p, aspect);
-  if (hit !== null) {
-    const path = session.paths.find((q) => q.id === hit)!;
+
+  if (hit?.kind === 'face') {
+    const path = session.paths.find((q) => q.id === hit.id)!;
     const anchor = path.points[0]!;
     return {
       ...session,
-      selectedId: hit,
+      selectedId: hit.id,
       // Selected immediately; MOVED only once the press has travelled past
       // `DRAG_SLOP`. Selecting is free and reversible, translating a marked face
       // is neither.
       move: {
-        id: hit,
+        id: hit.id,
         grab: { x: p.x - anchor.x, y: p.y - anchor.y },
         origin: p,
         live: false,
       },
     };
   }
+
   return {
     ...session,
     selectedId: null,
