@@ -6179,3 +6179,150 @@ output applied a scene, which means the whole editor tree — the two new panels
 included — mounted and ran its effects without throwing. A renderer that dies at
 startup is invisible to `vitest` by construction and takes ten seconds to rule
 out.
+
+2026-09-06 — Sprint (open) — a reel in three days, over the top of Phase 5
+DID: No code. A three-day sprint opened over the existing plan. Two new files, SPRINT.md and SPRINT_CHECKLIST.md; CLAUDE.md gains a SPRINT MODE section, a ninth hard rule, a "what you cannot claim" section and the handoff-prompt rule. SPEC.md and CHECKLIST.md are untouched.
+MEASURED: 825 / 825 green, 35 files. 43 / 43 goldens. Unchanged — nothing built.
+BLOCKER: none. Sprint block B1 can start.
+NEXT: B1 — core/surfaces.ts, core/roles.ts, calibration/surfaces.json.
+The deliverable changed, and that is the whole reason for the sprint
+
+Gate 5 has not been run and Phases 6–9 are four weeks of work. What is needed first is a short video: a wall with boxes inside the projector frame, the frame warped square, box faces marked by hand and lighting up as they are drawn, content filling every face carrying a role, and a group filling them in turn.
+
+A video has a second take. That single fact moves a great deal off the critical path — the usability run, the stranger, five clean end-to-end runs, recovery procedures, the runbook — and moves one thing onto it that was previously hygiene: nothing may end a take. Resetting a dark room with taped tripod legs costs an hour, so I-13 stops being a quality bar and becomes the load-bearing rule of the three days.
+
+DECISION — the sprint pulls Phase 6 and 7 forward rather than forking them
+
+The tempting shape was a parallel four-file set with its own spec. That is how a project acquires two sources of truth for the same thing, and this log already carries the lesson twice: two wordings agree exactly until one is edited.
+
+What is here instead is a work order subordinate to SPEC.md. Every invariant holds unchanged. The sprint's four new rules (SPRINT.md §3) do not add a concept — they instantiate I-15, I-16 and I-17 early, at the paths §7 already reserves:
+
+Sprint block	Is	Deferred back to it
+B1	reduced P6-A	per-surface mapping, the mask field, the full role API
+B2	reduced P6-B + P6-E	outline stroking, the surface cap and its ladder
+B3	part of P6-C	the calibration/performance mode split
+B4	reduced P7-A + P7-B	nesting, durationOverride, group motion and bindings
+B5	the wiring P5-C deliberately left undone	seam, orientOffset
+
+So core/surfaces.ts, core/roles.ts, render/mask.ts and core/groups.ts exist afterwards at the right paths, built against the invariants they were always going to be built against. Phase 6 resumes part-done rather than forked. SPRINT.md §8 is the closing session that records exactly what each block still owes, so the reduction is written down rather than discovered.
+
+DECISION — nothing is renamed, and Group therefore has no loop field
+
+A later spec pass proposed renaming endBehavior: 'loop' to 'cycle', on the correct grounds that D18 spends loop on a per-group toggle and two identically spelled fields in one JSON document is the hazard §13 guards against for the word block. That pass is not merged. The field in this tree is 'loop'.
+
+Rather than import half a rename into a three-day sprint, the sprint's Group simply has no loop field: a sequence always loops. The collision has no subject, so the rename has no urgency, and if the pass is ever merged the field it wanted the word for still does not exist — the rename stays free.
+
+Worth recording because the alternative was attractive and wrong: renaming an enum value across motion.ts, its 51 tests and the editor's motion panel, in the first hour of a sprint whose deliverable is a video, buys nothing that the camera can spend.
+
+DECISION — role is a free string, and an unmatched role is flagged, not refused
+
+The reel's closing beat is a fifth face marked mid-shot that fills itself. That needs content bound to a role, which is what I-15 already requires.
+
+The question raised and settled: does binding by role cost the ability to give each face its own content? It does not. Leave the default panel and every face shares one layer; set a face to box-left and only a layer naming box-left fills it — id-binding with a name the builder chose. Binding by role is a strict superset at identical implementation cost.
+
+This carves one stated exception out of "clamp what drifts, refuse what is wrong." An unknown enum value is refused everywhere else in this codebase. A role is not an enum, and a typo at the projector with the room dark must not stop the session — so it takes the I-13 path: flagged, logged, no throw, no substitution. Recorded here and in CLAUDE.md rather than left as a silent inconsistency with P5-A's rule.
+
+The consequence, written down now rather than found at the wall: one fill instance per matching surface is one decoder per matching surface. A role matching four faces with a video fill is four decoders against MAX_CONCURRENT_VIDEO of 4. Multi-face roles take sprite or procedural content; video and Lottie go on single-face roles only.
+
+SHORTCUT — the fifth-face moment is bought by resolveRole, not by a feature
+
+Nothing in the sprint implements "a new surface picks up existing content". It falls out of R2: the compositor resolves fillRole against the tree, so a surface added to the tree is matched on the next frame with no scene edit and no code that knows the moment is special.
+
+Logged as a SHORTCUT rather than a design note because it is worth knowing that the reel's best three seconds are free — and that the way to lose them is to cache the resolution.
+
+RISK-TRIGGERED, in advance — what the sprint does not cover
+One laptop, one projector, one cable. A spare USB-C→HDMI cable is the cheapest insurance in the plan and is on the pre-flight list. §9's recovery for a lost image is unplug-and-replug, which fails precisely when the cable is the fault.
+Ambient light. 500 ANSI lumens on a box under room lighting destroys I-6 entirely and cannot be fixed in the edit.
+No undo. Undo is cut from v1 and point editing is destructive. git commit calibration/surfaces.json after every wall session is the undo.
+A second OS update. One already landed between p4-regression and 2026-09-05 and invalidated every baseline in this project. Automatic updates are off and stay off; the build must read 26.6.2 (25G83) at every session.
+Day 3 code. The freeze hour is declared out loud and written into SPRINT_CHECKLIST.md. This is the rule most likely to be quietly ignored.
+What this entry did not do
+
+It changed no invariant, reopened no gate, moved no phase, renamed nothing and did not touch the ship date. SPEC.md stays at v4.0 and CHECKLIST.md's Tracking line stays at v4.0, so specVersion.test.ts is untouched — which is the check that would otherwise have fired first and hardest.
+
+The four Gate 5 conditions the projector is on for anyway — the region landing in the output, a freehand stroke with its before/after count, the HUD texture count on delete as two numbers per layer kind, and h/r/k all three seen — are scheduled into the sprint's first wall session, along with P5-F's open force-slider line. They are ticked in CHECKLIST.md only if they are actually observed, and only by the builder.
+---
+
+## 2026-09-06 — Sprint (block B1) — surfaces, roles, and one loader for `calibration/`
+
+- DID: `core/surfaces.ts` (the R1 `Surface` — id, name, role, path — a
+  marking-ordered tree, high-water-mark id generation, a tolerant
+  `canonicalizeSurface` that never throws, `describeSurfaces` as the
+  `[surfaces]` log line) and `core/roles.ts` (`resolveRole`, `knownRoles`, and
+  `logRoleMiss`, which reports each distinct miss once). In
+  `render/calibration.ts`: `readVersionedList`, generic and import-free, with
+  `canonicalizeCalibrationFile` refactored onto it, plus `SURFACES_VERSION`,
+  `readSurfaces`, `writeSurfaces` and `createSurfaceFile`. `Layer.fillRole?:
+  string`, spread so absent stays absent, canonicalized at the scene boundary
+  beside `motion`. Committed `calibration/surfaces.json`: two `panel` surfaces,
+  the second a six-point L with a reflex corner.
+- MEASURED: 825 → 869 green, 35 → 36 files, +44 all in `surfaces.test.ts`.
+  43 / 43 goldens unchanged. `typecheck` clean. Five mutations, every one
+  killing at least one test — table below.
+- BLOCKER: -
+- NEXT: B2 — mask and role fill.
+
+### `MEASURED` — mutation checks, the five new ones
+
+| mutation | tests failed |
+|---|---|
+| M31 `import type { Surface } from './surfaces'` planted in `core/scene.ts` | 2 |
+| M32 `resolveRole` sorts its result by id instead of preserving marking order | 1 |
+| M33 a role miss returns the first surface instead of an empty list and a flag | 3 |
+| M34 `writeSurfaces` deep-clones the tree through `JSON.parse(JSON.stringify(…))` | 1 |
+| M35 `createLayer` assigns `fillRole` unconditionally, so absent stops being absent | 3 (whole suite) |
+
+M31 is the one the block asked for by name. It fails with the file named in the
+message — "core/scene.ts reached into the surface tree" — and was reverted from
+a copy, with `grep -c "from './surfaces'" src/core/scene.ts` reading 0
+afterwards. M32 kills only one test because the committed room file's ids happen
+to be in marking order already; the case that catches it marks faces as
+`surface-9, surface-2, surface-5, surface-1` on purpose, so any sort at all is
+visible. M35 was run against the whole suite rather than the new file, because
+"absent stays absent" is a property the P5-F round-trip tests already hold.
+
+### DECISION — the surfaces loader is generic because both import directions are closed
+
+The block says persist through the existing `render/calibration.ts` loader, not
+a second reader and not a second format. Two tests already standing make the
+obvious build impossible:
+
+- `warp.test.ts` — "`render/calibration.ts` imports nothing at all". So that
+  file cannot import a `Surface`.
+- `warp.test.ts` — "nothing under `core/` imports the warp or its calibration"
+  (I-5, Gate 2's second condition). So `core/surfaces.ts` cannot import the
+  loader either.
+
+Neither direction is available and there is no third file in the block. So the
+envelope is **generic over the entry type** and the entry reader arrives as an
+argument: `readSurfaces(raw, canonicalizeSurface)`. `canonicalizeCalibrationFile`
+was refactored onto the same `readVersionedList`, which makes "not a second
+reader" literal — warp.json and surfaces.json are one function with two entry
+readers, and the tolerant policy (unknown version refused whole, bad entry
+skipped, duplicate id first-wins) is stated once.
+
+This is worth the paragraph because the shape looks like indirection for its own
+sake if you meet it without the two tests in front of you, and the cheap "fix"
+is to delete the parameter and add an import — which passes nothing.
+
+### The false positive the I-5 registry grep has, hit for real
+
+`parameters.test.ts` greps every source file for `/['"`]warp\.[A-Za-z]/` to
+prove no `warp.*` key was ever registered. Writing the loader's provenance in
+prose — the phrase "alongside `warp.json`", in backticks — tripped it in both
+new files. The grep is right to be crude and the fix was to drop the backticks,
+not to loosen the pattern. Noted because the next session to mention that
+filename in a comment will hit it again and the failure message says nothing
+about quoting.
+
+### What B1 could not do, and left where B3 will find it
+
+`electron/calibration.ts` still hard-codes warp.json. Nothing writes
+`surfaces.json` to disk yet — `writeSurfaces` returns the file object and stops
+there, which is the whole of "persistence" this block was scoped for. B3 is
+where the drag reaches the disk, and generalizing that store to take a filename
+is a two-line change made once rather than a second store made in a hurry.
+
+`writeSurfaces` copies the list and nothing else: the surfaces come back by
+reference, asserted by identity rather than by a timing test, because a timing
+assertion on a dev laptop is a flake waiting for the day it matters.

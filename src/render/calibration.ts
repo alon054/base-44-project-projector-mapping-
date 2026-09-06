@@ -221,29 +221,117 @@ function readViewport(raw: unknown): ViewportCalibration | null {
 }
 
 /**
- * Tolerant read. **Never throws** — a corrupt or future-version calibration
- * file must not stop the app from opening, so anything unreadable degrades to
- * "no calibration" and the caller logs it. Unknown future versions are refused
- * as a whole rather than half-interpreted, which is Phase 7's gate condition
- * ("a Phase-2 calibration file either loads or is migrated, never silently
- * misinterpreted") pointed the other way in time.
+ * The one versioned-file reader in `calibration/`. **Never throws.**
+ *
+ * Every file in that directory has the same envelope — a `version` and one
+ * named list — and this is the only code that opens it. warp.json and
+ * `surfaces.json` are two calls to this function with different entry readers,
+ * not two loaders that happen to agree today.
+ *
+ * The policy, in one place:
+ *
+ * - A corrupt or **future-version** file degrades to an empty list rather than
+ *   stopping the app. Unknown versions are refused **as a whole** rather than
+ *   half-interpreted, which is Phase 7's gate condition ("a Phase-2 file either
+ *   loads or is migrated, never silently misinterpreted") pointed the other way
+ *   in time.
+ * - An unreadable **entry** is skipped and the rest of the file survives. One
+ *   bad face is not a lost room (I-13).
+ * - Duplicate ids: first wins. Later entries are dropped rather than merged,
+ *   because a merge is a guess.
+ *
+ * Generic and structurally typed, so this module still imports **nothing at
+ * all** — see warp.test.ts. The entry reader arrives as an argument, which is
+ * also what keeps the surface tree in `core/` where SPEC.md §7 puts it while its
+ * bytes are read here (I-5: nothing under `core/` may import this file).
  */
-export function canonicalizeCalibrationFile(raw: unknown): CalibrationFile {
-  if (typeof raw !== 'object' || raw === null) return createCalibrationFile();
+export function readVersionedList<T>(
+  raw: unknown,
+  expectedVersion: number,
+  key: string,
+  readEntry: (entry: unknown) => T | null,
+  idOf: (entry: T) => string,
+): T[] {
+  if (typeof raw !== 'object' || raw === null) return [];
   const o = raw as Record<string, unknown>;
-  const version = o['version'];
-  if (version !== CALIBRATION_VERSION) return createCalibrationFile();
-  const list = o['viewports'];
-  if (!Array.isArray(list)) return createCalibrationFile();
-  const viewports: ViewportCalibration[] = [];
+  if (o['version'] !== expectedVersion) return [];
+  const list = o[key];
+  if (!Array.isArray(list)) return [];
+  const out: T[] = [];
   const seen = new Set<string>();
   for (const entry of list) {
-    const v = readViewport(entry);
-    if (!v || seen.has(v.viewportId)) continue;
-    seen.add(v.viewportId);
-    viewports.push(v);
+    const v = readEntry(entry);
+    if (!v || seen.has(idOf(v))) continue;
+    seen.add(idOf(v));
+    out.push(v);
   }
-  return { version: CALIBRATION_VERSION, viewports };
+  return out;
+}
+
+/** Tolerant read of warp.json. See `readVersionedList` for the policy. */
+export function canonicalizeCalibrationFile(raw: unknown): CalibrationFile {
+  return {
+    version: CALIBRATION_VERSION,
+    viewports: readVersionedList(
+      raw,
+      CALIBRATION_VERSION,
+      'viewports',
+      readViewport,
+      (v) => v.viewportId,
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// calibration/surfaces.json — the surface tree's bytes (I-15, SPRINT.md §3 R1).
+//
+// The room is calibration: it lives in `calibration/`, survives every scene
+// switch and is re-made when the room changes. So it is read and written here,
+// beside warp.json, through the envelope above — not by a second reader and
+// not in a second format.
+//
+// The *shape* of a surface lives in `core/surfaces.ts` and arrives as the
+// `readSurface` argument. That is not indirection for its own sake: I-5 forbids
+// anything under `core/` from importing this module, and this module imports
+// nothing, so the composition happens at the call site or nowhere.
+// ---------------------------------------------------------------------------
+
+/** Bumped when `surfaces.json`'s shape changes. Independent of the warp's version. */
+export const SURFACES_VERSION = 1;
+
+/** The on-disk envelope. Generic so this module needs no surface type. */
+export interface SurfaceFile<S> {
+  version: number;
+  surfaces: S[];
+}
+
+/**
+ * The surfaces in a stored file, in **marking order** — the array's order,
+ * preserved end to end, because it is the order faces light in.
+ */
+export function readSurfaces<S extends { id: string }>(
+  raw: unknown,
+  readSurface: (entry: unknown) => S | null,
+): S[] {
+  return readVersionedList(raw, SURFACES_VERSION, 'surfaces', readSurface, (s) => s.id);
+}
+
+/**
+ * The file to persist for a surface tree.
+ *
+ * **Called on every point drag** (B3), so it is O(n) in the number of faces and
+ * copies nothing else: the entries are the caller's own objects, and the list
+ * is copied only so a later edit to the tree cannot reach back into a file
+ * already handed to the writer. There is no serialization, no clone and no
+ * validation pass here — a drag must not pay for one.
+ */
+export function writeSurfaces<S>(surfaces: readonly S[]): SurfaceFile<S> {
+  return { version: SURFACES_VERSION, surfaces: [...surfaces] };
+}
+
+/** The empty room. What a first launch has before anything is marked. */
+export function createSurfaceFile<S>(): SurfaceFile<S> {
+  return { version: SURFACES_VERSION, surfaces: [] };
 }
 
 /**

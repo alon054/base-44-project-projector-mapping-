@@ -281,7 +281,31 @@ function canonicalizeLayer(raw: unknown, index: number): Layer {
     ...(typeof o['seed'] === 'number' ? { seed: o['seed'] } : {}),
     susceptibility: canonicalizeSusceptibility(o['susceptibility']),
     ...canonicalizeLayerMotion(o['motion'], index),
+    ...canonicalizeFillRole(o['fillRole'], index),
   });
+}
+
+/**
+ * I-15's binding, judged at the scene boundary where `motion` already is.
+ *
+ * Absent stays absent — "fills nothing" is a value, and `{ fillRole: undefined }`
+ * and `{}` serialize identically but are not deep-equal.
+ *
+ * A present-but-not-a-string value is **refused**, and that is not in tension
+ * with the free-string rule. The exception SPRINT.md §3 R2 states is about a
+ * role that matches nothing — a typo, resolved at draw time, flagged there. A
+ * `fillRole` that is a number or an object is not a typo; it is a file written
+ * by something this build does not understand, and reading it as `"3"` would be
+ * a plausible wrong answer painted onto a wall.
+ */
+function canonicalizeFillRole(raw: unknown, index: number): { fillRole?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'string' || raw === '') {
+    throw new SceneFormatError(
+      `layers[${index}].fillRole must be a non-empty string, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { fillRole: raw };
 }
 
 /**

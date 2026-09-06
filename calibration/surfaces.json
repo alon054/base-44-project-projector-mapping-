@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "surfaces": [
+    {
+      "id": "surface-1",
+      "name": "face 1",
+      "role": "panel",
+      "path": {
+        "id": "surface-1-path",
+        "closed": true,
+        "interpolation": "linear",
+        "points": [
+          { "x": 0.08, "y": 0.18 },
+          { "x": 0.44, "y": 0.12 },
+          { "x": 0.44, "y": 0.74 },
+          { "x": 0.08, "y": 0.82 }
+        ]
+      }
+    },
+    {
+      "id": "surface-2",
+      "name": "face 2",
+      "role": "panel",
+      "path": {
+        "id": "surface-2-path",
+        "closed": true,
+        "interpolation": "linear",
+        "points": [
+          { "x": 0.56, "y": 0.16 },
+          { "x": 0.92, "y": 0.22 },
+          { "x": 0.92, "y": 0.52 },
+          { "x": 0.74, "y": 0.5 },
+          { "x": 0.74, "y": 0.78 },
+          { "x": 0.56, "y": 0.8 }
+        ]
+      }
+    }
+  ]
+}

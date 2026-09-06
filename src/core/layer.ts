@@ -101,6 +101,23 @@ export interface Layer {
    * path and differ only by `phaseOffset`.
    */
   motion?: RouteMotion;
+  /**
+   * I-15. Which **role** this entity fills. Sprint block B1.
+   *
+   * A role, never an id: the entity says what kind of place it belongs on, and
+   * the room says which places are of that kind. One layer with a role matching
+   * four marked shapes draws four times, once into each. A shape marked later
+   * and given the same role is filled on the next frame with no edit here.
+   *
+   * **Optional, and absent is a stated meaning rather than a gap**: no field
+   * means "fills nothing" — the layer draws as it always has. Defaulting it to
+   * `'panel'` would silently re-target every scene ever authored the moment a
+   * room is described.
+   *
+   * A free string on purpose (SPRINT.md §3 R2), and a value matching nothing is
+   * flagged and logged, never substituted — see `core/roles.ts`.
+   */
+  fillRole?: string;
 }
 
 export const DEFAULT_TRANSFORM: NormalizedTransform = {
@@ -228,6 +245,7 @@ export interface LayerInit {
   seed?: number;
   susceptibility?: Susceptibility;
   motion?: RouteMotion;
+  fillRole?: string;
 }
 
 export function createLayer(init: LayerInit): Layer {
@@ -250,5 +268,8 @@ export function createLayer(init: LayerInit): Layer {
     // KEY — `{ motion: undefined }` and `{}` serialize the same but are not
     // deep-equal, and the round-trip check is on deep equality.
     ...(init.motion === undefined ? {} : { motion: init.motion }),
+    // Spread for the same reason `motion` is: absent must stay absent, or the
+    // deep-equal round-trip fails on a key that serializes to nothing.
+    ...(init.fillRole === undefined ? {} : { fillRole: init.fillRole }),
   };
 }
