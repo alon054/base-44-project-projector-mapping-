@@ -46,7 +46,15 @@
  */
 import { Container, Graphics } from 'pixi.js';
 import { toPixelRect, type Layer } from '../core/layer';
-import { identityModulation, type Modulation } from '../core/forces';
+import { composeAxes, identityModulation, type AxisWrite, type Modulation } from '../core/forces';
+import {
+  headingAtProgress,
+  isRouteTraversable,
+  pointAtProgress,
+  progressAt,
+  type RouteMotion,
+} from '../core/motion';
+import type { Path } from '../core/paths';
 import {
   failedLayers,
   isolateCreate,
@@ -179,6 +187,16 @@ interface Mounted {
    */
   isFill: boolean;
   /**
+   * B5 / I-18. The route this layer travels, resolved from its
+   * `motion.travelRole` against the room at mount, and re-pointed when the
+   * route's own surface is reshaped. `null` for a layer that declared no
+   * route, a fill layer (a fill is placed by its face), or a role that matched
+   * nothing — the last of which is also in `misses`.
+   */
+  route: Path | null;
+  /** The surface `route` came from, so a point drag on it can re-point `route`. */
+  routeSurfaceId: string | null;
+  /**
    * B4 / I-16. Whether this layer's `sequence` block is the one showing at the
    * last frame's time. Always `true` for a layer in no sequence — the implicit
    * `parallel` root and an explicit `parallel` group behave identically, which
@@ -239,7 +257,14 @@ function tintFromAxes(m: Modulation): number {
  */
 export function surfacesShapeKey(tree: SurfaceTree): string {
   return tree
-    .map((s) => `${s.id}\u0000${s.role}\u0000${isMaskable(s.path) ? '1' : '0'}`)
+    .map(
+      (s) =>
+        `${s.id}\u0000${s.role}\u0000${isMaskable(s.path) ? '1' : '0'}` +
+        // B5: a route crossing the two-point threshold gains or loses its
+        // travellers, exactly as a face crossing `MASK_MIN_POINTS` gains or
+        // loses its fill. Same reasoning, fourth field.
+        `${isRouteTraversable(s.path) ? '1' : '0'}`,
+    )
     .join('\u0001');
 }
 
@@ -371,7 +396,14 @@ export class Compositor {
     }
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
-      if (!mount?.isFill) continue;
+      if (!mount) continue;
+      // B5. A point of the ROUTE dragged: the traveller follows the new path on
+      // the next frame, with no rebuild — the same identity test the masks use.
+      if (mount.routeSurfaceId !== null) {
+        const surface = tree.find((s) => s.id === mount.routeSurfaceId);
+        if (surface && surface.path !== mount.route) mount.route = surface.path;
+      }
+      if (!mount.isFill) continue;
       for (const instance of mount.fills) {
         const surface = tree.find((s) => s.id === instance.surface.id);
         // Identity, not deep equality: `reconcileSurfaces` hands back the SAME
@@ -595,6 +627,7 @@ export class Compositor {
       applied: this.appliedFor(entry.layer, IDENTITY_MODULATION),
       fills: stack ? stack.instances : [],
       isFill: stack !== null,
+      ...this.resolveTravel(entry.layer, stack !== null),
       // Every layer starts ACTIVE and the first `update` decides otherwise, so
       // a sequence child that is not showing is hidden on the frame it is
       // judged, and a layer in no sequence is never touched at all.
@@ -608,17 +641,90 @@ export class Compositor {
   }
 
   /**
+   * B5 / I-18 / D21. Which path this layer travels, decided at mount.
+   *
+   * By ROLE (I-15): `resolveRole(travelRole, room)`, and the FIRST surface in
+   * marking order carrying it is the route — one traveller, one path; a role
+   * on several surfaces is not an error, the first was marked first. A fill
+   * layer never travels: it is placed by its face, and a route under it would
+   * drag the content out of the mask.
+   *
+   * Every failure is I-13's flag path: no route (`''`) is not flagged at all,
+   * because a default cannot be a defect; a role matching nothing, or matching
+   * a path too short to travel, is recorded in `misses` and the layer draws at
+   * its base transform, motionless. A flagged entity is still an entity.
+   */
+  private resolveTravel(
+    layer: Layer,
+    isFill: boolean,
+  ): { route: Path | null; routeSurfaceId: string | null } {
+    const none = { route: null, routeSurfaceId: null };
+    const role = layer.motion?.travelRole ?? '';
+    if (role === '' || isFill) return none;
+    const resolution = resolveRole(role, this.surfaces);
+    logRoleMiss(resolution);
+    if (resolution.unmatched) {
+      this.misses.push({ layerId: layer.id, layerName: layer.name, role, reason: resolution.message });
+      return none;
+    }
+    const surface = resolution.surfaces[0] as Surface;
+    if (!isRouteTraversable(surface.path)) {
+      this.misses.push({
+        layerId: layer.id,
+        layerName: layer.name,
+        role,
+        reason:
+          `route ${surface.id} ("${surface.name}") has ${surface.path.points.length} point(s) ` +
+          'and cannot be travelled — the entity holds at its base transform',
+      });
+      return none;
+    }
+    return { route: surface.path, routeSurfaceId: surface.id };
+  }
+
+  /**
+   * Motion, resolved INTO THE AXIS VOCABULARY and nowhere else (B5's rule).
+   *
+   * The route point minus the stored centre is a contribution to `offsetX` /
+   * `offsetY`, so the entity lands on the route and the forces still sum on
+   * top — a wind leans a travelling object. With `orient` on, the heading is
+   * an OVERRIDE of `rotate`: it replaces the authored rotation and the forces
+   * still sum on top of it (`composeAxes`). With `orient` off, motion
+   * contributes nothing to rotation, written as a zero contribution so the
+   * stage always says what it did.
+   *
+   * Nothing here writes `layer.transform`. A modulated position is a fact
+   * about this frame, never an edit to the scene (I-12), and a stored transform
+   * that motion overwrote would be a scene that could not be reloaded.
+   */
+  private travelWrites(layer: Layer, route: Path, motion: RouteMotion, timeSeconds: number): AxisWrite[] {
+    const progress = progressAt(timeSeconds, motion);
+    const p = pointAtProgress(route, progress);
+    return [
+      { axis: 'offsetX', value: p.x - layer.transform.x, mode: 'contribute' },
+      { axis: 'offsetY', value: p.y - layer.transform.y, mode: 'contribute' },
+      motion.orient
+        ? { axis: 'rotate', value: headingAtProgress(route, progress), mode: 'override' }
+        : { axis: 'rotate', value: 0, mode: 'contribute' },
+    ];
+  }
+
+  /**
    * I-1 and I-4 meeting. The stored transform is normalized and the modulation
    * is normalized; both become pixels here and nowhere else, and neither is
    * ever written back into the layer — a modulated position is a fact about
    * this frame, not an edit to the scene.
+   *
+   * `rotateOverride` (B5) is in TURNS and replaces the stored rotation as the
+   * base the modulation's `rotate` is added to. `null` — every layer before
+   * B5, and every layer with `orient` off — is the stored rotation.
    */
-  private appliedFor(layer: Layer, m: Modulation): AppliedModulation {
+  private appliedFor(layer: Layer, m: Modulation, rotateOverride: number | null = null): AppliedModulation {
     const rect = toPixelRect(layer.transform, this.width, this.height);
     return {
       x: rect.cx + m.offsetX * this.width,
       y: rect.cy + m.offsetY * this.height,
-      rotation: rect.rotation + m.rotate * TAU,
+      rotation: (rotateOverride === null ? rect.rotation : rotateOverride * TAU) + m.rotate * TAU,
       scale: m.scale,
       alpha: layer.opacity * m.opacity,
       tint: tintFromAxes(m),
@@ -889,9 +995,26 @@ export class Compositor {
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
       if (!mount) continue;
-      const m = frame.forces.modulationFor(entry.layer);
-      if (mount.isFill) this.writeFillModulation(mount, entry.layer, m);
-      else this.writeModulation(mount, this.appliedFor(entry.layer, m));
+      const forces = frame.forces.modulationFor(entry.layer);
+      if (mount.isFill) {
+        this.writeFillModulation(mount, entry.layer, forces);
+        continue;
+      }
+      // B5 / I-18. `base → motion → forces`: the route's contribution goes in
+      // under the forces, and the heading (if `orient`) replaces the base
+      // rotation. A layer with no route takes exactly the pre-B5 path.
+      if (mount.route !== null && entry.layer.motion !== undefined) {
+        const composed = composeAxes(
+          forces,
+          this.travelWrites(entry.layer, mount.route, entry.layer.motion, frame.timeSeconds),
+        );
+        this.writeModulation(
+          mount,
+          this.appliedFor(entry.layer, composed.modulation, composed.rotateOverride),
+        );
+        continue;
+      }
+      this.writeModulation(mount, this.appliedFor(entry.layer, forces));
     }
   }
 

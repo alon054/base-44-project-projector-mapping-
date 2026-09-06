@@ -126,6 +126,77 @@ export function isIdentityModulation(m: Modulation): boolean {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Writing into the axis vocabulary from outside the bus (B5, D21)            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The axes that accept an OVERRIDE — a value that replaces the entity's base
+ * rather than combining with it.
+ *
+ * Only `rotate`, and the reason is arithmetic rather than taste: an axis that
+ * SUMS cannot overwrite. Route motion with `orient` on wants the content to
+ * face its heading — not its authored rotation plus its heading — and the only
+ * way to say that through an axis that adds is to give the axis a second
+ * input. Position needs no override: motion's offset is `route point − base`,
+ * a genuine contribution that lands on the route by construction.
+ */
+export const OVERRIDABLE_AXES = ['rotate'] as const satisfies readonly ForceAxis[];
+export type OverridableAxis = (typeof OVERRIDABLE_AXES)[number];
+
+/** One stage's write into one axis. */
+export interface AxisWrite {
+  axis: ForceAxis;
+  /** In the axis's units — normalized offset, turns, a factor. */
+  value: number;
+  /** `contribute` combines by the axis rule; `override` replaces the base (rotate only). */
+  mode: 'contribute' | 'override';
+}
+
+/** What the renderer applies: the combined axes, plus the one base replacement. */
+export interface ComposedAxes {
+  modulation: Modulation;
+  /** Turns. `null` when nothing overrode the base rotation. */
+  rotateOverride: number | null;
+}
+
+/**
+ * Composition order `base → motion → forces`, as one function.
+ *
+ * `motion` writes go in first and `forces` — already evaluated by the bus,
+ * susceptibility and depth applied — combine on top, each axis by its own
+ * rule. For the summed axes the order is arithmetically moot; it is stated
+ * anyway because the OVERRIDE is not: an override replaces the BASE and the
+ * forces still sum on top of it, so with `orient` on and a wind blowing the
+ * drawn rotation is `heading + wind`, never `base + heading + wind`. That is
+ * the case that passes a naive test and fails the first time an entity has a
+ * non-zero authored rotation.
+ *
+ * Every axis is clamped to its spec on the way out, exactly as the bus clamps
+ * its own result — data written from outside the bus cannot push a nonsense
+ * value into the renderer either.
+ *
+ * An override on an axis that does not accept one is a programming error, not
+ * data, and throws.
+ */
+export function composeAxes(forces: Modulation, motion: readonly AxisWrite[]): ComposedAxes {
+  const acc = identityModulation();
+  let rotateOverride: number | null = null;
+  for (const w of motion) {
+    if (!Number.isFinite(w.value)) continue;
+    if (w.mode === 'override') {
+      if (!(OVERRIDABLE_AXES as readonly string[]).includes(w.axis)) {
+        throw new Error(`axis "${w.axis}" does not accept an override (only ${OVERRIDABLE_AXES.join(', ')})`);
+      }
+      rotateOverride = w.value;
+      continue;
+    }
+    acc[w.axis] = combine(w.axis, acc[w.axis], w.value);
+  }
+  for (const axis of FORCE_AXES) acc[axis] = clampAxis(axis, combine(axis, acc[axis], forces[axis]));
+  return { modulation: acc, rotateOverride };
+}
+
+/* -------------------------------------------------------------------------- */
 /* The force definition                                                       */
 /* -------------------------------------------------------------------------- */
 

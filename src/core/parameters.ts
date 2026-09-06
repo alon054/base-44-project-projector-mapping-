@@ -29,6 +29,7 @@ import {
   DEFAULT_ROUTE_MOTION,
   MOTION_PERIOD_MAX_SECONDS,
   MOTION_PERIOD_MIN_SECONDS,
+  MOTION_TRAVEL_ROLE_MAX_LENGTH,
   ROUTE_END_BEHAVIORS,
   isRouteEndBehavior,
   type RouteMotion,
@@ -710,6 +711,22 @@ export function defineMotionParameters(
       step: 0.001,
       get: () => read().phaseOffset,
       set: (v: number) => write({ phaseOffset: v }),
+    },
+    /**
+     * B5. Which route, by role (I-15). A `text` kind for `fillRole`'s reason:
+     * the route may be named before any face carries the role, and an enum
+     * built from the room would make the content tree ask the surface tree
+     * what is legal. `''` is "no route" and is the default, so a layer that
+     * declares no motion reads as travelling nothing.
+     */
+    {
+      key: `entity.${entityId}.motion.travelRole`,
+      label: 'Motion — travel role',
+      kind: 'text',
+      maxLength: MOTION_TRAVEL_ROLE_MAX_LENGTH,
+      default: DEFAULT_ROUTE_MOTION.travelRole,
+      get: () => read().travelRole,
+      set: (v: string) => write({ travelRole: v }),
     },
   ];
 }

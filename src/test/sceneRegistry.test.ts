@@ -93,6 +93,8 @@ describe('the registry is bound to every parameter the panel draws', () => {
       'entity.sea.motion.orient',
       'entity.sea.motion.periodSeconds',
       'entity.sea.motion.phaseOffset',
+      // B5. The fifth key; the panel draws it by existing, as a text field.
+      'entity.sea.motion.travelRole',
     ]);
     expect(groups.susceptibility).toHaveLength(FORCE_DEFINITIONS.length);
   });
@@ -159,7 +161,7 @@ describe('every control writes through the registry, and lands in scene state', 
   });
 });
 
-describe('the motion panel — I-18, the four fields P5-C registered', () => {
+describe('the motion panel — I-18, the four fields P5-C registered, plus B5\'s travelRole', () => {
   it('reports the stated defaults for a layer that has declared no motion', () => {
     const { registry, read } = bind(waterScene());
     expect(read().layers.find((l) => l.id === 'sea')!.motion).toBeUndefined();
@@ -184,17 +186,21 @@ describe('the motion panel — I-18, the four fields P5-C registered', () => {
     });
   });
 
-  it('each of the four fields writes independently', () => {
+  it('each of the five fields writes independently', () => {
     const { registry, read } = bind(waterScene());
     registry.write('entity.sea.motion.periodSeconds', 8);
     registry.write('entity.sea.motion.orient', true);
     registry.write('entity.sea.motion.endBehavior', 'pingpong');
     registry.write('entity.sea.motion.phaseOffset', 0.5);
+    registry.write('entity.sea.motion.travelRole', ' route ');
     expect(read().layers.find((l) => l.id === 'sea')!.motion).toEqual({
       periodSeconds: 8,
       orient: true,
       endBehavior: 'pingpong',
       phaseOffset: 0.5,
+      // Trimmed by the text kind, like `fillRole`: a trailing space is a route
+      // that silently never matches.
+      travelRole: 'route',
     });
   });
 
@@ -307,6 +313,7 @@ describe('a scene edited only through the panel round-trips deep-equal', () => {
       orient: true,
       endBehavior: 'pingpong',
       phaseOffset: 0.25,
+      travelRole: '',
     });
     expect(back.layers.find((l) => l.id === 'lamp')!.content['drops']).toBe(400);
   });

@@ -93,7 +93,11 @@ export { pointAtProgress, progressAlong };
 export const ROUTE_END_BEHAVIORS = ['loop', 'pingpong', 'hold'] as const;
 export type RouteEndBehavior = (typeof ROUTE_END_BEHAVIORS)[number];
 
-/** I-18, field for field. Stored on the entity, never on the path. */
+/**
+ * I-18, field for field, plus the ONE field sprint block B5 added.
+ *
+ * Stored on the entity, never on the path.
+ */
 export interface RouteMotion {
   /** > 0. One full traversal of the route, in seconds. */
   periodSeconds: number;
@@ -102,7 +106,26 @@ export interface RouteMotion {
   endBehavior: RouteEndBehavior;
   /** [0,1). Two entities on one route differ only in this. */
   phaseOffset: number;
+  /**
+   * B5. WHICH route: the role of the surface whose path this entity travels
+   * (I-15 — by role, never by surface id; I-17 — a route is an open path, and a
+   * surface carrying `role: 'route'` is how one is stored in `calibration/`).
+   *
+   * `''` means "no route declared", which is what every layer had before this
+   * field existed: the entity draws at its base transform, motionless, and is
+   * NOT flagged — a default cannot be a defect. A non-empty role matching no
+   * surface, or matching one too short to travel, is I-13's flag path: the
+   * layer draws at its base transform, motionless, and `roleMisses()` says why.
+   *
+   * A free string like `fillRole`, for the same reason: the role is typed by a
+   * person in a dark room, and a typo lights nothing rather than ending the
+   * session. One token, never split — see `roleTokens`.
+   */
+  travelRole: string;
 }
+
+/** A guard against a paste, not a validation rule — see `TextParameterDef`. */
+export const MOTION_TRAVEL_ROLE_MAX_LENGTH = 64;
 
 /**
  * The control range for `periodSeconds` in the registry (I-8).
@@ -128,6 +151,7 @@ export const DEFAULT_ROUTE_MOTION: RouteMotion = {
   orient: false,
   endBehavior: 'loop',
   phaseOffset: 0,
+  travelRole: '',
 };
 
 export class MotionFormatError extends Error {
@@ -193,6 +217,20 @@ export function canonicalizeRouteMotion(raw: unknown): RouteMotion {
     phaseOffset = wrapTurn(rawOffset);
   }
 
+  // A present-but-not-a-string role is a file this build does not understand,
+  // refused for `canonicalizeFillRole`'s reason. `''` and absent both mean "no
+  // route", and are the same stored value so a defaulted record is one record.
+  let travelRole = DEFAULT_ROUTE_MOTION.travelRole;
+  const rawRole = o['travelRole'];
+  if (rawRole !== undefined && rawRole !== null) {
+    if (typeof rawRole !== 'string') {
+      throw new MotionFormatError(
+        `motion.travelRole must be a string, got ${JSON.stringify(rawRole)}`,
+      );
+    }
+    travelRole = rawRole;
+  }
+
   return {
     periodSeconds,
     // Only an explicit `true` orients, exactly as `canonicalizePath` treats
@@ -201,7 +239,13 @@ export function canonicalizeRouteMotion(raw: unknown): RouteMotion {
     orient: o['orient'] === true,
     endBehavior,
     phaseOffset,
+    travelRole,
   };
+}
+
+/** Whether a path can be travelled — `assertRouteTraversable` as a question. */
+export function isRouteTraversable(path: Path): boolean {
+  return path.points.length >= 2;
 }
 
 /**

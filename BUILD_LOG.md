@@ -7025,3 +7025,48 @@ as it excludes `fill-`, so it is still 43.
 structural removal. Two reads in this block (`rootGroup`, `GroupPanel`) are
 written as `flatMap` rather than added to the test's named exceptions, so the
 test's claim stays exactly what it was.
+
+## 2026-09-07 — Sprint (block B5) — route motion on the render path
+- DID: `RouteMotion.travelRole` (one field, `'loop'` untouched); `composeAxes`
+  and the `rotate` override in `core/forces.ts`; the compositor's travel stage
+  (route resolved by role at mount, re-pointed on reshape, offsets contributed
+  and heading overridden per frame); `entity.<id>.motion.travelRole`; three
+  goldens with runner assertions.
+- MEASURED: npm test 1065 → 1089 (42 files). test:render 49 → 52; 43 pre-fill
+  byte-identical; `motion-default` hash-equal to `stack`. 10 mutations, 10
+  caught, one only after its test was strengthened.
+- BLOCKER: -
+- NEXT: W2 — the builder: set, roles per face, the sequence timed, one M1 run,
+  the backup take.
+
+**Motion is an axis writer, not a transform writer.** `travelWrites` returns
+three `AxisWrite`s — the route point minus the stored centre into `offsetX` /
+`offsetY` as contributions, and the heading into `rotate` as an OVERRIDE when
+`orient` is on. `composeAxes` puts them under the bus's already-evaluated
+modulation, so a wind leans a travelling object without either knowing about
+the other, and the compositor is grepped for never touching `layer.transform`.
+The override is the part that passes a naive test and fails on a wall: an
+axis that sums cannot overwrite, so an oriented entity with a non-zero
+authored rotation would have faced `base + heading`. The test states base
+0.25, heading 0.25, force 0.1, and asserts 0.35 turns and not 0.6.
+
+**A fill never travels.** Its content is placed by its face inside a mask; a
+route under it would drag the light out of the box. `resolveTravel` returns
+no route for a fill and does not flag one either — the first version of the
+test could not see that (the mutation "a fill resolves a route too" survived
+with 0 failures because the fill's frame path never reads `mount.route`), so
+the test now gives the fill an unmatched role and requires NO miss. Recorded
+because a mutation that survives is the useful kind.
+
+**The route is calibration.** A surface with an open path and `role: 'route'`
+in `calibration/surfaces.json`, resolved through `resolveRole` like a fill's
+face — I-15's binding by role for a path instead of a boundary, which is I-17's
+"one path primitive, three uses" arriving on the render path. Dragging a point
+of the route moves the traveller on the next frame with no rebuild, by the same
+path-identity test `setSurfaces` uses for masks. `surfacesShapeKey` gained a
+fourth field, traversability, for `isMaskable`'s reason: a route crossing two
+points gains or loses its travellers.
+
+**What the wall still owes:** travel, orient, and the wind slider leaning a
+travelling object, seen on a box. The route golden shows it at t = 3 and the
+runner shows it elsewhere at t = 0; neither is a wall.

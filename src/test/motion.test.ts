@@ -50,7 +50,7 @@ const motion = (init?: Partial<RouteMotion>): RouteMotion => createRouteMotion(i
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('I-18 — `RouteMotion` is exactly the four fields the spec states', () => {
+describe('I-18 — `RouteMotion` is exactly the four fields the spec states, plus B5\'s `travelRole`', () => {
   it('has the three end behaviours, in the spec\'s order', () => {
     expect(ROUTE_END_BEHAVIORS).toEqual(['loop', 'pingpong', 'hold']);
   });
@@ -62,19 +62,29 @@ describe('I-18 — `RouteMotion` is exactly the four fields the spec states', ()
     }
   });
 
-  it('a default record carries all four fields with stated values, never undefined', () => {
+  it('a default record carries all five fields with stated values, never undefined', () => {
     expect(DEFAULT_ROUTE_MOTION).toEqual({
       periodSeconds: GLOBAL_LOOP_SECONDS,
       orient: false,
       endBehavior: 'loop',
       phaseOffset: 0,
+      // B5. `''` is "no route declared" — what every layer had before the field.
+      travelRole: '',
     });
     expect(Object.keys(createRouteMotion()).sort()).toEqual([
       'endBehavior',
       'orient',
       'periodSeconds',
       'phaseOffset',
+      'travelRole',
     ]);
+  });
+
+  it('B5: travelRole is a free string; a non-string is refused naming the value', () => {
+    expect(canonicalizeRouteMotion({ travelRole: 'route' }).travelRole).toBe('route');
+    expect(canonicalizeRouteMotion({ travelRole: null }).travelRole).toBe('');
+    expect(() => canonicalizeRouteMotion({ travelRole: 3 })).toThrow(/travelRole.*3/);
+    expect(() => canonicalizeRouteMotion({ travelRole: {} })).toThrow(MotionFormatError);
   });
 
   it('a layer with no motion canonicalizes to the defaults, not to undefined', () => {
@@ -85,11 +95,12 @@ describe('I-18 — `RouteMotion` is exactly the four fields the spec states', ()
     }
   });
 
-  it('round-trips deep-equal, all four fields', () => {
+  it('round-trips deep-equal, all five fields', () => {
     for (const m of [
       createRouteMotion(),
       motion({ periodSeconds: 12.5, orient: true, endBehavior: 'pingpong', phaseOffset: 0.75 }),
       motion({ endBehavior: 'hold' }),
+      motion({ travelRole: 'route', orient: true }),
     ]) {
       expect(deserializeRouteMotion(serializeRouteMotion(m))).toEqual(m);
     }
@@ -499,7 +510,7 @@ describe('clamp what drifts, refuse what is wrong', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('I-8 — the four keys are on the entity, not on the path', () => {
+describe('I-8 — the five keys are on the entity, not on the path', () => {
   const build = () => {
     let state = createRouteMotion();
     const registry = new ParameterRegistry();
@@ -515,13 +526,14 @@ describe('I-8 — the four keys are on the entity, not on the path', () => {
     return { registry, read: () => state };
   };
 
-  it('registers exactly the four keys I-18 names, under entity.<id>.motion.*', () => {
+  it('registers exactly the four keys I-18 names plus B5\'s travelRole, under entity.<id>.motion.*', () => {
     const { registry } = build();
     expect(registry.keys('entity.firefly.motion')).toEqual([
       'entity.firefly.motion.endBehavior',
       'entity.firefly.motion.orient',
       'entity.firefly.motion.periodSeconds',
       'entity.firefly.motion.phaseOffset',
+      'entity.firefly.motion.travelRole',
     ]);
   });
 
@@ -542,7 +554,8 @@ describe('I-8 — the four keys are on the entity, not on the path', () => {
     expect(() =>
       registry.registerAll(defineMotionParameters('b', () => b, () => {})),
     ).not.toThrow();
-    expect(registry.size).toBe(8);
+    // Five keys per entity since B5 (`travelRole`), two entities.
+    expect(registry.size).toBe(10);
   });
 
   it('indexes the record rather than copying it — a write lands in state', () => {
@@ -556,11 +569,13 @@ describe('I-8 — the four keys are on the entity, not on the path', () => {
       orient: true,
       endBehavior: 'pingpong',
       phaseOffset: 0.4,
+      travelRole: '',
     });
     expect(registry.snapshot('entity.firefly.motion')).toEqual({
       'entity.firefly.motion.endBehavior': 'pingpong',
       'entity.firefly.motion.orient': true,
       'entity.firefly.motion.periodSeconds': 12,
+      'entity.firefly.motion.travelRole': '',
       'entity.firefly.motion.phaseOffset': 0.4,
     });
   });

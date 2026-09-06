@@ -52,6 +52,7 @@ import { BUNDLED_ASSETS, createBundledLibrary } from '../providers/bundled/manif
 import { ensureLottie } from '../providers/bundled/LottieView';
 import { Compositor } from '../render/compositor';
 import { createPath } from '../core/paths';
+import { DEFAULT_ROUTE_MOTION, createRouteMotion } from '../core/motion';
 import { createSurface, type SurfaceTree } from '../core/surfaces';
 import { readRenderTargets, type RenderTargetCensus } from '../debug/gpu';
 import { WarpStage } from '../render/warp';
@@ -707,7 +708,76 @@ function cases(): GoldenCase[] {
     { name: 'group-sequence-t6', scene: sequenceScene(), timeSeconds: 6 },
     { name: 'group-sequence-t9.5', scene: sequenceScene(), timeSeconds: 9.5 },
     { name: 'group-sequence-t12', scene: sequenceScene(), timeSeconds: 12 },
+
+    // -----------------------------------------------------------------------
+    // B5 — I-18, D21. Route motion on the render path.
+    //
+    // `motion-default` is the `stack` scene with a DEFAULTED motion record on
+    // every layer (`travelRole: ''`). It MUST hash identical to `stack`, and
+    // the runner asserts it: a declared-but-empty motion is inert.
+    //
+    // `route-travel` is one rect on an open two-segment route (a surface with
+    // `role: 'route'`), period 8 s, `orient` on, drawn at t = 3 — progress
+    // 0.375, three quarters along the first segment, turned to face down the
+    // slope. `route-travel-t0` is the same scene at t = 0, parked at the
+    // route's first point; the runner asserts the two frames DIFFER, which is
+    // the render-level statement that position is a function of the clock.
+    // -----------------------------------------------------------------------
+    { name: 'motion-default', scene: motionDefaulted(stack()) },
+    { name: 'route-travel', scene: routeScene(), surfaces: [GOLDEN_ROUTE], timeSeconds: 3 },
+    { name: 'route-travel-t0', scene: routeScene(), surfaces: [GOLDEN_ROUTE], timeSeconds: 0 },
   ];
+}
+
+/** `scene` with `DEFAULT_ROUTE_MOTION` stated on every layer. Must change nothing. */
+function motionDefaulted(scene: Scene): Scene {
+  return {
+    ...scene,
+    id: `${scene.id}-motion-default`,
+    layers: scene.layers.map((l) => ({ ...l, motion: { ...DEFAULT_ROUTE_MOTION } })),
+  };
+}
+
+/**
+ * The harness's route: OPEN, two segments of equal length, a peak in the
+ * middle. A literal for `GOLDEN_FACE_L`'s reason — the builder's room is not
+ * a fixture.
+ */
+const GOLDEN_ROUTE = createSurface({
+  id: 'route-1',
+  name: 'route 1',
+  role: 'route',
+  path: createPath({
+    id: 'route-1-path',
+    closed: false,
+    points: [
+      { x: 0.1, y: 0.8 },
+      { x: 0.5, y: 0.2 },
+      { x: 0.9, y: 0.8 },
+    ],
+  }),
+});
+
+/** One small rect that travels `GOLDEN_ROUTE`, facing its heading. */
+function routeScene(): Scene {
+  return createScene({
+    id: 'golden-route',
+    seed: 0x5eed,
+    background: 0x000000,
+    layers: [
+      createLayer({
+        id: 'walker',
+        providerId: PROVIDER_ID,
+        content: { kind: 'rect', tint: 0xffc040 },
+        // A base position OFF the route on purpose: if motion failed to move
+        // the layer it would sit here, at the bottom-left, and both frames
+        // would hash equal — which the runner refuses.
+        transform: { x: 0.2, y: 0.9, width: 0.14, height: 0.08, rotation: 0 },
+        zOrder: 0,
+        motion: createRouteMotion({ periodSeconds: 8, orient: true, travelRole: 'route' }),
+      }),
+    ],
+  });
 }
 
 /** `scene` with every layer in one explicit `parallel` group. Must change nothing. */

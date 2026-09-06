@@ -800,5 +800,50 @@
       32
     ],
     "meanLuminance": 0.174225
+  },
+  "motion-default": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ba2e7858",
+    "coverage": 0.465277,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.109309
+  },
+  "route-travel": {
+    "width": 1280,
+    "height": 720,
+    "hash": "c13b9815",
+    "coverage": 0.011324,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.008711
+  },
+  "route-travel-t0": {
+    "width": 1280,
+    "height": 720,
+    "hash": "ddeb1815",
+    "coverage": 0.011324,
+    "failures": [],
+    "layoutDelta": null,
+    "expectLayoutMismatch": false,
+    "centrePixel": [
+      0,
+      0,
+      0
+    ],
+    "meanLuminance": 0.008711
   }
 }

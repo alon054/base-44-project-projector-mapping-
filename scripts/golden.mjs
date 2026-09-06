@@ -584,10 +584,48 @@ app.whenReady().then(async () => {
     process.stdout.write(`I-16: 5 + 3 + 2 sequence shows one block per clock time (${seqSeen.join(', ')})\n`);
   }
 
-  // The 43 cases that predate B2, by name and by hash. B4's `group-` cases are
-  // excluded the same way B2's `fill-` cases are: the set is "what existed
-  // before the compositor learned each new trick", and it must not grow.
-  const preFill = Object.keys(expected).filter((n) => !n.startsWith('fill-') && !n.startsWith('group-'));
+  // -------------------------------------------------------------------------
+  // B5 — I-18, D21, asserted in the runner rather than only stored.
+  //
+  // A defaulted motion record must be BYTE-IDENTICAL to no motion at all, and
+  // a travelling entity must be somewhere else at a different clock time.
+  // -------------------------------------------------------------------------
+  const motionDefault = observed['motion-default'];
+  if (stackPlain && motionDefault) {
+    if (motionDefault.hash !== stackPlain.hash) {
+      problems.push(
+        `I-18: a defaulted motion record is NOT byte-identical to no motion — stack ${stackPlain.hash}, ` +
+          `motion-default ${motionDefault.hash}. travelRole '' must be inert.`,
+      );
+    } else {
+      process.stdout.write(`I-18: a defaulted motion record is byte-identical to no motion (${stackPlain.hash})\n`);
+    }
+  } else {
+    problems.push('I-18: the motion-default case is missing from the harness');
+  }
+  const travel3 = observed['route-travel'];
+  const travel0 = observed['route-travel-t0'];
+  if (travel3 && travel0) {
+    if (travel3.hash === travel0.hash) {
+      problems.push(
+        `I-18: route-travel at t = 3 and t = 0 hash IDENTICAL (${travel3.hash}). The entity is not ` +
+          'travelling — motion is not reaching the render path.',
+      );
+    } else {
+      process.stdout.write(
+        `I-18: the traveller is elsewhere at t = 3 than at t = 0 (${travel3.hash} vs ${travel0.hash})\n`,
+      );
+    }
+  } else {
+    problems.push('I-18: the route-travel cases are missing from the harness');
+  }
+
+  // The 43 cases that predate B2, by name and by hash. B4's `group-` and B5's
+  // `motion-` / `route-` cases are excluded the same way B2's `fill-` cases
+  // are: the set is "what existed before the compositor learned each new
+  // trick", and it must not grow.
+  const PRE_FILL_PREFIXES = ['fill-', 'group-', 'motion-', 'route-'];
+  const preFill = Object.keys(expected).filter((n) => !PRE_FILL_PREFIXES.some((p) => n.startsWith(p)));
   if (preFill.length !== PRE_FILL_CASES) {
     problems.push(
       `B2: ${preFill.length} pre-fill goldens are committed, expected ${PRE_FILL_CASES}. ` +
