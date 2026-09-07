@@ -60,9 +60,10 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
   if (surfaces.length === 0) {
     return (
       <p style={{ margin: 0, color: '#8b939b', fontSize: 12 }}>
-        No faces marked. Switch the preview&apos;s tool to <code>path</code>, click the corners of a
-        face, and press Enter — or click the first point again to close it. Either one banks the
-        face and writes <code>surfaces.json</code>.
+        No faces marked. Pick <strong>Rect</strong>, <strong>Triangle</strong> or{' '}
+        <strong>Ellipse</strong> under the preview and drag on empty space; or <strong>Pen</strong>:
+        click the corners and press Enter. Either banks the face and writes{' '}
+        <code>surfaces.json</code>.
       </p>
     );
   }
@@ -133,7 +134,9 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
 
 const rowStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 90px 96px 22px',
+  // The role field is wide enough for two words (`panel f1`); the status
+  // column sizes to its text so 'unfilled' is never clipped to 'unfille'.
+  gridTemplateColumns: 'minmax(80px, 1fr) 120px auto 22px',
   alignItems: 'center',
   gap: 6,
 };

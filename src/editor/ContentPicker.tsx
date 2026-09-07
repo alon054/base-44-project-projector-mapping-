@@ -1,29 +1,33 @@
 /**
- * The content picker with a picture of each choice.
+ * The content picker: a picture of every choice, and the current one beside
+ * the dropdown.
  *
  * The dropdown stays — it is the accessible control and the one the existing
- * tests know — and a strip of thumbnails sits under it so a builder can see
- * what "White puff (25f)" IS before putting it on a wall. Both fire the same
- * structural edit (`onPick` → `applyContentChoice` in the caller); this file
- * writes no parameter and knows nothing about the registry.
+ * tests know — and the grid under it is open by default: a builder choosing
+ * what goes on a wall wants to see "White puff (25f)" before putting it there,
+ * not after. Both fire the same structural edit (`onPick` →
+ * `applyContentChoice` in the caller); this file writes no parameter and knows
+ * nothing about the registry.
  *
- * WHAT A THUMBNAIL IS, PER KIND — and why no thumbnail is ever rendered:
+ * WHAT A THUMBNAIL IS, PER KIND:
  *
- *  - still: the image itself, `object-fit: contain`.
+ *  - procedural: the kind itself, drawn once offscreen (`thumbnails.ts`) at
+ *    the golden instant; a kind that cannot be drawn (`fault`) shows its name.
+ *  - still: the image, `object-fit: contain`.
  *  - spritesheet: the sheet as a CSS background sized to `columns × rows`, so
  *    the tile shows FRAME 0 and not the whole grid.
  *  - video: the poster (I-7's preview rung — no `<video>` is constructed here,
  *    exactly as in the preview canvas).
- *  - lottie: a label. Rendering one for a thumbnail would spin up a player per
- *    tile; the picker is not the place to spend that.
- *  - procedural: a label on a swatch. There is no file to show.
+ *  - lottie: a label. Rendering one for a tile would spin up a player per tile.
  *
- * Every image URL is one the CSP already allows: a bundled `?url` import, or a
- * `library://` file main serves from disk. Nothing here reaches the network.
+ * Every image URL is one the CSP already allows: a bundled `?url` import, a
+ * `library://` file main serves from disk, or a `data:` URL this window drew.
+ * Nothing here reaches the network.
  */
 import { useState } from 'react';
 import type { AssetLibrary, BundledAsset } from '../core/library';
 import type { ContentChoice } from './controls';
+import { useProceduralThumb } from './thumbnails';
 
 interface Props {
   choices: readonly ContentChoice[];
@@ -35,9 +39,12 @@ interface Props {
   providerId: string;
   id?: string;
   ariaLabel?: string;
-  /** Start with the strip open. Off by default in dense panels. */
+  /** Start with the grid open. On by default — the picture IS the picker. */
   browse?: boolean;
 }
+
+/** Downloaded assets are the third group, after `contentChoices`' two. */
+const DOWNLOADED_GROUP = 'Downloaded (Library)';
 
 export function ContentPicker({
   choices,
@@ -47,14 +54,22 @@ export function ContentPicker({
   providerId,
   id,
   ariaLabel,
-  browse = false,
+  browse = true,
 }: Props): React.JSX.Element {
   const [open, setOpen] = useState(browse);
-  const groups = [...new Set(choices.map((c) => c.group))];
+  const groupOf = (c: ContentChoice): string => {
+    const asset = assetOf(c, library);
+    return asset && asset.url.startsWith('library://') ? DOWNLOADED_GROUP : c.group;
+  };
+  const groups = [...new Set(choices.map(groupOf))];
+  const current = choices.find((c) => c.id === chosen) ?? null;
 
   return (
     <div style={{ display: 'grid', gap: 6, flex: 1, minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={currentBox} title={current ? `${current.label} — ${groupOf(current)}` : 'nothing picked'}>
+          {current ? <Thumb asset={assetOf(current, library)} choice={current} small /> : <span style={badgeStyle}>none</span>}
+        </div>
         <select
           {...(id ? { id } : {})}
           {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
@@ -69,7 +84,7 @@ export function ContentPicker({
           {groups.map((group) => (
             <optgroup key={group} label={group}>
               {choices
-                .filter((c) => c.group === group)
+                .filter((c) => groupOf(c) === group)
                 .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
@@ -81,56 +96,84 @@ export function ContentPicker({
         <button
           type="button"
           style={{ ...toggleStyle, borderColor: open ? '#40e0ff' : '#2b2f34' }}
-          title="Show a picture of each choice"
+          title={open ? 'Hide the pictures' : 'Show a picture of each choice'}
           aria-pressed={open}
           onClick={() => setOpen((o) => !o)}
         >
-          ▦
+          {open ? '▾ pictures' : '▸ pictures'}
         </button>
       </div>
       {open && (
-        <div style={stripStyle} role="listbox" aria-label="content previews">
-          {choices.map((c) => {
-            const asset = typeof c.content['assetId'] === 'string' ? library.get(c.content['assetId']) : undefined;
-            const selected = c.id === chosen;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                title={`${c.label} — ${c.group}${asset ? ` · ${asset.license.license}` : ''}`}
-                style={{ ...tileStyle, borderColor: selected ? '#40e0ff' : '#2b2f34' }}
-                onClick={() => onPick(c)}
-              >
-                <Thumb asset={asset} label={c.label} />
-                <span style={captionStyle}>{c.label}</span>
-              </button>
-            );
-          })}
+        <div style={gridStyle} role="listbox" aria-label="content previews">
+          {groups.map((group) => (
+            <div key={group} style={{ display: 'contents' }}>
+              <div style={groupLabel}>{group}</div>
+              {choices
+                .filter((c) => groupOf(c) === group)
+                .map((c) => {
+                  const asset = assetOf(c, library);
+                  const selected = c.id === chosen;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      title={`${c.label}${asset ? ` · ${asset.kind} · ${asset.license.license}` : ''}`}
+                      style={{
+                        ...tileStyle,
+                        borderColor: selected ? '#40e0ff' : '#2b2f34',
+                        boxShadow: selected ? '0 0 0 1px #40e0ff inset' : 'none',
+                      }}
+                      onClick={() => onPick(c)}
+                    >
+                      <Thumb asset={asset} choice={c} />
+                      <span style={captionStyle}>{c.label}</span>
+                    </button>
+                  );
+                })}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
+function assetOf(c: ContentChoice, library: AssetLibrary): BundledAsset | undefined {
+  const id = c.content['assetId'];
+  return typeof id === 'string' ? library.get(id) : undefined;
+}
+
 /** The picture for one choice. See the file header for what each kind shows. */
-function Thumb({ asset, label }: { asset: BundledAsset | undefined; label: string }): React.JSX.Element {
+function Thumb({
+  asset,
+  choice,
+  small = false,
+}: {
+  asset: BundledAsset | undefined;
+  choice: ContentChoice;
+  small?: boolean;
+}): React.JSX.Element {
+  const kind = typeof choice.content['kind'] === 'string' && !asset ? choice.content['kind'] : null;
+  const drawn = useProceduralThumb(kind);
+  const box = small ? thumbSmall : thumbBox;
   if (!asset) {
+    if (drawn) return <img src={drawn} alt="" style={{ ...box, objectFit: 'cover' }} draggable={false} />;
     return (
-      <div style={{ ...thumbBox, background: 'linear-gradient(135deg, #1d2a33, #2a1d33)' }}>
-        <span style={badgeStyle}>{label}</span>
+      <div style={{ ...box, background: 'linear-gradient(135deg, #1d2a33, #2a1d33)' }}>
+        <span style={badgeStyle}>{choice.label}</span>
       </div>
     );
   }
   switch (asset.kind) {
     case 'still':
-      return <img src={asset.url} alt="" style={{ ...thumbBox, objectFit: 'contain' }} draggable={false} />;
+      return <img src={asset.url} alt="" style={{ ...box, objectFit: 'contain' }} draggable={false} />;
     case 'spritesheet':
       return (
         <div
           style={{
-            ...thumbBox,
+            ...box,
             backgroundImage: `url("${asset.url}")`,
             backgroundSize: `${asset.columns * 100}% ${asset.rows * 100}%`,
             backgroundPosition: '0 0',
@@ -141,15 +184,17 @@ function Thumb({ asset, label }: { asset: BundledAsset | undefined; label: strin
       );
     case 'video':
       return (
-        <div style={{ ...thumbBox, position: 'relative' }}>
-          <img src={asset.posterUrl} alt="" style={{ ...thumbBox, objectFit: 'cover' }} draggable={false} />
-          <span style={{ ...badgeStyle, position: 'absolute', right: 3, bottom: 3 }}>▶ {asset.loopSeconds}s</span>
+        <div style={{ ...box, position: 'relative' }}>
+          <img src={asset.posterUrl} alt="" style={{ ...box, objectFit: 'cover' }} draggable={false} />
+          {!small && (
+            <span style={{ ...badgeStyle, position: 'absolute', right: 3, bottom: 3 }}>▶ {asset.loopSeconds}s</span>
+          )}
         </div>
       );
     case 'lottie':
       return (
-        <div style={{ ...thumbBox, background: '#1a1f24' }}>
-          <span style={badgeStyle}>Lottie · {asset.loopSeconds}s</span>
+        <div style={{ ...box, background: '#1a1f24' }}>
+          <span style={badgeStyle}>{small ? 'Lottie' : `Lottie · ${asset.loopSeconds}s`}</span>
         </div>
       );
   }
@@ -158,7 +203,7 @@ function Thumb({ asset, label }: { asset: BundledAsset | undefined; label: strin
 const selectStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
-  padding: '3px 6px',
+  padding: '4px 6px',
   borderRadius: 4,
   border: '1px solid #2b2f34',
   background: '#15181b',
@@ -167,40 +212,78 @@ const selectStyle: React.CSSProperties = {
 };
 
 const toggleStyle: React.CSSProperties = {
-  padding: '2px 7px',
+  padding: '3px 8px',
   borderRadius: 4,
   border: '1px solid #2b2f34',
   background: '#15181b',
-  color: 'inherit',
-  font: '12px/1.2 inherit',
+  color: '#a9b1b8',
+  font: '11px/1.2 inherit',
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
-const stripStyle: React.CSSProperties = {
-  display: 'flex',
+const gridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
   gap: 6,
-  overflowX: 'auto',
+  maxHeight: 236,
+  overflowY: 'auto',
   padding: '4px 2px',
+  border: '1px solid #1f2327',
+  borderRadius: 5,
+  background: '#0f1214',
+};
+
+const groupLabel: React.CSSProperties = {
+  gridColumn: '1 / -1',
+  font: '600 10px/1.4 ui-monospace, Menlo, monospace',
+  textTransform: 'uppercase',
+  letterSpacing: '.06em',
+  color: '#6f767d',
+  padding: '4px 4px 0',
 };
 
 const tileStyle: React.CSSProperties = {
-  flex: '0 0 auto',
-  width: 84,
   display: 'grid',
   gap: 3,
   padding: 3,
   borderRadius: 5,
   border: '1px solid #2b2f34',
-  background: '#0f1214',
+  background: '#15181b',
   color: 'inherit',
   cursor: 'pointer',
   textAlign: 'left',
+  minWidth: 0,
 };
 
 const thumbBox: React.CSSProperties = {
-  width: 76,
-  height: 46,
+  width: '100%',
+  aspectRatio: '16 / 9',
   borderRadius: 3,
+  background: '#000',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'hidden',
+};
+
+const thumbSmall: React.CSSProperties = {
+  width: 64,
+  height: 36,
+  borderRadius: 3,
+  background: '#000',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'hidden',
+};
+
+const currentBox: React.CSSProperties = {
+  flex: '0 0 auto',
+  width: 64,
+  height: 36,
+  borderRadius: 3,
+  border: '1px solid #2b2f34',
   background: '#000',
   display: 'flex',
   alignItems: 'center',
@@ -222,7 +305,7 @@ const badgeStyle: React.CSSProperties = {
   background: 'rgba(0,0,0,.55)',
   padding: '1px 4px',
   borderRadius: 3,
-  maxWidth: 70,
+  maxWidth: 84,
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',

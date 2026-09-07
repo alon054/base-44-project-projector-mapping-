@@ -276,8 +276,10 @@ function ensureEditorWindow(): BrowserWindow {
   if (editorWin && !editorWin.isDestroyed()) return editorWin;
   const saved = loadSettings().editorBounds;
   editorWin = new BrowserWindow({
-    width: saved?.width ?? 1180,
-    height: saved?.height ?? 820,
+    // Wide enough for wall mode's two columns (960 preview + the room beside
+    // it). A saved size wins, as before.
+    width: saved?.width ?? 1440,
+    height: saved?.height ?? 900,
     ...(saved ? { x: saved.x, y: saved.y } : {}),
     title: 'Projection Engine — Editor',
     backgroundColor: '#111214',

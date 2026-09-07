@@ -99,9 +99,10 @@ export function LayerPanel({
         ))}
       </div>
       <p style={{ margin: 0, fontSize: 11, color: '#6f767d' }}>
-        Listed back to front — the last row draws on top. Drag the <span aria-hidden>⠿</span> grip
-        to reorder, or use ↑ / ↓. <code>fault</code> throws on purpose (I-13): it must show a
-        magenta placeholder, never blank the frame.
+        Listed back to front — the last row draws on top. Click a row to select it and open its
+        controls; drag the <span aria-hidden>⠿</span> grip to reorder, or use ↑ / ↓.{' '}
+        <code>fault</code> throws on purpose (I-13): it must show a magenta placeholder, never
+        blank the frame.
       </p>
 
       {/*
@@ -193,8 +194,14 @@ export function LayerPanel({
               >
                 ⠿
               </span>
-              <code style={{ flex: 1, fontSize: 12 }}>
+              <code style={{ flex: 1, fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 z{layer.zOrder} {layer.name}
+                <span style={{ color: '#6f767d' }}>
+                  {' · '}
+                  {String(layer.content['kind'] ?? layer.content['assetId'] ?? layer.providerId)}
+                  {layer.fillRole ? ` → ${layer.fillRole}` : ''}
+                  {!layer.visible ? ' · hidden' : ''}
+                </span>
               </code>
               <button
                 type="button"
@@ -235,14 +242,21 @@ export function LayerPanel({
               header: the panel does not know these keys' names, so it cannot
               have a control that writes to something the registry does not
               hold, and it cannot miss one that the registry does.
-            */}
-            {entityParamGroups(registry, layer.id).layer.map((key) => (
-              <ParamControl key={key} registry={registry} paramKey={key} />
-            ))}
 
-            <code style={{ fontSize: 10, color: '#5c6470' }}>
-              entity.{layer.id}.* · {layer.providerId}
-            </code>
+              Drawn for the SELECTED layer only. Five layers × five controls
+              was a page of sliders nobody had asked to see; a row is a name
+              you click, and the controls open under the one you clicked.
+            */}
+            {layer.id === selectedId &&
+              entityParamGroups(registry, layer.id).layer.map((key) => (
+                <ParamControl key={key} registry={registry} paramKey={key} />
+              ))}
+
+            {layer.id === selectedId && (
+              <code style={{ fontSize: 10, color: '#5c6470' }}>
+                entity.{layer.id}.* · {layer.providerId}
+              </code>
+            )}
           </div>
         );
       })}

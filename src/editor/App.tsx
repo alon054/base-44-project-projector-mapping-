@@ -58,7 +58,7 @@ import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core
 import { SurfacePanel } from './SurfacePanel';
 import { FillPanel } from './FillPanel';
 import { GroupPanel } from './GroupPanel';
-import { CatalogPanel } from './CatalogPanel';
+import { LibraryDrawer } from './LibraryDrawer';
 import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
 import { addWhiteFill } from '../core/sceneEdit';
 
@@ -162,6 +162,11 @@ export function App(): React.JSX.Element {
       offAdded();
     };
   }, []);
+  /** The Library drawer (find + download). Closed, it takes no space. */
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+  /** The four-step card in wall mode, folded once it has been read. */
+  const [showSteps, setShowSteps] = useState(true);
 
   /**
    * True once the config has been consulted, so the FIRST scene this editor
@@ -441,8 +446,115 @@ export function App(): React.JSX.Element {
 
   const selectedDisplay = displays.find((d) => d.isSelected);
 
+  /** Whether a layer already fills the default role — the white-fill button is then done. */
+  const panelFilled = scene.layers.some((l) => l.fillRole === WHITE_FILL_ROLE);
+
+  const roomPanel = (
+    <Panel title="Room — the faces you marked (calibration/surfaces.json)">
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+        {!panelFilled ? (
+          <button
+            type="button"
+            style={{ ...buttonStyle, marginTop: 0, fontWeight: 600, borderColor: '#40e0ff' }}
+            title={
+              'Adds a flat white layer bound to role "panel" — every face tagged panel ' +
+              'lights white. Mark a face, drag its points until the white sits on it.'
+            }
+            onClick={() => setScene((prev) => addWhiteFill(prev, WHITE_FILL_ROLE))}
+          >
+            White fill → {WHITE_FILL_ROLE}
+          </button>
+        ) : null}
+        <span style={{ fontSize: 12, color: '#8b939b' }}>
+          {filledRoles.length === 0
+            ? 'no layer fills a role yet — nothing will land on a face'
+            : `filled roles: ${filledRoles.join(', ')}`}
+        </span>
+      </div>
+      <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
+      <p style={{ margin: '8px 0 0', fontSize: 11, color: '#6f767d' }}>
+        A role can be several words: <code>panel f1</code> is in the shared fill AND its own
+        slot, which is how a sequence lights faces one at a time.
+      </p>
+    </Panel>
+  );
+
+  const fillPanel = (
+    <Panel title="Fill — what the faces show">
+      <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} libraryVersion={libraryVersion} />
+    </Panel>
+  );
+
+  const groupsPanel = (
+    <Panel title="Groups — together, or one after another">
+      <GroupPanel scene={scene} setScene={setScene} registry={registry} />
+    </Panel>
+  );
+
+  const warpBody = (
+    <>
+      <WarpPanel calibration={calibration} onChange={applyCalibration} output={DEV_RESOLUTION} />
+      {!wallMode && (
+        <div style={{ marginTop: 10, borderTop: '1px solid #2b2f34', paddingTop: 10 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setScene(createDefaultScene())}>
+              Scene A
+            </button>
+            <button type="button" style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setScene(createAltScene())}>
+              Scene B
+            </button>
+            <button type="button" style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setScene(createPhase3Scene())}>
+              Phase 3 load
+            </button>
+            <button type="button" style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setScene(createResilienceVideoScene())}>
+              I-13 video
+            </button>
+            <button type="button" style={{ ...buttonStyle, marginTop: 0 }} onClick={() => setScene(createPhase4Scene())}>
+              Phase 4 forces
+            </button>
+            <button
+              type="button"
+              style={{ ...buttonStyle, marginTop: 0 }}
+              onClick={() => setScene(createPhase4ReferenceScene())}
+              title="Diagnostic: the grey patch must never change, whatever you drag"
+            >
+              Reference patch
+            </button>
+            <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: 12, color: '#8b939b' }}>
+            Gate 2: switching these must leave the corners above untouched. Two constructed scenes
+            through the existing editor path — the scene bank, save/load and undo are all Phase 6
+            and are not built here.
+          </p>
+        </div>
+      )}
+    </>
+  );
+
+  const previewPanel = (
+    <Panel title="Preview — scene space, not a photo of the wall (I-7)">
+      {/* P5-B: `setScene` is the same setter the layer list writes
+          through, so a pointer edit and a button edit are one code path to
+          the output. Selection is NOT passed — it is the preview's own UI
+          state and has no business up here (I-7). */}
+      <PreviewCanvas
+        speed={speed}
+        nominalMs={nominalMs}
+        scene={scene}
+        clockState={clockTransport.state}
+        onClockReady={setPreviewClock}
+        setScene={setScene}
+        surfaces={surfaces}
+        onSurfaces={applySurfaces}
+        size={wallMode ? WALL_PREVIEW_SIZE : PREVIEW_SIZE}
+        wallMode={wallMode}
+      />
+    </Panel>
+  );
+
   return (
-    <div style={{ padding: wallMode ? 12 : 20 }}>
+    <div style={{ padding: wallMode ? 10 : 20 }}>
       {/*
         The mode switch, first and unmissable. Everything hidden below is one
         click away, and the line beside it says what the output is doing, so
@@ -450,19 +562,26 @@ export function App(): React.JSX.Element {
         mode to go and look.
       */}
       <div style={wallBarStyle}>
-        <button
-          type="button"
-          onClick={() => setWallMode((w) => !w)}
-          style={{
-            ...buttonStyle,
-            marginTop: 0,
-            fontWeight: 600,
-            borderColor: wallMode ? '#40e0ff' : '#2b2f34',
-            background: wallMode ? '#16323a' : '#191c1f',
-          }}
-        >
-          {wallMode ? 'WALL MODE — show everything' : 'Back to wall mode'}
-        </button>
+        <div style={segmentStyle} role="group" aria-label="editor mode">
+          <button
+            type="button"
+            aria-pressed={wallMode}
+            onClick={() => setWallMode(true)}
+            style={{ ...segmentButton, ...(wallMode ? segmentOn : {}) }}
+            title="Only what the wall loop needs: preview, faces, fill, groups"
+          >
+            Wall mode
+          </button>
+          <button
+            type="button"
+            aria-pressed={!wallMode}
+            onClick={() => setWallMode(false)}
+            style={{ ...segmentButton, ...(!wallMode ? segmentOn : {}) }}
+            title="Every panel: displays, transport, forces, layers, entity, metrics"
+          >
+            Everything
+          </button>
+        </div>
         {/*
           The wall reference grid, toggled from here because the projector
           display runs `cursor: none` and is usually not focused — the same
@@ -482,6 +601,14 @@ export function App(): React.JSX.Element {
           title="White reference grid on the projection. Toggle — press again to clear it. NOT for a take."
         >
           Wall grid ⇄
+        </button>
+        <button
+          type="button"
+          onClick={() => setLibraryOpen(true)}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="Find loops on the Internet Archive and download them into the library"
+        >
+          Library — find &amp; download…
         </button>
         <span style={{ fontSize: 12, color: '#8b939b' }}>
           {selectedDisplay
@@ -514,329 +641,251 @@ export function App(): React.JSX.Element {
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-      {!wallMode && (
-      <div style={{ width: 380, display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <header>
-          <h1 style={{ font: '600 15px/1.3 inherit', margin: '0 0 4px' }}>
-            Projection Engine — Phase 1
-          </h1>
-          <p style={{ margin: 0, color: '#8b939b' }}>
-            Scaffold &amp; dual-screen output. DEV {DEV_RESOLUTION.width}×{DEV_RESOLUTION.height}
-            {' · target '}
-            {TARGET_RESOLUTION.width}×{TARGET_RESOLUTION.height}
-          </p>
-        </header>
+      <LibraryDrawer
+        open={libraryOpen}
+        onClose={closeLibrary}
+        scene={scene}
+        setScene={setScene}
+        libraryVersion={libraryVersion}
+      />
 
-        <Panel title="Output display">
-          {displays.length === 0 ? (
-            <p style={{ margin: 0, color: '#8b939b' }}>Enumerating…</p>
-          ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
-              {displays.map((d) => (
-                <li key={d.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void window.engine.selectDisplay(d.id).then(refreshDisplays);
-                    }}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '7px 9px',
-                      borderRadius: 4,
-                      border: `1px solid ${d.isSelected ? '#40e0ff' : '#2b2f34'}`,
-                      background: d.isSelected ? '#16323a' : '#191c1f',
-                      color: 'inherit',
-                      font: 'inherit',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <strong>{d.label || `Display ${d.id}`}</strong>
-                    {d.internal ? ' · internal' : ''}
-                    {d.isPrimary ? ' · primary' : ''}
-                    <br />
-                    <span style={{ color: '#8b939b', fontFamily: 'ui-monospace, Menlo, monospace' }}>
-                      {d.size.width}×{d.size.height} @ {d.displayFrequency}Hz · scale{' '}
-                      {d.scaleFactor}
-                    </span>
-                  </button>
+      {wallMode ? (
+        /*
+          Wall mode: the preview on the left, the room beside it. The builder's
+          eye moves preview → face list → fill → groups without scrolling, and
+          the warp and transport fold under them for the moment they are needed
+          (W1 starts by warping, and did not have the panel).
+        */
+        <div style={wallLayout}>
+          <div style={{ flex: '0 1 888px', minWidth: 0, display: 'grid', gap: 12 }}>
+            <details open={showSteps} onToggle={(e) => setShowSteps(e.currentTarget.open)} style={stepsCard}>
+              <summary style={summaryStyle}>How to mark a face — four steps</summary>
+              <ol style={stepsStyle}>
+                <li>
+                  Pick <strong>Rect</strong>, <strong>Triangle</strong> or <strong>Ellipse</strong>{' '}
+                  under the preview, then <strong>press and drag</strong> on empty space to size a
+                  face. Release and it is banked as <strong>face 1</strong>, role <code>panel</code>.{' '}
+                  <strong>Pen</strong> instead clicks corner by corner — <kbd style={kbdStyle}>Enter</kbd>,
+                  or click the first point, to close it.
                 </li>
-              ))}
-            </ul>
-          )}
-          <button type="button" onClick={refreshDisplays} style={buttonStyle}>
-            Re-enumerate
-          </button>
-        </Panel>
-
-        <Panel title={PARAM_TEST_PATTERN_SPEED}>
-          <input
-            type="range"
-            min={0}
-            max={4}
-            step={0.01}
-            value={speed}
-            onChange={(e) => push(Number(e.currentTarget.value))}
-            style={{ width: '100%' }}
-          />
-          <code style={{ color: '#8b939b' }}>{speed.toFixed(2)}×</code>
-          <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
-            Hierarchical key from Phase 0; registered in <code>parameters.ts</code> in the first
-            Phase 1 commit (I-8, SPEC.md §0.2).
-          </p>
-        </Panel>
-
-        <Panel title="Editor → output latency (A11: two figures, never conflated)">
-          {tStat && pStat ? (
-            <pre style={preStyle}>
-              {`transport  median ${tStat.median.toFixed(1)}  p95 ${tStat.p95.toFixed(1)} ms  ${
-                tStat.p95 <= TRANSPORT_GATE_MS ? 'PASS' : 'FAIL'
-              } (<=${TRANSPORT_GATE_MS} ms)  n=${tStat.n}
-presented  median ${pStat.median.toFixed(1)}  p95 ${pStat.p95.toFixed(1)} ms  ${
-                pStat.p95 <= PRESENTED_GATE_MS ? 'PASS' : 'FAIL'
-              } (<=${PRESENTED_GATE_MS} ms)  n=${pStat.n}
-implied one-way presented ≈ ${
-                nominalMs > 0 ? (pStat.median - nominalMs).toFixed(1) : '—'
-              } ms${nominalMs > 0 ? ` = ${((pStat.median - nominalMs) / nominalMs).toFixed(2)}× N` : ''}
-frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
-                wStat && nominalMs > 0
-                  ? ` = ${(wStat.median / nominalMs).toFixed(2)}× N  ${
-                      wStat.median >= nominalMs && wStat.median <= nominalMs * 2
-                        ? '(in the structural 1–2× N band)'
-                        : 'OUT OF BAND — investigate'
-                    }`
-                  : ''
-              }`}
-            </pre>
-          ) : (
-            <p style={{ margin: 0, color: '#8b939b' }}>Move the slider to sample.</p>
-          )}
-          <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
-            <strong>Transport</strong> is editor event → output receipt, no frame wait — the figure
-            that moves under load. <strong>Presented</strong> is acked from the frame after the one
-            that rendered, so it is conservative by one frame by construction. Neither includes
-            projector panel latency, which is informational and measured separately.
-          </p>
-        </Panel>
-
-        <Panel title="Measurement mode (ADD-2)">
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              checked={uncapped}
-              onChange={(e) => {
-                const on = e.currentTarget.checked;
-                void window.engine.setMeasurementMode(on).then((applied) => {
-                  if (!applied) setWarning('Measurement mode saved — relaunch to apply.');
-                });
-              }}
-            />
-            Disable frame-rate cap
-          </label>
-          <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
-            Needs a relaunch: the Chromium switches must be set before app ready.
-          </p>
-        </Panel>
-      </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/*
-          The three lines that answer "I don't understand". Shown only in wall
-          mode, because in full mode the tool dropdown is visible and the reader
-          has the whole panel set to orient by.
-        */}
-        {wallMode && (
-          <ol style={stepsStyle}>
-            <li>
-              Pick <strong>Rect</strong>, <strong>Triangle</strong> or{' '}
-              <strong>Ellipse</strong> under the preview, then <strong>press and drag</strong>{' '}
-              on empty space to size a face. Release and it is banked as{' '}
-              <strong>face 1</strong>, role <code>panel</code>. <strong>Pen</strong> instead
-              clicks corner by corner — <kbd style={kbdStyle}>Enter</kbd>, or click the
-              first point, to close it.
-            </li>
-            <li>
-              Hit <strong>White fill → panel</strong> once. Every face tagged{' '}
-              <code>panel</code> lights white, including ones you mark later.
-            </li>
-            <li>
-              Hit <strong>Wall grid</strong> to put a white reference grid on the
-              projection while you place things. Press it again to clear it —{' '}
-              <strong>it must be off for a take.</strong>
-            </li>
-            <li>
-              Click a face to select it, then drag its points until the white sits on the
-              real box. <strong>Click one of its edges to add a point there</strong> when a
-              quad will not fit the face. <kbd style={kbdStyle}>Delete</kbd> over a point
-              trims that corner; away from a point it removes the face.
-            </li>
-          </ol>
-        )}
-        <Panel title="Preview (I-7: approximation, not a mirror)">
-          {/* P5-B: `setScene` is the same setter the layer list writes
-              through, so a pointer edit and a button edit are one code path to
-              the output. Selection is NOT passed — it is the preview's own UI
-              state and has no business up here (I-7). */}
-          <PreviewCanvas
-            speed={speed}
-            nominalMs={nominalMs}
-            scene={scene}
-            clockState={clockTransport.state}
-            onClockReady={setPreviewClock}
-            setScene={setScene}
-            surfaces={surfaces}
-            onSurfaces={applySurfaces}
-            size={wallMode ? WALL_PREVIEW_SIZE : PREVIEW_SIZE}
-            wallMode={wallMode}
-          />
-        </Panel>
-
-        <Panel title="Room — I-15, marked faces in calibration/surfaces.json">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-            <button
-              type="button"
-              style={{ ...buttonStyle, marginTop: 0 }}
-              title={
-                'Adds a flat white layer bound to role "panel" — every face tagged panel ' +
-                'lights white. Mark a face, drag its points until the white sits on it.'
-              }
-              onClick={() => setScene((prev) => addWhiteFill(prev, WHITE_FILL_ROLE))}
-            >
-              White fill → {WHITE_FILL_ROLE}
-            </button>
-            <span style={{ fontSize: 12, color: '#8b939b' }}>
-              {filledRoles.length === 0
-                ? 'no layer fills a role — nothing will land on a face'
-                : `filling: ${filledRoles.join(', ')}`}
-            </span>
+                <li>
+                  Hit <strong>White fill → panel</strong> once (Room, on the right). Every face tagged{' '}
+                  <code>panel</code> lights white, including ones you mark later.
+                </li>
+                <li>
+                  Click a face to select it, then drag its points until the white sits on the real
+                  box. <strong>Click one of its edges to add a point there</strong> when a quad will
+                  not fit. <kbd style={kbdStyle}>Delete</kbd> over a point trims that corner; away from
+                  a point it removes the face.
+                </li>
+                <li>
+                  Change what the faces show under <strong>Fill</strong>; fetch new loops with{' '}
+                  <strong>Library</strong> (top bar). <strong>Wall grid</strong> helps you place things and{' '}
+                  <strong>must be off for a take</strong>.
+                </li>
+              </ol>
+            </details>
+            {previewPanel}
           </div>
-          <FillPanel scene={scene} setScene={setScene} surfaces={surfaces} libraryVersion={libraryVersion} />
-          <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
-        </Panel>
-
-        <Panel title="Groups — I-16, together and in turn, one clock">
-          <GroupPanel scene={scene} setScene={setScene} registry={registry} />
-        </Panel>
-
-        <Panel title="Catalog — Internet Archive loops, into assets/library with an I-10 record">
-          <CatalogPanel />
-        </Panel>
-
-        {!wallMode && (
-          <>
-        <Panel title="Transport — I-2, one clock for everything">
-          <TransportPanel transport={clockTransport} clock={previewClock} />
-        </Panel>
-
-        <Panel title="Warp — I-5 final stage, calibration/ not scenes">
-          <WarpPanel
-            calibration={calibration}
-            onChange={applyCalibration}
-            output={DEV_RESOLUTION}
-          />
-          <div style={{ marginTop: 10, borderTop: '1px solid #2b2f34', paddingTop: 10 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createDefaultScene())}
-              >
-                Scene A
-              </button>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createAltScene())}
-              >
-                Scene B
-              </button>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createPhase3Scene())}
-              >
-                Phase 3 load
-              </button>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createResilienceVideoScene())}
-              >
-                I-13 video
-              </button>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createPhase4Scene())}
-              >
-                Phase 4 forces
-              </button>
-              <button
-                type="button"
-                style={{ ...buttonStyle, marginTop: 0 }}
-                onClick={() => setScene(createPhase4ReferenceScene())}
-                title="Diagnostic: the grey patch must never change, whatever you drag"
-              >
-                Reference patch
-              </button>
-              <span style={{ fontSize: 12, color: '#8b939b' }}>current: {scene.id}</span>
-            </div>
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: '#8b939b' }}>
-              Gate 2: switching these must leave the corners above untouched. Two
-              constructed scenes through the existing editor path — the scene bank,
-              save/load and undo are all Phase 6 and are not built here.
-            </p>
+          <div style={{ flex: '1 1 520px', minWidth: 520, display: 'grid', gap: 12, alignContent: 'start' }}>
+            {roomPanel}
+            {fillPanel}
+            {groupsPanel}
+            <details style={foldStyle} open={!calibration.enabled}>
+              <summary style={summaryStyle}>
+                Warp — square the frame to the wall{calibration.enabled ? ' (on)' : ' (off)'}
+              </summary>
+              <div style={{ paddingTop: 8 }}>{warpBody}</div>
+            </details>
+            <details style={foldStyle}>
+              <summary style={summaryStyle}>Transport — pause, scrub, rate</summary>
+              <div style={{ paddingTop: 8 }}>
+                <TransportPanel transport={clockTransport} clock={previewClock} />
+              </div>
+            </details>
           </div>
-        </Panel>
-
-        <Panel title="Forces & parallax — I-4, I-8, I-14, D3">
-          <ForcePanel scene={scene} registry={registry} />
-        </Panel>
-
-        <Panel title="Layers — z-order, opacity, blend, depth (I-1, I-6, I-8)">
-          <LayerPanel
-            scene={scene}
-            setScene={setScene}
-            registry={registry}
-            failures={failures}
-            selectedId={selectedLayerId(panelUi, scene)}
-            onSelect={(id) => setPanelUi({ ...panelUi, selectedLayerId: id })}
-          />
-        </Panel>
-
-        <Panel title="Entity — content, parameters, motion (I-8, I-18)">
-          <EntityPanel
-            scene={scene}
-            setScene={setScene}
-            registry={registry}
-            layerId={selectedLayerId(panelUi, scene)}
-            ui={panelUi}
-            setUi={setPanelUi}
-            libraryVersion={libraryVersion}
-          />
-        </Panel>
-
-        <Panel title="Output metrics — SPEC.md §4 (always-on mirror)">
-          {metrics ? (
-            <>
-              <pre style={preStyle}>{formatReport(metrics, uncapped)}</pre>
-              <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
-                Gate needs <strong>both</strong>: M1{' '}
-                {passesPresentation(metrics) ? '✓' : '✗'} · M2{' '}
-                {passesHeadroom(metrics) ? '✓' : '✗'} (p99 ≤{' '}
-                {(MAX_RENDER_FRACTION * 100).toFixed(0)}% of N, A10)
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+          <div style={{ width: 380, flex: '0 0 380px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <header>
+              <h1 style={{ font: '600 15px/1.3 inherit', margin: '0 0 4px' }}>Projection Engine</h1>
+              <p style={{ margin: 0, color: '#8b939b' }}>
+                Sprint build · output {DEV_RESOLUTION.width}×{DEV_RESOLUTION.height}
               </p>
-            </>
-          ) : (
-            <p style={{ margin: 0, color: '#8b939b' }}>Waiting for the output window…</p>
-          )}
-        </Panel>
-          </>
-        )}
-      </div>
-      </div>
+            </header>
+
+            <Panel title="Output display">
+              {displays.length === 0 ? (
+                <p style={{ margin: 0, color: '#8b939b' }}>Enumerating…</p>
+              ) : (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+                  {displays.map((d) => (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void window.engine.selectDisplay(d.id).then(refreshDisplays);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '7px 9px',
+                          borderRadius: 4,
+                          border: `1px solid ${d.isSelected ? '#40e0ff' : '#2b2f34'}`,
+                          background: d.isSelected ? '#16323a' : '#191c1f',
+                          color: 'inherit',
+                          font: 'inherit',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <strong>{d.label || `Display ${d.id}`}</strong>
+                        {d.internal ? ' · internal' : ''}
+                        {d.isPrimary ? ' · primary' : ''}
+                        <br />
+                        <span style={{ color: '#8b939b', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                          {d.size.width}×{d.size.height} @ {d.displayFrequency}Hz · scale {d.scaleFactor}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={refreshDisplays} style={buttonStyle}>
+                Re-enumerate
+              </button>
+            </Panel>
+
+            <Panel title="Output metrics — SPEC.md §4 (always-on mirror)">
+              {metrics ? (
+                <>
+                  <pre style={preStyle}>{formatReport(metrics, uncapped)}</pre>
+                  <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
+                    Gate needs <strong>both</strong>: M1 {passesPresentation(metrics) ? '✓' : '✗'} · M2{' '}
+                    {passesHeadroom(metrics) ? '✓' : '✗'} (p99 ≤ {(MAX_RENDER_FRACTION * 100).toFixed(0)}% of
+                    N, A10)
+                  </p>
+                </>
+              ) : (
+                <p style={{ margin: 0, color: '#8b939b' }}>Waiting for the output window…</p>
+              )}
+            </Panel>
+
+            <details style={foldStyle}>
+              <summary style={summaryStyle}>Measurement &amp; debug</summary>
+              <div style={{ display: 'grid', gap: 14, paddingTop: 10 }}>
+                <div>
+                  <div style={subheadStyle}>{PARAM_TEST_PATTERN_SPEED} — the clock rate, Phase 0's knob</div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={4}
+                    step={0.01}
+                    value={speed}
+                    onChange={(e) => push(Number(e.currentTarget.value))}
+                    style={{ width: '100%' }}
+                  />
+                  <code style={{ color: '#8b939b' }}>{speed.toFixed(2)}×</code>
+                </div>
+
+                <div>
+                  <div style={subheadStyle}>Editor → output latency (A11: two figures, never conflated)</div>
+                  {tStat && pStat ? (
+                    <pre style={preStyle}>
+                      {`transport  median ${tStat.median.toFixed(1)}  p95 ${tStat.p95.toFixed(1)} ms  ${
+                        tStat.p95 <= TRANSPORT_GATE_MS ? 'PASS' : 'FAIL'
+                      } (<=${TRANSPORT_GATE_MS} ms)  n=${tStat.n}
+presented  median ${pStat.median.toFixed(1)}  p95 ${pStat.p95.toFixed(1)} ms  ${
+                        pStat.p95 <= PRESENTED_GATE_MS ? 'PASS' : 'FAIL'
+                      } (<=${PRESENTED_GATE_MS} ms)  n=${pStat.n}
+implied one-way presented ≈ ${
+                        nominalMs > 0 ? (pStat.median - nominalMs).toFixed(1) : '—'
+                      } ms${nominalMs > 0 ? ` = ${((pStat.median - nominalMs) / nominalMs).toFixed(2)}× N` : ''}
+frame wait median ${wStat ? wStat.median.toFixed(1) : '—'} ms${
+                        wStat && nominalMs > 0
+                          ? ` = ${(wStat.median / nominalMs).toFixed(2)}× N  ${
+                              wStat.median >= nominalMs && wStat.median <= nominalMs * 2
+                                ? '(in the structural 1–2× N band)'
+                                : 'OUT OF BAND — investigate'
+                            }`
+                          : ''
+                      }`}
+                    </pre>
+                  ) : (
+                    <p style={{ margin: 0, color: '#8b939b' }}>Move the slider above to sample.</p>
+                  )}
+                  <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
+                    <strong>Transport</strong> is editor event → output receipt, no frame wait.{' '}
+                    <strong>Presented</strong> is acked from the frame after the one that rendered, so
+                    it is conservative by one frame by construction. Neither includes projector panel
+                    latency.
+                  </p>
+                </div>
+
+                <div>
+                  <div style={subheadStyle}>Measurement mode (ADD-2)</div>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={uncapped}
+                      onChange={(e) => {
+                        const on = e.currentTarget.checked;
+                        void window.engine.setMeasurementMode(on).then((applied) => {
+                          if (!applied) setWarning('Measurement mode saved — relaunch to apply.');
+                        });
+                      }}
+                    />
+                    Disable frame-rate cap
+                  </label>
+                  <p style={{ margin: '6px 0 0', color: '#6f767d', fontSize: 12 }}>
+                    Needs a relaunch: the Chromium switches must be set before app ready.
+                  </p>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {previewPanel}
+            {roomPanel}
+            {fillPanel}
+            {groupsPanel}
+
+            <Panel title="Transport — I-2, one clock for everything">
+              <TransportPanel transport={clockTransport} clock={previewClock} />
+            </Panel>
+
+            <Panel title="Warp — I-5 final stage, calibration/ not scenes">{warpBody}</Panel>
+
+            <Panel title="Forces & parallax — I-4, I-8, I-14, D3">
+              <ForcePanel scene={scene} registry={registry} />
+            </Panel>
+
+            <Panel title="Layers — z-order, opacity, blend, depth (I-1, I-6, I-8)">
+              <LayerPanel
+                scene={scene}
+                setScene={setScene}
+                registry={registry}
+                failures={failures}
+                selectedId={selectedLayerId(panelUi, scene)}
+                onSelect={(id) => setPanelUi({ ...panelUi, selectedLayerId: id })}
+              />
+            </Panel>
+
+            <Panel title="Entity — content, parameters, motion (I-8, I-18)">
+              <EntityPanel
+                scene={scene}
+                setScene={setScene}
+                registry={registry}
+                layerId={selectedLayerId(panelUi, scene)}
+                ui={panelUi}
+                setUi={setPanelUi}
+                libraryVersion={libraryVersion}
+              />
+            </Panel>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -864,11 +913,72 @@ const WHITE_FILL_ROLE = 'panel';
  * `Compositor.resize` rebuilds every mask from its normalized path (I-1), so a
  * face marked at one size is the same face at the other.
  *
- * Sized to fit the editor window's 1180px default with the left column gone.
- * Corners are aimed at with a mouse, and a corner is four times easier to hit
- * here than in a 480-wide preview.
+ * 864×486: 1.8× the full-mode preview's edge, so a corner is over three times
+ * easier to hit than at 480 wide — and the room fits BESIDE it in the 1440-wide
+ * default window (888 + 12 + 520 + 20 = 1440, the warp's 480-wide corner box included), which is the point of the
+ * two-column wall layout: preview → faces → fill without scrolling. On a
+ * narrower window the room wraps underneath, as it did before.
  */
-const WALL_PREVIEW_SIZE = { width: 960, height: 540 } as const;
+const WALL_PREVIEW_SIZE = { width: 864, height: 486 } as const;
+
+const wallLayout: React.CSSProperties = {
+  display: 'flex',
+  gap: 12,
+  alignItems: 'flex-start',
+  flexWrap: 'wrap',
+};
+
+const segmentStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  border: '1px solid #2b2f34',
+  borderRadius: 5,
+  overflow: 'hidden',
+};
+
+const segmentButton: React.CSSProperties = {
+  padding: '6px 12px',
+  border: 'none',
+  background: '#191c1f',
+  color: '#a9b1b8',
+  font: 'inherit',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const segmentOn: React.CSSProperties = {
+  background: '#16323a',
+  color: '#e6ebf0',
+  boxShadow: 'inset 0 -2px 0 #40e0ff',
+};
+
+const foldStyle: React.CSSProperties = {
+  border: '1px solid #2b2f34',
+  borderRadius: 6,
+  padding: '8px 12px',
+  background: '#15181b',
+};
+
+const stepsCard: React.CSSProperties = {
+  border: '1px solid #2b2f34',
+  borderRadius: 6,
+  padding: '8px 12px',
+  background: '#15181b',
+};
+
+const summaryStyle: React.CSSProperties = {
+  cursor: 'pointer',
+  font: '600 11px/1.4 ui-monospace, Menlo, monospace',
+  textTransform: 'uppercase',
+  letterSpacing: '.06em',
+  color: '#8b939b',
+  userSelect: 'none',
+};
+
+const subheadStyle: React.CSSProperties = {
+  font: '600 11px/1.4 ui-monospace, Menlo, monospace',
+  color: '#8b939b',
+  marginBottom: 6,
+};
 
 const wallBarStyle: React.CSSProperties = {
   display: 'flex',

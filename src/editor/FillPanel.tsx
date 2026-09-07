@@ -1,6 +1,6 @@
 /**
- * Swap what a bound layer fills its faces with — SPRINT.md's "white → animation"
- * beat, in one control.
+ * What the faces show — one card per layer bound to a role, with the picker
+ * and its pictures. SPRINT.md's "white → animation" beat, in one place.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHY THIS EXISTS WHEN `EntityPanel` ALREADY HAS A CONTENT PICKER.
@@ -60,11 +60,19 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
   const assets = useMemo(() => editorLibrary.all(), [libraryVersion]);
   const choices = useMemo(() => contentChoices(assets), [assets]);
 
+  // A read to list the bound layers — named in `sceneEdit.test.ts` as such.
   const fills = scene.layers.filter((l) => l.fillRole !== undefined);
-  if (fills.length === 0) return null;
+  if (fills.length === 0) {
+    return (
+      <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
+        No layer is bound to a role yet. <strong>White fill → panel</strong> in the Room panel makes
+        one; then pick what it shows here.
+      </p>
+    );
+  }
 
   return (
-    <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
       {fills.map((layer) => {
         const role = layer.fillRole as string;
         const faces = resolveRole(role, surfaces).surfaces.length;
@@ -76,34 +84,27 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
         const overCap = cap !== undefined && faces > cap;
 
         return (
-          <div key={layer.id} style={{ display: 'grid', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, color: '#c7ced4', minWidth: 0, flex: '0 1 auto' }}>
-                {layer.name}
-              </span>
-              <code style={{ fontSize: 11, color: '#6f767d' }}>
-                → {role} · {faces} face{faces === 1 ? '' : 's'}
+          <div key={layer.id} style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 12, color: '#e6ebf0' }}>{layer.name}</strong>
+              <code style={{ fontSize: 11, color: faces === 0 ? '#d8b45a' : '#6f767d' }}>
+                fills role “{role}” · {faces} face{faces === 1 ? '' : 's'}
+                {faces === 0 ? ' — no face carries this role yet' : ''}
               </code>
-              <ContentPicker
-                choices={choices}
-                chosen={chosen}
-                library={editorLibrary}
-                providerId={layer.providerId}
-                ariaLabel={`fill content for ${layer.name}`}
-                // One call, the same one the entity panel makes. It spreads
-                // the layer, so `fillRole` survives the swap — the faces keep
-                // their binding and only what is drawn into them changes.
-                onPick={(next) => setScene((prev) => applyContentChoice(prev, layer.id, next))}
-              />
             </div>
+            <ContentPicker
+              choices={choices}
+              chosen={chosen}
+              library={editorLibrary}
+              providerId={layer.providerId}
+              ariaLabel={`fill content for ${layer.name}`}
+              // One call, the same one the entity panel makes. It spreads
+              // the layer, so `fillRole` survives the swap — the faces keep
+              // their binding and only what is drawn into them changes.
+              onPick={(next) => setScene((prev) => applyContentChoice(prev, layer.id, next))}
+            />
             {asset && PER_INSTANCE_COST.has(asset.kind) && faces > 1 ? (
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 11,
-                  color: overCap ? '#ffb4b4' : '#d8b45a',
-                }}
-              >
+              <p style={{ margin: 0, fontSize: 11, color: overCap ? '#ffb4b4' : '#d8b45a' }}>
                 {`${asset.kind} × ${faces} faces = ${faces} decoder${faces === 1 ? '' : 's'}`}
                 {cap === undefined ? '' : ` against a cap of ${cap}`}
                 {overCap
@@ -117,3 +118,12 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
     </div>
   );
 }
+
+const cardStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 6,
+  padding: 8,
+  borderRadius: 5,
+  border: '1px solid #2b2f34',
+  background: '#191c1f',
+};

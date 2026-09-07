@@ -7156,3 +7156,51 @@ credit "hamageddon"); delete the folder to start clean.
 
 Owed to the wall: a catalog video on a face at the projector — one instance
 per face is one decoder per face (R2), and the picker says so.
+
+## 2026-09-07 — Sprint (operator additions, 2) — the editor's UX pass
+- DID: looked at the editor as a user (screenshots via `scripts/ui-shot.mjs`,
+  CDP over Electron's debug port, no new dependency) and fixed what it showed:
+  wall mode is two columns (preview | room → fill → groups, warp and transport
+  folded under); the mode switch is a segmented control; the catalog moved out
+  of the page into a **Library drawer** with a "use on faces" button; every
+  content picker shows its pictures by default with the current choice beside
+  the dropdown, and the procedural kinds are DRAWN (one offscreen Pixi render
+  each, cached); the layer list shows controls for the selected row only;
+  Phase-0 debug panels fold under "Measurement & debug"; stale copy ("Phase 1",
+  "switch the tool to path") fixed; default window 1440×900.
+- MEASURED: npm test 1118 / 1118 (43 files), unchanged — no test greps the
+  layout. Build and typecheck clean. Wall mode at 1440: no horizontal
+  overflow; at 1180 the room wraps under the preview.
+- BLOCKER: -
+- NEXT: W2.
+
+What the screenshots showed, in the order it mattered. (1) Wall mode put a
+960-wide preview beside 400 px of nothing and stacked the room, the groups and
+the whole catalog under it, so the loop's own controls were below the fold.
+(2) The catalog — a search box, five chips, a paragraph — sat between the
+groups and the transport, so "download" and "put on the wall" were one scroll
+apart and looked like the same job. (3) The picker's pictures were behind a ▦
+toggle nobody would find. (4) The warp panel, which W1 starts with, was not in
+wall mode at all. (5) "Everything" opened on a Phase 1 title, a Phase 0 slider
+panel, and five layers × five sliders. (6) The status column in the face rows
+clipped "unfilled" to "unfille".
+
+Decisions worth keeping. The preview shrank from 960×540 to 864×486 so the
+room fits beside it in a 1440 window with the warp's 480-wide corner box
+included; still 1.8× the full-mode edge. The drawer is where content is FOUND;
+the pickers beside the faces are where it is USED — the two were mixed and are
+now apart, which is what the operator asked for in "the add animation and
+download need to be in a different place". Procedural thumbnails come from a
+lazily-created 160×90 Pixi application in the editor window rendering each
+kind once at the golden instant; `fault` yields null and shows its name (I-13
+at thumbnail scale). Rule 9's graph is untouched — `output/main.ts` and
+`golden/main.ts` still cannot reach the preview, and the thumbnail renderer is
+editor-only. `ContentPicker`, `LibraryDrawer` and the reworked panels contain
+no parameter write; the writer test still names `ParamControl` and
+`ForcePanel` alone. The layer list still enumerates
+`entityParamGroups(registry, layer.id).layer`, for the selected layer.
+
+This touched P5-F's panels, a passed phase. CLAUDE.md says log rather than
+refactor; the operator asked for the pass by name ("go all over the UX/UI,
+find problems, make it easier") and this entry is the log. Nothing in the
+engine changed.
