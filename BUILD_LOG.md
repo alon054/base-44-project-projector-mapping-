@@ -7789,3 +7789,13 @@ Learned: a grid or flex item is as wide as its widest child unless
 `min-width: 0`; the thumbnail strip inside a row's picker widened the whole
 column past the window, and the row's buttons went with it. Two captures
 showed it before the cause was read off the layout rather than guessed.
+
+## 2026-09-07 — Sprint (operator additions, 6b) — one layer, one picker
+- DID: the Properties panel under the Layers column no longer repeats the
+  row's picker. `EntityPanel` gains `showContentPicker` (default true, for
+  Everything mode, where it is the only picker); the column passes false.
+  Operator: a screenshot of the two pickers and "there is two animation
+  picker".
+- MEASURED: npm test 1221 / 1221, 50 files. Typecheck clean.
+- BLOCKER: -
+- NEXT: unchanged — the builder saves the reel scene, then Day 3.

@@ -45,6 +45,12 @@ interface Props {
   setUi: (ui: PanelUi) => void;
   /** Ticks when a catalog asset lands, so the choice list is re-derived. */
   libraryVersion: number;
+  /**
+   * Off where the layer list already has a picker on the row (the Layers
+   * column): one layer, one picker. On by default for the Everything mode,
+   * where this panel is the only one.
+   */
+  showContentPicker?: boolean;
 }
 
 export function EntityPanel({
@@ -55,6 +61,7 @@ export function EntityPanel({
   ui,
   setUi,
   libraryVersion,
+  showContentPicker = true,
 }: Props): React.JSX.Element {
   // Rebuilt only when the library grows (a catalog asset landed), never on a
   // slider drag — sorting the catalog sixty times a second is what the memo
@@ -82,6 +89,7 @@ export function EntityPanel({
       </div>
 
       {/* The picker. A plain dropdown this block — the library browser is P8-B. */}
+      {showContentPicker && (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <label style={{ fontSize: 12, color: '#c7ced4', width: 148 }} htmlFor="content-choice">
           Content
@@ -95,6 +103,7 @@ export function EntityPanel({
           onPick={(next) => setScene((prev) => applyContentChoice(prev, layerId, next))}
         />
       </div>
+      )}
 
       <Section
         title={`Parameters (${groups.layer.length + groups.content.length})`}

@@ -992,7 +992,7 @@ export function App(): React.JSX.Element {
               </div>
             </Panel>
             {selectedGroupId === null && selectedLayerId(panelUi, scene) !== null && (
-              <Panel title="Properties — the selected layer">
+              <Panel title="Properties — opacity, blend, motion">
                 <EntityPanel
                   scene={scene}
                   setScene={setScene}
@@ -1001,6 +1001,8 @@ export function App(): React.JSX.Element {
                   ui={panelUi}
                   setUi={setPanelUi}
                   libraryVersion={libraryVersion}
+                  // The row's ▦ is the picker. One layer, one picker.
+                  showContentPicker={false}
                 />
               </Panel>
             )}
