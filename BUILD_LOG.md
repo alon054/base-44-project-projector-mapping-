@@ -7599,3 +7599,30 @@ Still open from W1, because it was not reported: every precondition line;
 whether the fifth face lit itself; the Gate 5 debts with their numbers; `g`
 clearing the guides; a clip's poster on the panel. W2 can discharge each in
 passing, and the checklist says so line by line.
+
+## 2026-09-07 — Sprint (W1 + W2) — the builder's report, and what the tree says beside it
+- DID: recorded the builder's "i did w2 and w1 mark them too" in
+  `SPRINT_CHECKLIST.md`: every verdict line ticked as builder-reported with
+  no figures; every line that asks for a number, or that the tree
+  contradicts, marked `[!]` with what discharges it. Committed
+  `calibration/surfaces.json` on the builder's word (W1's last line) — one
+  face, `panel`, four points, guide off.
+- MEASURED: none given by the builder. From the tree: no `scenes/reel.json`;
+  one marked face; six snapshots in `calibration/surfaces.history/`; no
+  measurement log newer than 2026-09-05; `config/settings.json` points at a
+  `reel` scene that does not exist.
+- BLOCKER: `scenes/reel.json` — the reel cannot be committed, frozen or
+  re-shot until the builder saves it (top bar: `reel` → Save scene).
+- NEXT: the builder saves the scene; then `git tag reel-freeze` is possible.
+
+This is the fifth recorded case of a verdict covering less than it sounds
+like (Gate 4, P5-B, P5-D, P5-E, and now W1/W2), and it is labelled as such
+here rather than afterwards. "Done" without the reel file is a take that
+exists on a phone and nowhere the tree can reproduce; "done" without the
+Gate 5 numbers is the debts still open. Neither is an accusation — the
+builder was at a wall in the dark — and both are one action each to close.
+
+`warp.json` is gitignored (I-5: a calibration from another wall is worse than
+none). W1's and W2's "commit warp.json" lines were written before that rule
+was applied to the file and cannot be done as written. Logged, not changed:
+`SPRINT_CHECKLIST.md`'s lines now say so inline.
