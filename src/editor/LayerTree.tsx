@@ -23,8 +23,9 @@ import type { ParameterRegistry } from '../core/parameters';
 import type { Scene } from '../core/scene';
 import { groupDuration } from '../core/groups';
 import { resolveRole } from '../core/roles';
-import { addGroup, addWhiteFill, removeGroup, removeLayer, renameLayer } from '../core/sceneEdit';
-import { DEFAULT_SURFACE_ROLE, type SurfaceTree } from '../core/surfaces';
+import { addGroup, removeGroup, removeLayer, renameLayer } from '../core/sceneEdit';
+import { removeSurface, withSurfaceGuide, withSurfaceName, type SurfaceTree } from '../core/surfaces';
+import { faceOfLayer } from './faceLayers';
 import { CONCURRENCY_CAPS } from '../core/library';
 import { editorLibrary } from './assets';
 import { ContentPicker } from './ContentPicker';
@@ -37,6 +38,12 @@ interface Props {
   setScene: (update: (prev: Scene) => Scene) => void;
   registry: ParameterRegistry;
   surfaces: SurfaceTree;
+  /**
+   * The room after an edit — a face's name, its guide grid, its deletion —
+   * because a face's row IS the face (`faceLayers.ts`). Goes to `App`'s one
+   * room writer; this file never touches the room tree itself.
+   */
+  onSurfaces: (tree: SurfaceTree) => void;
   failures: SceneFailure[];
   /** Panel UI state, never scene state. One of the two is set, or neither. */
   selectedLayerId: string | null;
@@ -53,6 +60,7 @@ export function LayerTree({
   setScene,
   registry,
   surfaces,
+  onSurfaces,
   failures,
   selectedLayerId,
   selectedGroupId,
@@ -97,11 +105,17 @@ export function LayerTree({
     const r = renaming;
     setRenaming(null);
     if (!r) return;
-    setScene((prev) => renameLayer(prev, r.id, r.text));
+    // A face's row renames the FACE (room); any other row renames the layer.
+    const layer = scene.layers.find((l) => l.id === r.id);
+    const face = layer ? faceOfLayer(layer, surfaces) : undefined;
+    if (face) onSurfaces(withSurfaceName(surfaces, face.id, r.text));
+    else setScene((prev) => renameLayer(prev, r.id, r.text));
   };
 
   const layerRow = (row: Extract<TreeRow, { kind: 'layer' }>): React.JSX.Element => {
     const { layer, group, blockIndex } = row;
+    const face = faceOfLayer(layer, surfaces);
+    const shownName = face ? face.name : layer.name;
     const selected = layer.id === selectedLayerId && selectedGroupId === null;
     const failure = failures.find((f) => f.layerId === layer.id);
     const faces = layer.fillRole ? resolveRole(layer.fillRole, surfaces).surfaces : [];
@@ -111,7 +125,7 @@ export function LayerTree({
     const what = asset ? asset.name : String(layer.content['kind'] ?? layer.providerId);
     const key = `layer:${layer.id}`;
     return (
-      <div key={key} style={{ display: 'grid', gap: 4 }}>
+      <div key={key} style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <div
           {...dragHandlers(key, { kind: 'before', layerId: layer.id })}
           onClick={() => onSelectLayer(layer.id)}
@@ -132,7 +146,7 @@ export function LayerTree({
             }}
             onDragEnd={endDrag}
             title="Drag above another row to reorder, onto a folder to file it"
-            aria-label={`drag ${layer.name}`}
+            aria-label={`drag ${shownName}`}
             style={gripStyle}
           >
             ⠿
@@ -145,7 +159,7 @@ export function LayerTree({
             <input
               autoFocus
               value={renaming.text}
-              aria-label={`rename ${layer.name}`}
+              aria-label={`rename ${shownName}`}
               spellCheck={false}
               style={renameStyle}
               onClick={(e) => e.stopPropagation()}
@@ -159,20 +173,38 @@ export function LayerTree({
           ) : (
             <span
               style={nameStyle}
-              title={`${layer.name} — double-click to rename`}
+              title={`${shownName} — double-click to rename`}
               onDoubleClick={(e) => {
                 e.stopPropagation();
-                setRenaming({ id: layer.id, text: layer.name });
+                setRenaming({ id: layer.id, text: shownName });
               }}
             >
-              {layer.name}
+              {face ? '▱ ' : ''}
+              {shownName}
             </span>
           )}
-          <span style={chipStyle} title={layer.fillRole ? `fills role "${layer.fillRole}"` : 'draws in its own rectangle, on no face'}>
+          <span
+            style={chipStyle}
+            title={face ? `${what} on this face` : layer.fillRole ? `fills role "${layer.fillRole}" · ${faces.length} face${faces.length === 1 ? '' : 's'}` : 'draws in its own rectangle, on no face'}
+          >
             {what}
-            {layer.fillRole ? ` → ${layer.fillRole}` : ''}
-            {layer.fillRole ? ` · ${faces.length}` : ''}
+            {face ? '' : layer.fillRole ? ` → ${layer.fillRole} · ${faces.length}` : ''}
           </span>
+          {face && (
+            <label
+              onClick={(e) => e.stopPropagation()}
+              style={gridLabel}
+              title="White guide grid on this face on the projector. Off once the face has its animation unless you pin it on. g on the output hides them all."
+            >
+              <input
+                type="checkbox"
+                checked={face.guide ?? false}
+                aria-label={`guide grid on ${face.name}`}
+                onChange={(e) => onSurfaces(withSurfaceGuide(surfaces, face.id, e.currentTarget.checked))}
+              />
+              grid
+            </label>
+          )}
           {group?.mode === 'sequence' && (
             <span onClick={(e) => e.stopPropagation()} title="block length, seconds">
               <ParamControl registry={registry} paramKey={`child.${layer.id}.duration`} label="seconds" compact />
@@ -190,7 +222,18 @@ export function LayerTree({
           >
             ▦
           </button>
-          <button type="button" style={iconStyle} title="Delete this layer" onClick={(e) => { e.stopPropagation(); setScene((prev) => removeLayer(prev, layer.id)); }}>
+          <button
+            type="button"
+            style={iconStyle}
+            title={face ? 'Delete this face — its light goes out on the wall' : 'Delete this layer'}
+            onClick={(e) => {
+              e.stopPropagation();
+              // A face's row deletes the FACE; its layer follows through
+              // `syncFaceLayers` in App, the one place that rule lives.
+              if (face) onSurfaces(removeSurface(surfaces, face.id));
+              else setScene((prev) => removeLayer(prev, layer.id));
+            }}
+          >
             ✕
           </button>
         </div>
@@ -201,13 +244,13 @@ export function LayerTree({
           </p>
         )}
         {pickerFor === layer.id && (
-          <div style={{ paddingLeft: group ? 22 : 6 }}>
+          <div style={{ paddingLeft: group ? 22 : 6, minWidth: 0, overflow: 'hidden' }}>
             <ContentPicker
               choices={choices}
               chosen={currentChoiceId(scene, layer.id, choices)}
               library={editorLibrary}
               providerId={layer.providerId}
-              ariaLabel={`animation for ${layer.name}`}
+              ariaLabel={`animation for ${shownName}`}
               onPick={(next) => setScene((prev) => applyContentChoice(prev, layer.id, next))}
             />
           </div>
@@ -268,7 +311,7 @@ export function LayerTree({
           ✕
         </button>
         {pickerFor === group.id && children.length > 0 && (
-          <div style={{ gridColumn: '1 / -1' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ gridColumn: '1 / -1', minWidth: 0, overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <ContentPicker
               choices={choices}
               chosen={chosenId}
@@ -283,17 +326,15 @@ export function LayerTree({
     );
   };
 
+  // `minmax(0, 1fr)`: a grid track is as wide as its widest item unless told
+  // otherwise, and an open picker's thumbnail strip would widen every row
+  // past the column, taking the row buttons with it.
   return (
-    <div style={{ display: 'grid', gap: 6 }}>
+    <div style={{ display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          style={addStyle}
-          title={`A new layer on every face tagged "${DEFAULT_SURFACE_ROLE}", white until you pick its animation`}
-          onClick={() => setScene((prev) => addWhiteFill(prev, DEFAULT_SURFACE_ROLE, `layer ${prev.layers.length + 1}`))}
-        >
-          + layer
-        </button>
+        <span style={{ fontSize: 11, color: '#8b939b', alignSelf: 'center' }}>
+          Trace a face on the stage — it appears here as a layer, white until you pick its animation.
+        </span>
         <button type="button" style={addStyle} title="A folder whose layers all run together" onClick={() => setScene((prev) => addGroup(prev, 'parallel'))}>
           + folder
         </button>
@@ -301,7 +342,11 @@ export function LayerTree({
           + folder, in turn
         </button>
       </div>
-      {rows.length === 0 && <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>No layers. Add one, or open Library and use a clip on the faces.</p>}
+      {rows.length === 0 && (
+        <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
+          No layers yet. Pick <strong>Rect</strong> under the stage and drag over a box.
+        </p>
+      )}
       {rows.map((row) => (row.kind === 'folder' ? folderRow(row) : layerRow(row)))}
       <div
         {...dragHandlers('root-end', { kind: 'root-end' })}
@@ -311,7 +356,7 @@ export function LayerTree({
           opacity: dragId === null ? 0.5 : 1,
         }}
       >
-        {dragId === null ? 'top of the list draws in front · drop here to send to the back, out of any folder' : 'drop: to the back, out of any folder'}
+        {dragId === null ? 'top covers what is below · drop here to send to the back, out of any folder' : 'drop: to the back, out of any folder'}
       </div>
     </div>
   );
@@ -319,7 +364,7 @@ export function LayerTree({
 
 const rowStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'auto auto auto minmax(60px, 1fr) auto auto auto auto',
+  gridTemplateColumns: 'auto auto auto minmax(60px, 1fr) auto auto auto auto auto',
   alignItems: 'center',
   gap: 6,
   padding: '4px 6px',
@@ -338,4 +383,5 @@ const iconStyle: React.CSSProperties = { padding: '1px 6px', borderRadius: 4, bo
 const iconOn: React.CSSProperties = { borderColor: '#40e0ff', background: '#16303a' };
 const addStyle: React.CSSProperties = { padding: '4px 8px', borderRadius: 4, border: '1px solid #2b2f34', background: '#191c1f', color: 'inherit', font: '12px/1.2 inherit', cursor: 'pointer' };
 const rootZone: React.CSSProperties = { border: '1px dashed #2b2f34', borderRadius: 5, padding: '6px 8px', fontSize: 10, color: '#6f767d', textAlign: 'center' };
+const gridLabel: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#8b939b', cursor: 'pointer', whiteSpace: 'nowrap' };
 const noteStyle = (color: string): React.CSSProperties => ({ margin: 0, fontSize: 11, color, paddingLeft: 6 });

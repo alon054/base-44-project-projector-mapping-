@@ -7742,3 +7742,50 @@ not the code.
 SHORTCUT: the eye is a checkbox (`ParamControl compact`), not an icon; the
 folder's name is `Folder N`; the Properties panel repeats the row's picker
 (EntityPanel's own). All three are cosmetic and none blocks a take.
+
+## 2026-09-07 — Sprint (operator additions, 6) — a face is a layer: one column, one list
+- DID: `src/editor/faceLayers.ts` — `withFaceRoles` (room: default-role
+  faces onto their own token, applied inside `applySurfaces` and at the room
+  read), `syncFaceLayers` (scene: one white fill per own-token face, prune
+  once `roomLoaded`), `faceOfLayer`. `LayerTree` rows for a face show the
+  face's name, guide box and delete, and rename/delete the FACE through
+  `onSurfaces`. `App`: the Room tab and the "+ layer" button are gone;
+  Undo/Redo under the list; Warp, Transport and an Advanced fold (the old
+  Room and Fill panels) under that; the page is fixed-height and the column
+  scrolls; `Panel` gets `minWidth: 0; overflow: hidden`.
+- MEASURED: npm test 1215 → 1221, 50 files (+6, `faceLayers.test.ts`).
+  test:render 52 / 52. Mutation checks, the new file alone (6 tests):
+  | Mutation | Result |
+  |---|---|
+  | the prune ignores `roomLoaded` | 1 failed / 6 |
+  | `withFaceRoles` re-tags typed roles too | 1 failed / 6 |
+  Seen at 1440×900 with the builder's live room: 8 rows, named, white; a
+  row dragged into an in-turn folder; a picker open under a row; buttons
+  inside the column.
+- BLOCKER: -
+- NEXT: unchanged — the builder saves the reel scene, then Day 3.
+
+DECISION: the operator's mental model is Photoshop's: a traced face IS a
+layer. The engine's is I-15's: a face is calibration, a layer is content,
+and they meet at a role string. The bridge keeps the engine's model and
+shows the operator's — every face on its own token, one fill per face,
+rows in draw order. `core/` learns nothing; `surfaces.test.ts`'s
+import-graph rules are untouched. Beat 5 ("one control, all faces change")
+is now the folder picker; beat 7 (a fifth face lights itself) is the sync
+making its white fill. The shared `panel` role still works from the
+Advanced fold for anyone who types it.
+
+DECISION: the prune waits for the room. Two promises at launch; if the
+scene lands first, every face layer names a face an empty room lacks, and
+pruning then throws away the builder's picks. `roomLoaded` is set when the
+room read answers, empty or not. A test pins the race.
+
+RISK: a scene saved here binds its layers to `surface-N` tokens. In another
+room those faces do not exist: the layers are pruned and the new faces get
+white fills. Scenes are per-wall now in practice. Noted, not solved — a
+per-scene face manifest (UI_PLAN.md H15) is the fix and belongs to P8-C.
+
+Learned: a grid or flex item is as wide as its widest child unless
+`min-width: 0`; the thumbnail strip inside a row's picker widened the whole
+column past the window, and the row's buttons went with it. Two captures
+showed it before the cause was read off the layout rather than guessed.

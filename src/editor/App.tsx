@@ -65,6 +65,7 @@ import { FillPanel } from './FillPanel';
 import { ensureOwnFillLayer, withOwnFillRole, withSharedFillRole, withoutOwnFillLayers } from './ownFill';
 import { GroupPanel } from './GroupPanel';
 import { LayerTree } from './LayerTree';
+import { syncFaceLayers, withFaceRoles } from './faceLayers';
 import { ParamControl } from './ParamControl';
 import { LibraryDrawer } from './LibraryDrawer';
 import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
@@ -160,8 +161,9 @@ export function App(): React.JSX.Element {
    * assumed, and rounded to 16 px so a window drag does not rebuild every
    * mask at every pixel. Selection of a folder is panel state like a layer's.
    */
-  const [rightTab, setRightTab] = useState<'layers' | 'room'>('layers');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  /** True once the stored room has been read, empty or not — `faceLayers.ts`'s prune waits for it. */
+  const [roomLoaded, setRoomLoaded] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [stageWidth, setStageWidth] = useState<number>(WALL_PREVIEW_SIZE.width);
   useEffect(() => {
@@ -376,11 +378,14 @@ export function App(): React.JSX.Element {
     void window.engine
       .getSurfaces()
       .then((raw) => {
-        const tree = readSurfaces(raw, canonicalizeSurface);
+        // Every face on its own token (`faceLayers.ts`): a room from before
+        // that rule reads in as it was and is normalised on its next write.
+        const tree = withFaceRoles(readSurfaces(raw, canonicalizeSurface));
         if (tree.length > 0) {
           surfacesRef.current = tree;
           setSurfaces(tree);
         }
+        setRoomLoaded(true);
         console.log(describeSurfaces(tree));
       })
       .catch((err: unknown) => {
@@ -403,7 +408,11 @@ export function App(): React.JSX.Element {
    * crosses the boundary and what is stored are the same bytes rather than two
    * shapes to keep in step. Normalized points only — no pixels cross (I-1, I-7).
    */
-  const applySurfaces = useCallback((next: SurfaceTree) => {
+  const applySurfaces = useCallback((edited: SurfaceTree) => {
+    // A face is a layer: a traced face leaves the default role for its own
+    // token here, in the one room writer, so nothing downstream ever sees a
+    // face without one (`faceLayers.ts`).
+    const next = withFaceRoles(edited);
     // S3. The room before this write goes into the ring if the write starts
     // a gesture (`roomHistory.ts`, the one rule; main applies the same one to
     // the snapshot files). Every sample of a drag still writes; only the
@@ -464,6 +473,16 @@ export function App(): React.JSX.Element {
    * tracked, because a `fillRole` edited in the layer panel must move this
    * column with it and a second copy would be a second thing to update.
    */
+  /**
+   * A face is a layer (`faceLayers.ts`): one white fill per face on its own
+   * token, made the moment the face exists — so a traced face lights at once
+   * and has a row — and removed when the face goes, once the room is known.
+   * Identity when nothing is owed, so React bails and this cannot loop.
+   */
+  useEffect(() => {
+    setScene((prev) => syncFaceLayers(prev, surfaces, roomLoaded));
+  }, [surfaces, roomLoaded, scene]);
+
   const filledRoles = useMemo(
     () => [...new Set(scene.layers.flatMap((l) => (l.fillRole ? [l.fillRole] : [])))],
     [scene],
@@ -751,7 +770,7 @@ export function App(): React.JSX.Element {
   );
 
   return (
-    <div style={{ padding: wallMode ? 10 : 20 }}>
+    <div style={wallMode ? { padding: 10, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' } : { padding: 20 }}>
       {/*
         The mode switch, first and unmissable. Everything hidden below is one
         click away, and the line beside it says what the output is doing, so
@@ -895,7 +914,7 @@ export function App(): React.JSX.Element {
           steps fold under the stage, shut by default, one click away.
         */
         <div style={stageLayout}>
-          <div ref={stageRef} style={{ flex: '1 1 0', minWidth: 0, display: 'grid', gap: 10, alignContent: 'start' }}>
+          <div ref={stageRef} style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, overflowY: 'auto', display: 'grid', gap: 10, alignContent: 'start' }}>
             {previewPanel}
             <details open={showSteps} onToggle={(e) => setShowSteps(e.currentTarget.open)} style={stepsCard}>
               <summary style={summaryStyle}>How to mark a face — four steps</summary>
@@ -927,86 +946,97 @@ export function App(): React.JSX.Element {
               </ol>
             </details>
           </div>
-          <div style={{ flex: '0 1 420px', minWidth: 340, display: 'grid', gap: 10, alignContent: 'start' }}>
-            <div style={segmentStyle} role="tablist" aria-label="right column">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightTab === 'layers'}
-                onClick={() => setRightTab('layers')}
-                style={{ ...segmentButton, flex: 1, ...(rightTab === 'layers' ? segmentOn : {}) }}
-              >
-                Layers
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightTab === 'room'}
-                onClick={() => setRightTab('room')}
-                style={{ ...segmentButton, flex: 1, ...(rightTab === 'room' ? segmentOn : {}) }}
-              >
-                Room · {surfaces.length} face{surfaces.length === 1 ? '' : 's'}
-              </button>
-            </div>
-            {rightTab === 'layers' ? (
-              <>
-                <Panel title="Layers — front on top">
-                  <LayerTree
-                    scene={scene}
-                    setScene={setScene}
-                    registry={registry}
-                    surfaces={surfaces}
-                    failures={failures}
-                    selectedLayerId={selectedLayerId(panelUi, scene)}
-                    selectedGroupId={selectedGroupId}
-                    onSelectLayer={(id) => {
-                      setSelectedGroupId(null);
-                      setPanelUi({ ...panelUi, selectedLayerId: id });
-                    }}
-                    onSelectGroup={setSelectedGroupId}
-                    libraryVersion={libraryVersion}
-                  />
-                </Panel>
-                {selectedGroupId === null && selectedLayerId(panelUi, scene) !== null && (
-                  <Panel title="Properties — the selected layer">
-                    <EntityPanel
-                      scene={scene}
-                      setScene={setScene}
-                      registry={registry}
-                      layerId={selectedLayerId(panelUi, scene)}
-                      ui={panelUi}
-                      setUi={setPanelUi}
-                      libraryVersion={libraryVersion}
-                    />
-                  </Panel>
-                )}
-                {selectedGroupId !== null && scene.groups.some((g) => g.id === selectedGroupId) && (
-                  <Panel title="Properties — the selected folder">
-                    <ParamControl registry={registry} paramKey={`group.${selectedGroupId}.mode`} />
-                    <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6f767d' }}>
-                      Together: every layer inside runs at once. In turn: one after another, each for
-                      its seconds (set on the row), looping. The ▦ on the folder row picks one
-                      animation for every layer inside.
-                    </p>
-                  </Panel>
-                )}
-              </>
-            ) : (
-              <>
-                {roomPanel}
-                {fillPanel}
-                <details style={foldStyle} open={!calibration.enabled}>
-                  <summary style={summaryStyle}>
-                    Warp — square the frame to the wall{calibration.enabled ? ' (on)' : ' (off)'}
-                  </summary>
-                  <div style={{ paddingTop: 8 }}>{warpBody}</div>
-                </details>
-              </>
+          {/*
+            The column scrolls on its own, inside a page that never does —
+            so the stage stays put and a long Properties panel cannot push
+            the row buttons off the window (a page scrollbar took the width
+            the column had been measured with).
+          */}
+          <div style={{ flex: '0 0 420px', width: 420, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 2 }}>
+            <Panel title="Layers — top covers what is below">
+              <LayerTree
+                scene={scene}
+                setScene={setScene}
+                registry={registry}
+                surfaces={surfaces}
+                onSurfaces={applySurfaces}
+                failures={failures}
+                selectedLayerId={selectedLayerId(panelUi, scene)}
+                selectedGroupId={selectedGroupId}
+                onSelectLayer={(id) => {
+                  setSelectedGroupId(null);
+                  setPanelUi({ ...panelUi, selectedLayerId: id });
+                }}
+                onSelectGroup={setSelectedGroupId}
+                libraryVersion={libraryVersion}
+              />
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={undoRoom}
+                  disabled={roomHistoryDepth[0] === 0}
+                  style={{ ...buttonStyle, marginTop: 0 }}
+                  title="Undo the last change to a face — a drag, a delete, a trace. ⌘Z"
+                >
+                  ↶ Undo{roomHistoryDepth[0] > 0 ? ` (${roomHistoryDepth[0]})` : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={redoRoom}
+                  disabled={roomHistoryDepth[1] === 0}
+                  style={{ ...buttonStyle, marginTop: 0 }}
+                  title="Redo. ⇧⌘Z"
+                >
+                  ↷ Redo{roomHistoryDepth[1] > 0 ? ` (${roomHistoryDepth[1]})` : ''}
+                </button>
+              </div>
+            </Panel>
+            {selectedGroupId === null && selectedLayerId(panelUi, scene) !== null && (
+              <Panel title="Properties — the selected layer">
+                <EntityPanel
+                  scene={scene}
+                  setScene={setScene}
+                  registry={registry}
+                  layerId={selectedLayerId(panelUi, scene)}
+                  ui={panelUi}
+                  setUi={setPanelUi}
+                  libraryVersion={libraryVersion}
+                />
+              </Panel>
             )}
+            {selectedGroupId !== null && scene.groups.some((g) => g.id === selectedGroupId) && (
+              <Panel title="Properties — the selected folder">
+                <ParamControl registry={registry} paramKey={`group.${selectedGroupId}.mode`} />
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6f767d' }}>
+                  Together: every layer inside runs at once. In turn: one after another, each for
+                  its seconds (set on the row), looping. The ▦ on the folder row picks one
+                  animation for every layer inside.
+                </p>
+              </Panel>
+            )}
+            <details style={foldStyle} open={!calibration.enabled}>
+              <summary style={summaryStyle}>
+                Warp — square the frame to the wall{calibration.enabled ? ' (on)' : ' (off)'}
+              </summary>
+              <div style={{ paddingTop: 8 }}>{warpBody}</div>
+            </details>
             <details style={foldStyle}>
               <summary style={summaryStyle}>Transport — pause, scrub, rate</summary>
               <div style={{ paddingTop: 8 }}>
                 <TransportPanel transport={clockTransport} clock={previewClock} />
+              </div>
+            </details>
+            <details style={foldStyle}>
+              <summary style={summaryStyle}>Advanced — roles and shared fills</summary>
+              <div style={{ paddingTop: 8, display: 'grid', gap: 10 }}>
+                <p style={{ margin: 0, fontSize: 11, color: '#6f767d' }}>
+                  Underneath, a face carries a role and a layer fills a role. Every traced face
+                  is on its own role, which is what makes it a layer above. Type <code>panel</code>
+                  on several faces and one fill for <code>panel</code> lights them all — the old
+                  way, still here.
+                </p>
+                {roomPanel}
+                {fillPanel}
               </div>
             </details>
           </div>
@@ -1230,7 +1260,9 @@ const WALL_PREVIEW_SIZE = { width: 864, height: 486 } as const;
 const stageLayout: React.CSSProperties = {
   display: 'flex',
   gap: 12,
-  alignItems: 'flex-start',
+  alignItems: 'stretch',
+  flex: '1 1 0',
+  minHeight: 0,
 };
 
 const segmentStyle: React.CSSProperties = {
@@ -1261,6 +1293,7 @@ const foldStyle: React.CSSProperties = {
   borderRadius: 6,
   padding: '8px 12px',
   background: '#15181b',
+  flexShrink: 0,
 };
 
 const stepsCard: React.CSSProperties = {
@@ -1340,6 +1373,13 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
         borderRadius: 6,
         padding: 12,
         background: '#15181b',
+        // A grid or flex item is as wide as its widest child unless told
+        // otherwise; a thumbnail strip must scroll inside, not widen the column.
+        minWidth: 0,
+        overflow: 'hidden',
+        // In the scrolling column a panel keeps its height; the column
+        // scrolls rather than the panels squashing to fit.
+        flexShrink: 0,
       }}
     >
       <h2
