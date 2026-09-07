@@ -7582,3 +7582,20 @@ the test run, so a red suite cannot be committed by accident.
 - BLOCKER: -
 - NEXT: the builder — restart the app (the change needs the rebuilt bundle),
   untick grid on the face, and read `guide=off` in the output log.
+
+## 2026-09-07 — Sprint (W1 fixes, close) — the builder confirms the switch; the documents brought current
+- DID: no code. The builder, at the wall, after a restart: **"it works now"**
+  — the per-face grid switch turns the face's grid off on the projection.
+  Recorded in `SPRINT_CHECKLIST.md` as said, no numbers. The checklist's
+  "State now" gains an evening addendum; W2's tool list is rewritten (it named
+  the removed White fill button); a "grid off" line joins W2's take steps;
+  `UI_PLAN.md` gets a status block under its header.
+- MEASURED: npm test 1189 / 1189, 47 files (1118 → 1189 over the day, +71 in
+  four new files). test:render 52 / 52 throughout. Fourteen commits today.
+- BLOCKER: -
+- NEXT: W2 — the set, the reel scene saved as `reel`, the backup take.
+
+Still open from W1, because it was not reported: every precondition line;
+whether the fifth face lit itself; the Gate 5 debts with their numbers; `g`
+clearing the guides; a clip's poster on the panel. W2 can discharge each in
+passing, and the checklist says so line by line.
