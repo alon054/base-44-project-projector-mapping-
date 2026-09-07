@@ -18,6 +18,10 @@
  * applies unchanged — and so does its warning: **guides on the projection are
  * a re-shoot.** The toggle is for the take.
  *
+ * WHICH faces show one is the compositor's rule, passed in: a face's own
+ * `guide` flag if set, else "shown while nothing fills it" — the grid is for
+ * placing the face, and once the animation lands the grid is in the way.
+ *
  * Normalized positions become pixels here and nowhere else (I-1). Redrawn from
  * the path on every room write and on resize — never scaled, for the reason
  * `reshapeFill` gives: a guide that remembered where it used to be would sit
@@ -25,7 +29,7 @@
  */
 import { Container, Graphics } from 'pixi.js';
 import type { Path } from '../core/paths';
-import type { SurfaceTree } from '../core/surfaces';
+import type { Surface, SurfaceTree } from '../core/surfaces';
 import { buildMask, isMaskable, pathPixelBounds, pathPixelPoints } from './mask';
 
 const WHITE = 0xffffff;
@@ -61,10 +65,17 @@ export function drawFaceGuide(g: Graphics, path: Path, width: number, height: nu
  * previous children are destroyed, not reused — a room write is operator-paced
  * (a pointer sample at most), and this allocates nothing per frame (A14).
  */
-export function drawFaceGuides(root: Container, surfaces: SurfaceTree, width: number, height: number): void {
+export function drawFaceGuides(
+  root: Container,
+  surfaces: SurfaceTree,
+  width: number,
+  height: number,
+  /** Which faces show a guide. Default: every maskable one. The compositor passes the auto rule. */
+  show: (surface: Surface) => boolean = () => true,
+): void {
   for (const child of root.removeChildren()) child.destroy({ children: true });
   for (const surface of surfaces) {
-    if (!isMaskable(surface.path)) continue;
+    if (!isMaskable(surface.path) || !show(surface)) continue;
     const holder = new Container();
     holder.label = `guide:${surface.id}`;
     const mask = buildMask(surface.path, width, height);

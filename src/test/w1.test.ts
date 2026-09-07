@@ -11,7 +11,10 @@ import { Container, Graphics } from 'pixi.js';
 import { Compositor } from '../render/compositor';
 import { FACE_GRID_DIVISIONS, drawFaceGuide, drawFaceGuides } from '../render/faceGuides';
 import { createPath, type Path } from '../core/paths';
-import { createSurface, reconcileSurfaces, type SurfaceTree } from '../core/surfaces';
+import { canonicalizeSurface, createSurface, reconcileSurfaces, withSurfaceGuide, type SurfaceTree } from '../core/surfaces';
+import { createBlankScene } from '../core/defaultScene';
+import { createLayer } from '../core/layer';
+import { type ContentProvider, type LayerView, type ProviderContext } from '../providers/ContentProvider';
 import { ProviderRegistry } from '../providers/ContentProvider';
 import { createScene } from '../core/scene';
 import { addAssetFill } from '../core/sceneEdit';
@@ -112,9 +115,13 @@ describe('W1 note 1 — a white guide grid on every marked face, on the projecti
   it('visible-then-draw, the v8 rule, in setWallGrid and in setSurfaces and resize', () => {
     const src = read('src/render/compositor.ts');
     const body = src.match(/setWallGrid\(on: boolean\): void \{([\s\S]*?)\n  \}/)![1]!;
-    expect(body.indexOf('this.faceGuides.visible = on')).toBeLessThan(body.indexOf('drawFaceGuides('));
-    expect(src).toMatch(/if \(this\.faceGuides\.visible\) drawFaceGuides\(this\.faceGuides, tree/);
-    expect(src).toMatch(/if \(this\.faceGuides\.visible\) drawFaceGuides\(this\.faceGuides, this\.surfaces/);
+    expect(body.indexOf('this.faceGuides.visible = on')).toBeLessThan(body.indexOf('this.refreshGuides()'));
+    // One redraw path, guarded on visibility, called from the room write, the
+    // scene apply and the resize — never per frame.
+    const refresh = src.match(/private refreshGuides\(\): void \{([\s\S]*?)\n  \}/)![1]!;
+    expect(refresh.indexOf('if (!this.faceGuides.visible) return;')).toBeLessThan(refresh.indexOf('drawFaceGuides('));
+    expect((src.match(/this\.refreshGuides\(\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect(src).not.toMatch(/update\([\s\S]{0,400}refreshGuides/);
   });
 
   it('the golden harness never enables it, so no blessed frame can contain a guide', () => {
@@ -176,5 +183,100 @@ describe('W1 note 3 — the preview learns the downloaded clips', () => {
     expect(src).toMatch(/onLibraryChange\(\(\) => \{[\s\S]*registerAssets\(downloadedEntries\(\)\)[\s\S]*reapplyScene\(\)/);
     // Never the whole editor library: the bundled assets are not library:// entries.
     expect(src).not.toMatch(/editorLibrary\.all\(\)/);
+  });
+});
+
+
+class PlainProvider implements ContentProvider {
+  readonly id = 'plain';
+  create(ctx: ProviderContext): LayerView {
+    const view = new Container();
+    view.addChild(new Graphics().rect(0, 0, ctx.width, ctx.height).fill({ color: 0x808080 }));
+    return { view, update: () => {}, resize: () => {}, destroy: () => {} };
+  }
+}
+function fillScene(role: string) {
+  return createScene({ id: 'f', layers: [createLayer({ id: 'fill-1', providerId: 'plain', content: {}, fillRole: role })] });
+}
+function guidedCompositor(surfaces: SurfaceTree): Compositor {
+  const providers = new ProviderRegistry();
+  providers.register(new PlainProvider());
+  return new Compositor({ providers, width: W, height: H, surfaces });
+}
+
+describe('W1 follow-up — a per-face grid switch that hides itself once the face is filled', () => {
+  it('the flag is optional, tolerant, and absent from a face that never touched it (R1 intact)', () => {
+    const s = createSurface({ id: 'surface-1', path: quad('p1') });
+    expect(Object.keys(s).sort()).toEqual(['id', 'name', 'path', 'role']);
+    expect(canonicalizeSurface({ ...s, guide: true })?.guide).toBe(true);
+    expect(canonicalizeSurface({ ...s, guide: false })?.guide).toBe(false);
+    expect(canonicalizeSurface({ ...s, guide: 'yes' })).toEqual(s);
+    expect(withSurfaceGuide([s], 'surface-1', true)[0]!.guide).toBe(true);
+    expect(Object.keys(withSurfaceGuide(withSurfaceGuide([s], 'surface-1', true), 'surface-1', undefined)[0]!).sort()).toEqual(['id', 'name', 'path', 'role']);
+  });
+
+  it('the flag survives a drag — reconcile keeps the face and its switch', () => {
+    const tree = withSurfaceGuide(room(quad('p1')), 'surface-1', true);
+    const moved = reconcileSurfaces(tree, [quad('p1', 0.4, 0.2)]);
+    expect(moved[0]!.guide).toBe(true);
+  });
+
+  it('auto: a bare face shows its grid; the moment a fill lands on it, the grid goes', () => {
+    const c = guidedCompositor(room(quad('p1'), quad('p2', 0.5, 0.5)));
+    c.setWallGrid(true);
+    expect(guidesOf(c).map((g) => g.label)).toEqual(['guide:surface-1', 'guide:surface-2']);
+    c.setScene(fillScene('panel'));
+    // Both faces carry `panel`, both are filled, both grids gone.
+    expect(guidesOf(c)).toEqual([]);
+    c.setScene(fillScene('other'));
+    // Nothing matches `other`: no fill lands, both grids back.
+    expect(guidesOf(c).length).toBe(2);
+    c.destroy();
+  });
+
+  it('a re-tag on the room side moves the grid with the fill, on the same write', () => {
+    const tree = room(quad('p1'), quad('p2', 0.5, 0.5));
+    const c = guidedCompositor(tree);
+    c.setScene(fillScene('f1'));
+    c.setWallGrid(true);
+    expect(guidesOf(c).length).toBe(2);
+    c.setSurfaces(tree.map((s) => (s.id === 'surface-1' ? { ...s, role: 'f1' } : s)));
+    expect(guidesOf(c).map((g) => g.label)).toEqual(['guide:surface-2']);
+    c.destroy();
+  });
+
+  it('the switch wins over auto, both ways', () => {
+    const tree = room(quad('p1'), quad('p2', 0.5, 0.5));
+    const c = guidedCompositor(tree);
+    c.setScene(fillScene('panel'));
+    c.setWallGrid(true);
+    expect(guidesOf(c)).toEqual([]);
+    c.setSurfaces(withSurfaceGuide(tree, 'surface-1', true));
+    expect(guidesOf(c).map((g) => g.label)).toEqual(['guide:surface-1']);
+    c.setScene(fillScene('other'));
+    c.setSurfaces(withSurfaceGuide(tree, 'surface-2', false));
+    expect(guidesOf(c).map((g) => g.label)).toEqual(['guide:surface-1']);
+    c.destroy();
+  });
+
+  it('the panel row has the switch and it writes through the one room writer', () => {
+    const src = read('src/editor/SurfacePanel.tsx');
+    expect(src).toMatch(/checked=\{surface\.guide \?\? !lit\}/);
+    expect(src).toMatch(/onSurfaces\(withSurfaceGuide\(surfaces, surface\.id, e\.currentTarget\.checked\)\)/);
+  });
+});
+
+describe('W1 follow-up — a blank page at launch', () => {
+  it('createBlankScene has no layers and no groups, and is a valid scene', () => {
+    const b = createBlankScene();
+    expect(b.layers).toEqual([]);
+    expect(b.groups).toEqual([]);
+    expect(b.id).toBe('blank');
+  });
+
+  it('the editor opens on it; the Phase-1 scene is still there for the debug buttons', () => {
+    const app = read('src/editor/App.tsx');
+    expect(app).toMatch(/useState<Scene>\(createBlankScene\)/);
+    expect(app).toMatch(/setScene\(createDefaultScene\(\)\)/);
   });
 });

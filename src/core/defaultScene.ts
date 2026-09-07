@@ -14,6 +14,16 @@ import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvid
 import { FORCE_DEFINITIONS } from './forceDefs';
 import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
 
+/**
+ * W1 fix. What the editor opens on when no scene is stored: nothing. The
+ * builder's words — "start from a blank page, no tree or water." The Phase-1
+ * scene is still `createDefaultScene` for the tests, the goldens and the
+ * measurement runs that name it; it is just not the first thing on the wall.
+ */
+export function createBlankScene(): Scene {
+  return createScene({ id: 'blank', name: 'Blank' });
+}
+
 export function createDefaultScene(): Scene {
   return createScene({
     id: 'phase1-default',

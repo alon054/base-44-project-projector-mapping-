@@ -7482,3 +7482,37 @@ the two places that DEPENDED on it (the drawer's disabled button, the Fill
 panel's empty text) were prose, not code paths a test walked. "When you fix
 an instance, grep for the class" applies to a button's name as much as to a
 counter: grep the label before deleting the thing it labels.
+
+## 2026-09-07 — Sprint (W1 fixes, follow-up 2) — a per-face grid switch that hides itself, and a blank page
+- DID: `Surface.guide?: boolean` (absent = automatic), `withSurfaceGuide`,
+  tolerant read in `canonicalizeSurface`. Compositor: one `refreshGuides()`
+  — guarded on visibility, called from the toggle, the room write (after the
+  fills reshape), the scene apply (after the mounts exist) and resize — with
+  the rule `s.guide ?? !filled.has(s.id)` where `filled` is read off the live
+  fill instances. `SurfacePanel` row gains a **grid** checkbox
+  (`surface.guide ?? !lit`) writing through the one room writer.
+  `createBlankScene`; the editor opens on it.
+- MEASURED: npm test 1177 → 1185 (+8 in `w1.test.ts`); test:render 52 / 52,
+  43 pre-fill byte-identical. Mutations: auto rule inverted → 6 fail;
+  setScene forgets to refresh → 3 fail; canonicalizer drops the flag → 1 fail.
+- BLOCKER: -
+- NEXT: the builder — the two new (wall) lines under F1, then W2.
+
+DECISION — the switch is room state, not scene state, not UI state. It is
+about placing a face against cardboard, it must reach the output (which draws
+the guides), and it must survive a scene load. That is calibration by I-15's
+test, so it lives on the `Surface` and crosses on `surfaces:set` like `role`.
+The output does not receive "which faces are filled" — it already knows,
+from its own fill instances — so the automatic half of the rule is computed
+where the fills are, and the panel's checkbox mirrors the same question
+through `lit`. One rule, two readers, no second source of truth.
+
+DECISION — the optional field does not bump `SURFACES_VERSION`. A file
+written before the flag reads back identical; a file with the flag read by
+the previous build loses only the flag, which is a display aid. The R1
+shape test still passes because the key is spread only when set.
+
+The blank page: the builder's "no tree or water" is a first impression, and
+the Phase-1 scene was the first thing on the wall at every launch for seven
+phases because nobody but the builder had ever opened the app. Gate 9's "a
+person who is not the builder" starts with an empty page now.

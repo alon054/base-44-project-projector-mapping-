@@ -37,6 +37,7 @@
 import {
   DEFAULT_SURFACE_ROLE,
   removeSurface,
+  withSurfaceGuide,
   withSurfaceName,
   withSurfaceRole,
   type SurfaceTree,
@@ -112,6 +113,23 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
               }}
               onCommit={(v) => onSurfaces(withSurfaceRole(surfaces, surface.id, v))}
             />
+            {/*
+              W1 fix. The face's guide grid on the projection. Checked = shown.
+              Unset, it follows the rule the output applies: shown while nothing
+              fills the face, hidden once something does — so the box reads
+              "on" for a bare face and "off" the moment its animation lands,
+              and a click pins either way. `lit` here is the same question the
+              output answers with its fill instances.
+            */}
+            <label style={guideStyle} title="White guide grid on this face, on the projection. Unset: on until the face has a fill. g on the output hides them all.">
+              <input
+                type="checkbox"
+                checked={surface.guide ?? !lit}
+                aria-label={`guide grid on ${surface.name}`}
+                onChange={(e) => onSurfaces(withSurfaceGuide(surfaces, surface.id, e.currentTarget.checked))}
+              />
+              grid
+            </label>
             <span style={countStyle} title={surface.id}>
               {points} pt{points === 1 ? '' : 's'}
               {surface.path.closed ? '' : ' · open'}
@@ -143,7 +161,7 @@ const rowStyle: React.CSSProperties = {
   display: 'grid',
   // The role field is wide enough for two words (`panel f1`); the status
   // column sizes to its text so 'unfilled' is never clipped to 'unfille'.
-  gridTemplateColumns: 'minmax(80px, 1fr) 120px auto 22px',
+  gridTemplateColumns: 'minmax(80px, 1fr) 120px auto auto 22px',
   alignItems: 'center',
   gap: 6,
 };
@@ -156,6 +174,16 @@ const fieldStyle: React.CSSProperties = {
   color: 'inherit',
   font: '12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace',
   minWidth: 0,
+};
+
+const guideStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 3,
+  fontSize: 11,
+  color: '#8b939b',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const countStyle: React.CSSProperties = {

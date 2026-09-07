@@ -54,6 +54,17 @@ export interface Surface {
   role: string;
   /** I-17, normalized (I-1). Open or closed; `closed` is a value, not a kind. */
   path: Path;
+  /**
+   * W1 fix. The face's guide grid on the projection: `true` shown, `false`
+   * hidden, ABSENT = automatic — shown while nothing fills the face, hidden
+   * once something does. The builder's rule: the grid is for placing the face,
+   * and once the animation is on it the grid is in the way, "but I can turn it
+   * on if I want." Optional and spread only when set, so a face that never
+   * touched the switch keeps R1's four fields and the file written before the
+   * flag existed reads back unchanged. A display aid, not geometry: it is
+   * tolerated like `role`, never refused.
+   */
+  guide?: boolean;
 }
 
 /**
@@ -97,13 +108,27 @@ export function createSurface(init: {
   name?: string;
   role?: string;
   path: Path;
+  guide?: boolean;
 }): Surface {
   return {
     id: init.id,
     name: init.name === undefined || init.name === '' ? init.id : init.name,
     role: init.role === undefined || init.role === '' ? DEFAULT_SURFACE_ROLE : init.role,
     path: init.path,
+    ...(init.guide === undefined ? {} : { guide: init.guide }),
   };
+}
+
+/**
+ * W1 fix. Show, hide, or hand the face's guide back to the automatic rule
+ * (`undefined`). Room side, like `withSurfaceRole`.
+ */
+export function withSurfaceGuide(tree: SurfaceTree, id: string, guide: boolean | undefined): Surface[] {
+  return tree.map((s) => {
+    if (s.id !== id) return s;
+    const { guide: _dropped, ...rest } = s;
+    return guide === undefined ? rest : { ...rest, guide };
+  });
 }
 
 /**
@@ -188,6 +213,9 @@ export function canonicalizeSurface(raw: unknown): Surface | null {
     name: typeof o['name'] === 'string' ? o['name'] : o['id'],
     role: typeof o['role'] === 'string' ? o['role'] : DEFAULT_SURFACE_ROLE,
     path,
+    // Anything but a boolean is "not set": a display aid is tolerated the way
+    // `role` is — a mistyped flag must not drop a face at the wall.
+    ...(typeof o['guide'] === 'boolean' ? { guide: o['guide'] } : {}),
   });
 }
 

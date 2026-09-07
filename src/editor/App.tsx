@@ -37,6 +37,7 @@ import { WarpPanel } from './WarpPanel';
 import type { Clock } from '../core/clock';
 import {
   createAltScene,
+  createBlankScene,
   createDefaultScene,
   createPhase3Scene,
   createResilienceVideoScene,
@@ -68,7 +69,8 @@ import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryE
 
 export function App(): React.JSX.Element {
   const [speed, setSpeed] = useState(1);
-  const [scene, setScene] = useState<Scene>(createDefaultScene);
+  // W1 fix: a blank page, not the Phase-1 scene. A stored scene (S1) replaces it at launch.
+  const [scene, setScene] = useState<Scene>(createBlankScene);
   const [failures, setFailures] = useState<SceneFailure[]>([]);
   /**
    * P5-F. The control panel's own state — which layer is selected, which

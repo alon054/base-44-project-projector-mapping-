@@ -351,7 +351,24 @@ export class Compositor {
     if (on) drawWallGrid(this.wallGrid, this.width, this.height);
     // The face guides follow, under the same visible-then-draw rule.
     this.faceGuides.visible = on;
-    if (on) drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height);
+    if (on) this.refreshGuides();
+  }
+
+  /**
+   * W1 fix. Redraw the face guides for the current room and scene, while they
+   * are showing. A face shows its guide if its own `guide` flag says so, else
+   * while NOTHING fills it — the moment a fill instance lands on a face, its
+   * grid goes, unless the builder switched it on. Called wherever either input
+   * changes: the toggle, a room write, a scene apply, a resize. Never per frame.
+   */
+  private refreshGuides(): void {
+    if (!this.faceGuides.visible) return;
+    const filled = new Set<string>();
+    for (const mount of this.mounts.values()) {
+      if (!mount.isFill) continue;
+      for (const instance of mount.fills) filled.add(instance.surface.id);
+    }
+    drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height, (s) => s.guide ?? !filled.has(s.id));
   }
 
   /** Whether the grid is currently on the projection. For the log and the HUD. */
@@ -402,11 +419,12 @@ export class Compositor {
   setSurfaces(tree: SurfaceTree): void {
     const previous = this.surfaces;
     this.surfaces = tree;
-    // W1 fix. Guides are the room's, not the scene's: redrawn on every room
-    // write while they are showing, before and regardless of the fills below.
-    if (this.faceGuides.visible) drawFaceGuides(this.faceGuides, tree, this.width, this.height);
-    if (!this.scene) return;
+    if (!this.scene) {
+      this.refreshGuides();
+      return;
+    }
     if (surfacesShapeKey(previous) !== surfacesShapeKey(tree)) {
+      // `setScene` refreshes the guides itself, after the fills are rebuilt.
       this.setScene(this.scene);
       return;
     }
@@ -429,6 +447,9 @@ export class Compositor {
         this.reshapeFill(instance, entry.layer, surface);
       }
     }
+    // W1 fix. Guides are redrawn AFTER the fills are reshaped, so a face that
+    // just gained or lost a fill shows or hides its grid on the same write.
+    this.refreshGuides();
   }
 
   /**
@@ -485,6 +506,8 @@ export class Compositor {
     );
 
     for (const entry of this.entries) this.mount(entry);
+    // W1 fix. Which faces are filled is known only now.
+    this.refreshGuides();
   }
 
   private createView(scene: Scene, layer: Layer): LayerView {
@@ -901,7 +924,7 @@ export class Compositor {
     // Rebuilt from normalized positions at the new size (I-1), not scaled — the
     // same ruling the masks take four lines down, for the same reason.
     if (this.wallGrid.visible) drawWallGrid(this.wallGrid, this.width, this.height);
-    if (this.faceGuides.visible) drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height);
+    this.refreshGuides();
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
       if (mount?.isFill) {
