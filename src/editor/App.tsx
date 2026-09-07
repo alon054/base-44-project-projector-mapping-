@@ -64,7 +64,6 @@ import { FillPanel } from './FillPanel';
 import { GroupPanel } from './GroupPanel';
 import { LibraryDrawer } from './LibraryDrawer';
 import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
-import { addWhiteFill } from '../core/sceneEdit';
 
 
 export function App(): React.JSX.Element {
@@ -582,19 +581,13 @@ export function App(): React.JSX.Element {
   const roomPanel = (
     <Panel title="Room — the faces you marked (calibration/surfaces.json)">
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        {!panelFilled ? (
-          <button
-            type="button"
-            style={{ ...buttonStyle, marginTop: 0, fontWeight: 600, borderColor: '#40e0ff' }}
-            title={
-              'Adds a flat white layer bound to role "panel" — every face tagged panel ' +
-              'lights white. Mark a face, drag its points until the white sits on it.'
-            }
-            onClick={() => setScene((prev) => addWhiteFill(prev, WHITE_FILL_ROLE))}
-          >
-            White fill → {WHITE_FILL_ROLE}
-          </button>
-        ) : null}
+        {/*
+          W1 fix. The white-fill button is gone at the builder's
+          request: the face guides on the projection (grid on from launch) are
+          the placement aid now, and a face goes straight from marked to an
+          animation on its role. `addWhiteFill` stays in `core/sceneEdit.ts`
+          — B3's tests and the reel's beat 3 still use it.
+        */}
         <span style={{ fontSize: 12, color: '#8b939b' }}>
           {filledRoles.length === 0
             ? 'no layer fills a role yet — nothing will land on a face'
@@ -860,8 +853,10 @@ export function App(): React.JSX.Element {
                   or click the first point, to close it.
                 </li>
                 <li>
-                  Hit <strong>White fill → panel</strong> once (Room, on the right). Every face tagged{' '}
-                  <code>panel</code> lights white, including ones you mark later.
+                  On the projector every marked face shows a white guide grid (the grid is on from
+                  launch; <kbd style={kbdStyle}>g</kbd> toggles it — <strong>off before a take</strong>).
+                  Pick an animation for role <code>panel</code> under Fill and every face tagged{' '}
+                  <code>panel</code> shows it, including ones you mark later.
                 </li>
                 <li>
                   Click a face to select it, then drag its points until the white sits on the real

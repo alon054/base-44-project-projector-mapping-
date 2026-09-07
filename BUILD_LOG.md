@@ -7391,3 +7391,73 @@ IDEAS — three things this session noticed and did not do:
 3. The rotating snapshot slot restarts at zero per launch. A timestamped name
    would make the files self-describing at the cost of a directory that grows;
    the rotation was chosen so the directory cannot grow. Noted, not changed.
+
+## 2026-09-07 — Sprint (W1) — the builder's first wall session, as reported
+- DID: nothing in the tree. This entry records the builder's W1 report in
+  their words, with no numbers, because none were given. A verdict given
+  without figures is recorded as a verdict without figures (CLAUDE.md).
+- MEASURED: - (no HUD numbers, no point counts, no texture counts reported)
+- BLOCKER: -
+- NEXT: the four notes below, diagnosed against the code in the same session.
+
+The builder's notes, verbatim:
+1. "i want to see the grid on the projector sence from the begining so i can
+   se accatly where i put the animation (show it in a white grid)"
+2. "i dont want a white fill i want the grid allways there is no need to the
+   white fill"
+3. "when i swap its swaps only in the projector on the contorol pannel i see
+   an error"
+4. "also the animation are in really low qulity and there is problems there"
+
+Not reported, and therefore still open: every W1 precondition line, the
+warp-survives-relaunch line, whether a marked face lit, whether the fifth
+face lit itself, the Gate 5 debts (point counts, texture counts, h/r/k
+reaching the output, the force sliders, the hit radius), and the five lines
+before leaving the room. The implication of note 3 is that the swap DID
+reach the projector, and of note 1 that the projector showed content — but
+neither is a line the builder ticked, and neither is ticked here.
+
+## 2026-09-07 — Sprint (W1 fixes, F1) — face guides, no white fill, the preview learns the library, low-res named
+- DID: `render/faceGuides.ts` — per-face white guide (outline + 4×4 over the
+  box, masked to the face), a compositor sibling between the layers and the
+  wall grid, on the wall grid's toggle; output turns the toggle ON at launch
+  unless `measureLabel` is set. White fill button and hint removed from
+  `App.tsx`. `PreviewCanvas` registers the downloaded entries into its host
+  before the first scene and on `library:added` (`editor/assets.ts` keeps the
+  accepted raw entries — `downloadedEntries()`). Catalog ranking prefers the
+  height nearest 720 rows; `isLowRes` names under-480 / `_512kb`; the drawer
+  prints resolution and "low-res". Day-3 checklist gains "grid off before
+  every take".
+- MEASURED: npm test 1161 → 1175 (46 → 47 files, +14); test:render 52 / 52;
+  typecheck clean. Direct launch: `[grid] ON at launch`, 8 assets registered
+  in both windows, 0 skipped-entry warnings (the first cut logged 8).
+  Archive metadata for FREE_VJ_LOOPS: 60 × QuickTime 320×240 and 60 × 512Kb
+  MPEG4 320×240 — the pack is 240 rows at the source. Mutations: no guide
+  redraw → 2 fail; no preview registration → 1; old ranking → 1.
+- BLOCKER: -
+- NEXT: the builder at the wall — the three (wall) lines under F1, then W2.
+
+DECISION — the guides are guides, not content. They could have been a
+"grid fill" content layer per face, which would have reached the preview and
+the goldens and needed a registry key. They are instead the wall grid's
+sibling under its toggle: never in a blessed frame, never in a scene file, and
+a re-shoot if left on — which is what the new day-3 line is for. Hard rule
+9's import-graph guard is untouched and still passes.
+
+DECISION — B3's "grid off at every launch" is reversed, by the builder, for
+the reason B3 gave for having a grid at all: placing a face on cardboard by
+eye without a reference is guesswork. The safety moved from the default to
+the checklist and the log line. A measurement run keeps the old default so
+§4's numbers are still without guide lines.
+
+MEASURED — the low quality is the source. The ranking bug was real (smallest
+file ≥ 240 rows won) and is fixed, but the clip in the screenshot had no
+better sibling to lose to: every MP4 in that pack is 320×240. The builder
+needs a different pack, and the drawer now says which ones are low-res before
+the download rather than after the wall.
+
+A fix caught by running it. `editorLibrary.all()` as the preview's
+registration list passed the bundled assets through `canonicalizeLibraryEntry`,
+which refuses their `bundled:`/`file:` URLs — eight warnings per launch and a
+log nobody would read. The suite was green; the launch was not clean. The list
+is now the raw entries the editor accepted, and the test forbids `.all()`.

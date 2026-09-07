@@ -162,6 +162,8 @@ export interface CatalogClip {
   thumbUrl: string;
   /** The clip's base name without the derivative suffix, for the label. */
   label: string;
+  /** W1 fix: under 480 rows (or a `_512kb` derivative of unknown height). Shown before the download. */
+  lowRes: boolean;
 }
 
 /**
@@ -252,6 +254,20 @@ const ext = (name: string): string => name.toLowerCase().replace(/^.*\./, '');
  * A pack of clips comes back as a list in a stable order, so the editor can
  * show them and the operator can pick one; `pickArchiveFile` is its head.
  */
+/**
+ * W1 fix. A file the builder will see as "really low quality" on a 720-row
+ * projector: under 480 rows when the height is known, or one of the Archive's
+ * `_512kb` derivatives when it is not. Named so the drawer can SAY it before
+ * the download — the FREE_VJ_LOOPS pack is 320×240 at the source, originals
+ * included, and no ranking could have found a sharper file in it.
+ */
+export const LOW_RES_ROWS = 480;
+export function isLowRes(f: Pick<ArchiveFile, 'name' | 'height'>): boolean {
+  const h = num(f.height);
+  if (h > 0) return h < LOW_RES_ROWS;
+  return /_512kb\.mp4$/i.test(f.name);
+}
+
 export function candidateFiles(files: readonly ArchiveFile[], kind: CatalogKind): ArchiveFile[] {
   if (kind === 'video') {
     const mp4s = files.filter(
@@ -261,12 +277,16 @@ export function candidateFiles(files: readonly ArchiveFile[], kind: CatalogKind)
         num(f.size) > 0 &&
         num(f.size) <= MAX_DOWNLOAD_BYTES,
     );
+    // W1 fix. Was: within a rank, the SMALLEST file at or above 240 px. On a
+    // 720-row projector that chose 240p over 720p every time a pack offered
+    // both. Now: the height nearest 720 rows wins, a low-res file (`isLowRes`)
+    // ranks after any that is not, and a pack's clips keep a stable name order.
     const rank = (f: ArchiveFile): number => {
       const h264 = (f.format ?? '').toLowerCase().startsWith('h.264') ? 0 : 1;
-      const tall = num(f.height) === 0 || num(f.height) >= 240 ? 0 : 1;
-      return h264 * 2 + tall;
+      return h264 * 2 + (isLowRes(f) ? 1 : 0);
     };
-    return mp4s.slice().sort((a, b) => rank(a) - rank(b) || num(a.size) - num(b.size) || a.name.localeCompare(b.name));
+    const nearness = (f: ArchiveFile): number => (num(f.height) === 0 ? 360 : Math.abs(num(f.height) - 720));
+    return mp4s.slice().sort((a, b) => rank(a) - rank(b) || nearness(a) - nearness(b) || a.name.localeCompare(b.name));
   }
   const images = files.filter(
     (f) =>
@@ -333,6 +353,7 @@ export function catalogClips(identifier: string, files: readonly ArchiveFile[], 
       height: num(f.height),
       thumbUrl: thumb ? libraryFileThumbUrl(identifier, thumb.name) : libraryThumbUrl(identifier),
       label: clipBase(f.name),
+      lowRes: isLowRes(f),
     };
   });
 }

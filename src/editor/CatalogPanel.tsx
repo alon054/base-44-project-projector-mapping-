@@ -218,7 +218,13 @@ export function CatalogPanel({ onAdded }: Props): React.JSX.Element {
                         onClick={() => void add(hit, clip.name)}
                       >
                         <img src={clip.thumbUrl} alt="" style={clipThumb} loading="lazy" draggable={false} />
-                        <span style={clipCaption}>{inLib ? '✓ ' : ''}{clip.label}</span>
+                        <span style={clipCaption}>
+                          {inLib ? '✓ ' : ''}
+                          {clip.label}
+                          {/* W1 fix: the resolution BEFORE the download, and low-res named as such. */}
+                          {clip.width ? ` · ${clip.width}×${clip.height}` : ''}
+                          {clip.lowRes ? <span style={{ color: '#d8b45a' }}> · low-res</span> : null}
+                        </span>
                       </button>
                     );
                   })}

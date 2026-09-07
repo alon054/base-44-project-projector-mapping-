@@ -464,6 +464,17 @@ host = await createRenderHost({
   if (added.length > 0) console.log(`[library] ${added.length} downloaded asset(s) registered`);
 }
 
+// W1 fix — the builder's call, reversing B3's "off at every launch": the wall
+// grid and the face guides are ON from the first frame, so a face can be
+// placed against the wall without a white fill. Still not persisted, still one
+// toggle (`g`), still logged — and still a re-shoot if it is up in a take, so
+// the day-3 checklist says "grid off" before every one. A measurement run
+// keeps B3's default: guide lines are load, and §4's numbers are without them.
+if (config.measureLabel === '') {
+  host.setWallGrid(true);
+  console.log('[grid] ON at launch — guide lines are on the projection, not for a take (press g)');
+}
+
 if (pendingScene.v) {
   host.setScene(pendingScene.v);
   pendingScene.v = null;

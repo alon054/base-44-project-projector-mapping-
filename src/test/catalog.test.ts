@@ -17,6 +17,7 @@ import {
   archiveSearchUrl,
   buildLibraryEntry,
   candidateFiles,
+  isLowRes,
   catalogAssetId,
   catalogClips,
   clipBase,
@@ -129,7 +130,7 @@ describe('which file comes home', () => {
     { name: '__ia_thumb.jpg', format: 'Item Tile', size: '4000', source: 'metadata' },
   ];
 
-  it('video: an h.264 derivative beats the 512Kb one, and the smallest h.264 at or above 240 px wins', () => {
+  it('video: an h.264 derivative beats the 512Kb one, and the height nearest 720 rows wins', () => {
     // `loop_512kb.mp4` is smaller but is the Archive's low-quality derivative;
     // with a real h.264 present it is not the one to put on a wall.
     expect(pickArchiveFile(files, 'video')?.name).toBe('loop.mp4');
@@ -138,6 +139,24 @@ describe('which file comes home', () => {
       { name: 'loop_1080.mp4', format: 'h.264 HD', size: '40000000', height: '1080', source: 'derivative' },
     ];
     expect(pickArchiveFile(two, 'video')?.name).toBe('loop.mp4');
+  });
+
+  it('W1 fix: 720 beats 240 even when 240 is the smaller file — the old rule chose 240 here', () => {
+    const both: ArchiveFile[] = [
+      { name: 'a_240.mp4', format: 'h.264', size: '1000', height: '240' },
+      { name: 'a_720.mp4', format: 'h.264', size: '9000', height: '720' },
+      { name: 'a_360.mp4', format: 'h.264', size: '3000', height: '360' },
+    ];
+    expect(candidateFiles(both, 'video').map((f) => f.name)).toEqual(['a_720.mp4', 'a_360.mp4', 'a_240.mp4']);
+  });
+
+  it('W1 fix: low-res is named — under 480 rows, or a _512kb derivative of unknown height', () => {
+    expect(isLowRes({ name: 'x.mp4', height: '240' })).toBe(true);
+    expect(isLowRes({ name: 'x.mp4', height: '480' })).toBe(false);
+    expect(isLowRes({ name: 'x_512kb.mp4' })).toBe(true);
+    expect(isLowRes({ name: 'x.mp4' })).toBe(false);
+    const clips = catalogClips('pack-1', [{ name: 'c_512kb.mp4', format: '512Kb MPEG4', size: '300', height: '240' }], 'video');
+    expect(clips[0]?.lowRes).toBe(true);
   });
 
   it('video: falls back to any MP4 when there is no h.264 derivative', () => {

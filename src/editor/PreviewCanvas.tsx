@@ -28,6 +28,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRenderHost, type RenderHost } from '../render/host';
+import { downloadedEntries, onLibraryChange } from './assets';
 import type { Clock, ClockTransport } from '../core/clock';
 import type { Scene } from '../core/scene';
 import { addLayer, removeLayer, setLayerRect, type NormalizedRect } from '../core/sceneEdit';
@@ -227,6 +228,13 @@ export function PreviewCanvas({
         return;
       }
       host.current = h;
+      // W1 fix. The preview's host has its own asset library, and nothing
+      // told it about the DOWNLOADED clips — so a library video showed the
+      // I-13 placeholder here ("no bundled asset") while it played on the
+      // projector. The output registers them at start and on `library:added`
+      // (`output/main.ts`); the preview now does the same with the entries the
+      // editor's library accepted, before the first scene is applied.
+      h.registerAssets(downloadedEntries());
       h.setSpeed(speed);
       h.setScene(sceneRef.current);
       h.setSurfaces(surfacesRef.current);
@@ -247,6 +255,19 @@ export function PreviewCanvas({
   useEffect(() => {
     host.current?.setSpeed(speed);
   }, [speed]);
+
+  // W1 fix, the other half: a clip downloaded while the editor is open. Same
+  // rule as the output — register, and re-apply the scene only if something
+  // was actually new, so a placeholder standing in for it becomes the poster.
+  useEffect(
+    () =>
+      onLibraryChange(() => {
+        const h = host.current;
+        if (!h) return;
+        if (h.registerAssets(downloadedEntries()).length > 0) h.reapplyScene();
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (nominalMs > 0) host.current?.setNominalMs(nominalMs);

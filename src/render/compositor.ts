@@ -71,6 +71,7 @@ import type { ContentProvider, LayerFrame, LayerView, ProviderRegistry } from '.
 import { toPixiBlendMode } from './blend';
 import { buildMask, drawMask, isMaskable, pathPixelBounds, type PixelBox } from './mask';
 import { drawWallGrid } from './wallGrid';
+import { drawFaceGuides } from './faceGuides';
 import { createPlaceholderGraphic } from './placeholder';
 
 /** Frozen: the compositor reads it every mount and must never mutate it. */
@@ -284,6 +285,14 @@ export class Compositor {
    * blessed frame can contain it — structural, not a promise.
    */
   private readonly wallGrid = new Graphics();
+  /**
+   * W1 fix. The per-face guide grids (`render/faceGuides.ts`): a sibling
+   * between the layers and the wall grid, following the wall grid's ONE toggle
+   * and its rules — hidden at construction, never enabled by the golden
+   * harness, drawn pre-warp. Redrawn on every room write while visible; an
+   * empty container and nothing else while hidden (A14).
+   */
+  private readonly faceGuides = new Container();
   private readonly providers: ProviderRegistry;
   private readonly onLayerFailed: (info: PlaceholderInfo, error: unknown) => void;
 
@@ -310,7 +319,8 @@ export class Compositor {
     this.height = opts.height;
     this.surfaces = opts.surfaces ?? [];
     this.wallGrid.visible = false;
-    this.view.addChild(this.background, this.layerRoot, this.wallGrid);
+    this.faceGuides.visible = false;
+    this.view.addChild(this.background, this.layerRoot, this.faceGuides, this.wallGrid);
   }
 
   /**
@@ -339,6 +349,9 @@ export class Compositor {
     // on and the geometry is stale.
     this.wallGrid.visible = on;
     if (on) drawWallGrid(this.wallGrid, this.width, this.height);
+    // The face guides follow, under the same visible-then-draw rule.
+    this.faceGuides.visible = on;
+    if (on) drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height);
   }
 
   /** Whether the grid is currently on the projection. For the log and the HUD. */
@@ -389,6 +402,9 @@ export class Compositor {
   setSurfaces(tree: SurfaceTree): void {
     const previous = this.surfaces;
     this.surfaces = tree;
+    // W1 fix. Guides are the room's, not the scene's: redrawn on every room
+    // write while they are showing, before and regardless of the fills below.
+    if (this.faceGuides.visible) drawFaceGuides(this.faceGuides, tree, this.width, this.height);
     if (!this.scene) return;
     if (surfacesShapeKey(previous) !== surfacesShapeKey(tree)) {
       this.setScene(this.scene);
@@ -885,6 +901,7 @@ export class Compositor {
     // Rebuilt from normalized positions at the new size (I-1), not scaled — the
     // same ruling the masks take four lines down, for the same reason.
     if (this.wallGrid.visible) drawWallGrid(this.wallGrid, this.width, this.height);
+    if (this.faceGuides.visible) drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height);
     for (const entry of this.entries) {
       const mount = this.mounts.get(entry.layer.id);
       if (mount?.isFill) {

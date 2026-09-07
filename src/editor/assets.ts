@@ -22,6 +22,19 @@ import { canonicalizeLibraryEntry } from '../core/libraryEntry';
 
 export const editorLibrary = createBundledLibrary();
 
+/**
+ * W1 fix. The raw downloaded entries, as main delivered them, so a SECOND
+ * library — the preview host's (`PreviewCanvas.tsx`) — can be handed exactly
+ * what this one accepted. Not `editorLibrary.all()`: that includes the bundled
+ * assets, whose `bundled:`/`file:` URLs the library-entry check refuses, and a
+ * launch that logs one skipped-entry warning per bundled asset is a launch
+ * whose log nobody reads.
+ */
+const downloaded: unknown[] = [];
+export function downloadedEntries(): readonly unknown[] {
+  return downloaded;
+}
+
 let version = 0;
 const listeners = new Set<(v: number) => void>();
 
@@ -49,6 +62,7 @@ export function registerLibraryEntries(entries: readonly unknown[]): string[] {
       const asset = canonicalizeLibraryEntry(raw);
       if (editorLibrary.get(asset.id)) continue;
       editorLibrary.register(asset);
+      downloaded.push(raw);
       added.push(asset.id);
     } catch (err) {
       console.warn(`[library] entry skipped: ${String(err)}`);
