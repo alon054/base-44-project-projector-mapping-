@@ -7823,3 +7823,25 @@ showed it before the cause was read off the layout rather than guessed.
 - BLOCKER: -
 - NEXT: the builder at the wall with the new column — trace, pick, cover —
   and `git add scenes/reel.json` when they say so. Then Day 3.
+
+## 2026-09-07 — Sprint (handoff) — the repo organised for upload and handover
+- DID: no code. `README.md` written: reading order for the documents, commands,
+  layout, what is tracked and what is machine-local by design, the state at
+  handoff, what a fresh clone shows (the reel's five clips fall to the I-13
+  placeholder without the library; the room is one physical set). On the
+  operator's ask, `calibration/surfaces.json` (five faces) and
+  `scenes/reel.json` committed, each alone. W2's commit line in
+  `SPRINT_CHECKLIST.md` re-annotated: `warp.json` is gitignored by design, so
+  it stays `[!]`. Repo-local git identity set (the earlier commits carry a
+  `@Mac.lan` address). Checked: no secrets, no absolute paths, `.DS_Store`
+  not tracked, every data directory created on demand.
+- MEASURED: npm test 1221 / 1221, 50 files, before and after (no source
+  touched). typecheck clean. test:render not re-run; last recorded 52 / 52.
+- BLOCKER: no git remote exists. Adding one and pushing is the operator's.
+- NEXT: push; then `SPRINT.md` §8 closes the sprint when the reel is cut.
+
+DECISION: the room and the reel scene are committed because a handover
+without them hands over an empty set. The rule that a session never commits
+`surfaces.json` on its own stands; this was the operator asking for the
+whole tree to travel. `warp.json` and `assets/library/` do not travel, on
+purpose (I-5, I-10): the README says what that costs on another machine.
