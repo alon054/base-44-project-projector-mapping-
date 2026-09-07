@@ -7534,3 +7534,22 @@ by `g` or the top-bar button. They are different on purpose (hard rule 9 —
 nothing drawn in the preview reaches the wall), and merging them would need
 the output to report grid state back, which is not plumbed. So: named
 honestly, and put in the same row.
+
+## 2026-09-07 — Sprint (W1 fixes, follow-up 4) — grid off on a face is no grid line across it
+- DID: `drawWallGridCutout` (`render/faceGuides.ts`): the whole frame with
+  every guide-hidden face cut out (`Graphics.cut()`, PixiJS 8.20). The
+  compositor applies it as the wall grid's mask from `refreshGuides()` while
+  any face is hidden, and drops the mask otherwise. Test-side, the wall grid is
+  found by its pinned position in the view.
+- MEASURED: npm test 1186 → 1189. test:render 52 / 52. Mutations: cut-out
+  never applied → 4 fail; the cut skipped → 1 fail.
+- BLOCKER: -
+- NEXT: the builder — untick grid on a face: no line of any kind crosses it.
+
+The builder's report, second reading: "the checkbox of the grid on the
+projector screen" — the per-face switch. It worked as built and looked broken:
+it removed the face's own outline and 4×4 while the frame-wide wall grid kept
+running its lines across the face, which to the eye is "the grid is there
+all the time." The switch now means what it says. A filled face, auto-hidden,
+gets the same cut, so the animation sits on a clean face with the wall grid
+around it — which is the picture the builder described on day one.

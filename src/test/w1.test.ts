@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Container, Graphics } from 'pixi.js';
 import { Compositor } from '../render/compositor';
-import { FACE_GRID_DIVISIONS, drawFaceGuide, drawFaceGuides } from '../render/faceGuides';
+import { FACE_GRID_DIVISIONS, drawFaceGuide, drawFaceGuides, drawWallGridCutout } from '../render/faceGuides';
 import { createPath, type Path } from '../core/paths';
 import { canonicalizeSurface, createSurface, reconcileSurfaces, withSurfaceGuide, type SurfaceTree } from '../core/surfaces';
 import { createBlankScene } from '../core/defaultScene';
@@ -109,7 +109,7 @@ describe('W1 note 1 — a white guide grid on every marked face, on the projecti
 
   it('sits between the layers and the wall grid, inside the composite (pre-warp)', () => {
     const src = read('src/render/compositor.ts');
-    expect(src).toMatch(/addChild\(this\.background, this\.layerRoot, this\.faceGuides, this\.wallGrid\)/);
+    expect(src).toMatch(/addChild\(this\.background, this\.layerRoot, this\.faceGuides, this\.wallGrid, this\.wallGridCutout\)/);
   });
 
   it('visible-then-draw, the v8 rule, in setWallGrid and in setSurfaces and resize', () => {
@@ -293,5 +293,47 @@ describe('W1 follow-up — two grids, two controls, labelled and side by side', 
     // The preview's grid still never reaches the output: the import-graph test
     // covers the mechanism; this covers the words.
     expect(src).not.toMatch(/setWallGrid\(/);
+  });
+});
+
+describe('W1 follow-up — grid off on a face means NO grid line crosses it, the wall grid included', () => {
+  // background, layerRoot, faceGuides, wallGrid, wallGridCutout — the order
+  // the structural test above pins.
+  const wallGridOf = (c: Compositor): Graphics => c.view.children[3] as Graphics;
+
+  it('the cut-out: whole frame with the hidden faces as holes; nothing cut, nothing drawn', () => {
+    const g = new Graphics();
+    expect(drawWallGridCutout(g, [], W, H)).toBe(false);
+    expect(g.context.instructions.length).toBe(0);
+    expect(drawWallGridCutout(g, [quad('p1'), line('open')], W, H)).toBe(true);
+    // One fill whose path is the frame plus one hole per maskable face (the
+    // open line is not one): the rect and the cut poly, two shapes in one path.
+    const fill = g.context.instructions[0] as { data: { path: { instructions: unknown[] } } };
+    expect(g.context.instructions.length).toBe(1);
+    expect(fill.data.path.instructions.length).toBe(2);
+  });
+
+  it('the wall grid is unmasked while every face shows its guide, and masked once one is switched off', () => {
+    const tree = room(quad('p1'), quad('p2', 0.5, 0.5));
+    const c = guidedCompositor(tree);
+    c.setWallGrid(true);
+    const grid = wallGridOf(c);
+    expect(grid.mask).toBeNull();
+    c.setSurfaces(withSurfaceGuide(tree, 'surface-1', false));
+    expect(grid.mask).toBeInstanceOf(Graphics);
+    c.setSurfaces(withSurfaceGuide(tree, 'surface-1', undefined));
+    expect(grid.mask).toBeNull();
+    c.destroy();
+  });
+
+  it('a filled face (auto-hidden) cuts the wall grid too, so the animation is clean', () => {
+    const tree = room(quad('p1'), quad('p2', 0.5, 0.5));
+    const c = guidedCompositor(tree);
+    c.setWallGrid(true);
+    c.setScene(fillScene('panel'));
+    expect(wallGridOf(c).mask).toBeInstanceOf(Graphics);
+    c.setScene(fillScene('other'));
+    expect(wallGridOf(c).mask).toBeNull();
+    c.destroy();
   });
 });

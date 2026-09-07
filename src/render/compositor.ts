@@ -71,7 +71,7 @@ import type { ContentProvider, LayerFrame, LayerView, ProviderRegistry } from '.
 import { toPixiBlendMode } from './blend';
 import { buildMask, drawMask, isMaskable, pathPixelBounds, type PixelBox } from './mask';
 import { drawWallGrid } from './wallGrid';
-import { drawFaceGuides } from './faceGuides';
+import { drawFaceGuides, drawWallGridCutout } from './faceGuides';
 import { createPlaceholderGraphic } from './placeholder';
 
 /** Frozen: the compositor reads it every mount and must never mutate it. */
@@ -293,6 +293,12 @@ export class Compositor {
    * empty container and nothing else while hidden (A14).
    */
   private readonly faceGuides = new Container();
+  /**
+   * The wall grid's cut-out over faces whose guide is hidden
+   * (`drawWallGridCutout`). Applied as the wall grid's mask only while some
+   * face is cut; otherwise the mask is dropped and this is an empty Graphics.
+   */
+  private readonly wallGridCutout = new Graphics();
   private readonly providers: ProviderRegistry;
   private readonly onLayerFailed: (info: PlaceholderInfo, error: unknown) => void;
 
@@ -320,7 +326,7 @@ export class Compositor {
     this.surfaces = opts.surfaces ?? [];
     this.wallGrid.visible = false;
     this.faceGuides.visible = false;
-    this.view.addChild(this.background, this.layerRoot, this.faceGuides, this.wallGrid);
+    this.view.addChild(this.background, this.layerRoot, this.faceGuides, this.wallGrid, this.wallGridCutout);
   }
 
   /**
@@ -368,7 +374,13 @@ export class Compositor {
       if (!mount.isFill) continue;
       for (const instance of mount.fills) filled.add(instance.surface.id);
     }
-    drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height, (s) => s.guide ?? !filled.has(s.id));
+    const show = (s: Surface): boolean => s.guide ?? !filled.has(s.id);
+    drawFaceGuides(this.faceGuides, this.surfaces, this.width, this.height, show);
+    // And the wall grid stays out of every face whose guide is hidden — "grid
+    // off" on a face is no grid line at all across it, the wall's included.
+    const hidden = this.surfaces.filter((s) => !show(s)).map((s) => s.path);
+    const cut = drawWallGridCutout(this.wallGridCutout, hidden, this.width, this.height);
+    this.wallGrid.mask = cut ? this.wallGridCutout : null;
   }
 
   /** Whether the grid is currently on the projection. For the log and the HUD. */

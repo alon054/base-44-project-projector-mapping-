@@ -85,3 +85,20 @@ export function drawFaceGuides(
     root.addChild(holder);
   }
 }
+
+/**
+ * W1 follow-up. The wall grid's mask: the whole frame, with every face whose
+ * guide is HIDDEN cut out of it — so "grid off" on a face means no grid line
+ * of any kind crosses that face, not just its own 4×4 gone while the wall
+ * grid's lines still run straight through it (which is what the builder saw).
+ * Returns whether anything was cut; with nothing cut the caller drops the mask
+ * altogether rather than paying a stencil for a full-frame rectangle.
+ */
+export function drawWallGridCutout(g: Graphics, hidden: readonly Path[], width: number, height: number): boolean {
+  g.clear();
+  const faces = hidden.filter(isMaskable);
+  if (faces.length === 0) return false;
+  g.rect(0, 0, width, height).fill({ color: 0xffffff, alpha: 1 });
+  for (const path of faces) g.poly(pathPixelPoints(path, width, height), true).cut();
+  return true;
+}
