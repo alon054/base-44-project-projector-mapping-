@@ -7568,3 +7568,17 @@ RISK-TRIGGERED — commit 0f5859c landed with three red tests. The shell ran
 chained with `;`-style sequencing in one command. Not amended: the history
 says what happened. The rule from here: the commit line is `&&`-chained to
 the test run, so a red suite cannot be committed by accident.
+
+## 2026-09-07 — Sprint (W1 fixes, follow-up 4c) — the per-face switch, driven in the real app
+- DID: `describeSurfaces` prints `guide=on|off` when the flag is set, so the
+  `[surfaces]` line answers "did the switch reach the output". No mechanism
+  changed.
+- MEASURED: driven once in the built app over CDP (scratch script, output
+  window screenshotted): face 1's box read `true`, click → `false`; the
+  output logged `guide=off`; the screenshot shows the face as a clean hole in
+  the wall grid with no line across it. The builder's room file was backed up
+  before and restored byte-for-byte after; it carried `guide: true` on face 1
+  — the switch was ON when they reported "the grid does not disappear".
+- BLOCKER: -
+- NEXT: the builder — restart the app (the change needs the rebuilt bundle),
+  untick grid on the face, and read `guide=off` in the output log.

@@ -238,7 +238,12 @@ export function emptySurface(id: string, name?: string): Surface {
 export function describeSurfaces(tree: SurfaceTree): string {
   if (tree.length === 0) return '[surfaces] none';
   const each = tree
-    .map((s) => `${s.id}:"${s.name}" role=${s.role} pts=${s.path.points.length}${s.path.closed ? ' closed' : ' open'}`)
+    .map(
+      (s) =>
+        `${s.id}:"${s.name}" role=${s.role} pts=${s.path.points.length}${s.path.closed ? ' closed' : ' open'}` +
+        // W1 follow-up: the guide switch, so "the grid did not go" is answerable from the log.
+        (s.guide === undefined ? '' : ` guide=${s.guide ? 'on' : 'off'}`),
+    )
     .join(' | ');
   return `[surfaces] ${tree.length}: ${each}`;
 }
