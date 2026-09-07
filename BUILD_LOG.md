@@ -7461,3 +7461,24 @@ registration list passed the bundled assets through `canonicalizeLibraryEntry`,
 which refuses their `bundled:`/`file:` URLs — eight warnings per launch and a
 log nobody would read. The suite was green; the launch was not clean. The list
 is now the raw entries the editor accepted, and the test forbids `.all()`.
+
+## 2026-09-07 — Sprint (W1 fixes, F1 follow-up) — the fill is made where it is picked
+- DID: `core/sceneEdit.ts` gains `addAssetFill(scene, role, assetId, name)`
+  — a bound layer showing a library asset from the start. The Library
+  drawer's "use on faces" makes the fill with it when no bound layer exists
+  (bound to `panel`, the default role every marked face carries); the Fill
+  panel's empty state offers "+ Add a fill for role panel" and then shows the
+  picker card. Both texts that pointed at the removed white-fill button are
+  gone.
+- MEASURED: npm test 1175 → 1177 (+2 in `w1.test.ts`). Typecheck clean. No
+  draw path touched; goldens not re-run.
+- BLOCKER: -
+- NEXT: the builder — Library → use on faces on a clip that is not marked
+  low-res, and watch the faces.
+
+RISK-TRIGGERED — a removal without a grep for its callers. The white-fill
+button was deleted on the builder's note and the suite stayed green, because
+the two places that DEPENDED on it (the drawer's disabled button, the Fill
+panel's empty text) were prose, not code paths a test walked. "When you fix
+an instance, grep for the class" applies to a button's name as much as to a
+counter: grep the label before deleting the thing it labels.

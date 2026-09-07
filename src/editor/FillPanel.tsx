@@ -34,6 +34,8 @@
  */
 import { useMemo } from 'react';
 import type { Scene } from '../core/scene';
+import { addWhiteFill } from '../core/sceneEdit';
+import { DEFAULT_SURFACE_ROLE } from '../core/surfaces';
 import { applyContentChoice, contentChoices, currentChoiceId } from './controls';
 import { editorLibrary } from './assets';
 import { ContentPicker } from './ContentPicker';
@@ -63,11 +65,24 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
   // A read to list the bound layers — named in `sceneEdit.test.ts` as such.
   const fills = scene.layers.filter((l) => l.fillRole !== undefined);
   if (fills.length === 0) {
+    // W1 fix: the fill is made HERE now, not by a white-fill button. It starts
+    // as a plain rect and the picker on its card is the next thing on screen.
     return (
-      <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
-        No layer is bound to a role yet. <strong>White fill → panel</strong> in the Room panel makes
-        one; then pick what it shows here.
-      </p>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <p style={{ margin: 0, fontSize: 12, color: '#8b939b' }}>
+          No layer fills a role yet. Every marked face is tagged <code>{DEFAULT_SURFACE_ROLE}</code>;
+          add a fill for it, then pick what it shows. Or open <strong>Library</strong> and hit{' '}
+          <strong>use on faces</strong> on a clip — that makes the fill in one step.
+        </p>
+        <button
+          type="button"
+          style={addButton}
+          title={`Adds a layer bound to role "${DEFAULT_SURFACE_ROLE}". Every face tagged ${DEFAULT_SURFACE_ROLE} shows what you pick next.`}
+          onClick={() => setScene((prev) => addWhiteFill(prev, DEFAULT_SURFACE_ROLE))}
+        >
+          + Add a fill for role {DEFAULT_SURFACE_ROLE}
+        </button>
+      </div>
     );
   }
 
@@ -126,4 +141,17 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 5,
   border: '1px solid #2b2f34',
   background: '#191c1f',
+};
+
+const addButton: React.CSSProperties = {
+  justifySelf: 'start',
+  background: '#16303a',
+  color: '#c7ced4',
+  border: '1px solid #40e0ff',
+  borderRadius: 4,
+  padding: '6px 10px',
+  font: 'inherit',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
 };

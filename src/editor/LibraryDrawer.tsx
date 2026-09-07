@@ -18,6 +18,8 @@ import type { Scene } from '../core/scene';
 import type { BundledAsset } from '../core/library';
 import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
 import { applyContentChoice, type ContentChoice } from './controls';
+import { addAssetFill } from '../core/sceneEdit';
+import { DEFAULT_SURFACE_ROLE } from '../core/surfaces';
 import { editorLibrary } from './assets';
 import { CatalogPanel } from './CatalogPanel';
 
@@ -54,10 +56,16 @@ export function LibraryDrawer({ open, onClose, scene, setScene, libraryVersion }
       group: 'Downloaded (Library)',
       content: { assetId: asset.id },
     };
-    // The FIRST bound layer — the white fill in the reel's case. A second bound
-    // layer is a deliberate arrangement the pickers beside the faces handle.
+    // The FIRST bound layer. A second bound layer is a deliberate arrangement
+    // the pickers beside the faces handle. No bound layer yet (W1 fix: the
+    // white fill is no longer the first step) → this download BECOMES the fill,
+    // bound to `panel`, the default role every marked face carries.
     const target = fills[0];
-    if (!target) return;
+    if (!target) {
+      setScene((prev) => addAssetFill(prev, DEFAULT_SURFACE_ROLE, asset.id, asset.name));
+      onClose();
+      return;
+    }
     setScene((prev) => applyContentChoice(prev, target.id, choice));
     onClose();
   };
@@ -114,11 +122,10 @@ export function LibraryDrawer({ open, onClose, scene, setScene, libraryVersion }
                   </div>
                   <button
                     type="button"
-                    style={{ ...button, opacity: fills.length === 0 ? 0.5 : 1 }}
-                    disabled={fills.length === 0}
+                    style={button}
                     title={
                       fills.length === 0
-                        ? 'Make a fill first (White fill → panel in the Room panel)'
+                        ? `Put this on every face tagged "${DEFAULT_SURFACE_ROLE}" — makes the fill`
                         : `Put this on "${fills[0]?.name}" — every face it fills changes at once`
                     }
                     onClick={() => useOnFaces(a)}

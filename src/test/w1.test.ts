@@ -13,6 +13,8 @@ import { FACE_GRID_DIVISIONS, drawFaceGuide, drawFaceGuides } from '../render/fa
 import { createPath, type Path } from '../core/paths';
 import { createSurface, reconcileSurfaces, type SurfaceTree } from '../core/surfaces';
 import { ProviderRegistry } from '../providers/ContentProvider';
+import { createScene } from '../core/scene';
+import { addAssetFill } from '../core/sceneEdit';
 
 const ROOT = join(new URL('../../', import.meta.url).pathname);
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -137,7 +139,25 @@ describe('W1 note 1 — a white guide grid on every marked face, on the projecti
   });
 });
 
-describe('W1 note 2 — no white fill button', () => {
+describe('W1 note 2 — the fill is made where it is picked, and a download can make it', () => {
+  it('addAssetFill: a layer bound to the role, showing the asset from the start', () => {
+    const scene = addAssetFill(createScene({ id: 's' }), 'panel', 'archive.x.clip', 'clip');
+    const l = scene.layers[0]!;
+    expect(l.fillRole).toBe('panel');
+    expect(l.providerId).toBe('bundled');
+    expect(l.content['assetId']).toBe('archive.x.clip');
+    expect(l.name).toBe('clip (panel)');
+  });
+
+  it('the drawer makes the fill when none exists; the fill panel offers to add one', () => {
+    const drawer = read('src/editor/LibraryDrawer.tsx');
+    expect(drawer).toMatch(/if \(!target\) \{[\s\S]*addAssetFill\(prev, DEFAULT_SURFACE_ROLE, asset\.id, asset\.name\)/);
+    expect(drawer).not.toMatch(/disabled=\{fills\.length === 0\}/);
+    const fill = read('src/editor/FillPanel.tsx');
+    expect(fill).toMatch(/addWhiteFill\(prev, DEFAULT_SURFACE_ROLE\)/);
+    expect(fill).not.toMatch(/White fill →/);
+  });
+
   it('the button and the hint are gone from the editor; the core function stays for B3', () => {
     const app = read('src/editor/App.tsx');
     expect(app).not.toMatch(/White fill →/);

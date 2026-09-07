@@ -27,6 +27,7 @@ import {
   type GroupMode,
 } from './groups';
 import { PROCEDURAL_PROVIDER_ID } from '../providers/procedural/ProceduralProvider';
+import { BUNDLED_PROVIDER_ID } from '../providers/bundled/id';
 
 /**
  * The smallest a region may be made, in normalized units (I-1).
@@ -174,6 +175,23 @@ export function addLayer(scene: Scene, spec: AddLayerSpec): Scene {
  * it. Half-frame is visible, obviously wrong, and harmless.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+/**
+ * W1 fix. A fill bound to `role` that shows a library asset from the start —
+ * what "use on faces" does when no bound layer exists yet, now that the white
+ * fill is no longer the first step. Same half-frame rect as `addWhiteFill`, for
+ * the same reason (the face places it; the rect is only for a cleared role).
+ */
+export function addAssetFill(scene: Scene, role: string, assetId: string, name: string): Scene {
+  return addLayer(scene, {
+    idPrefix: 'fill',
+    name: `${name} (${role})`,
+    providerId: BUNDLED_PROVIDER_ID,
+    content: { assetId },
+    rect: { x: 0.5, y: 0.5, width: 0.5, height: 0.5 },
+    fillRole: role,
+  });
+}
+
 export function addWhiteFill(scene: Scene, role: string): Scene {
   return addLayer(scene, {
     idPrefix: 'whitefill',
