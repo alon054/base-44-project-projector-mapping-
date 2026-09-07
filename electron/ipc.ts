@@ -116,6 +116,20 @@ export const CH = {
   surfacesSet: 'surfaces:set',
   /** renderer -> main (invoke): the stored surface tree, or null. Read at launch. */
   surfacesGet: 'surfaces:get',
+  /**
+   * Scene persistence, minimal (S1 — the sprint pulling a third of P8-C
+   * forward, the way B1 pulled P6-A). Main is as dumb here as it is for the
+   * room: it writes the JSON it is handed to `scenes/<name>.json` and reads it
+   * back; every rule about what a scene IS lives in `core/scene.ts` on the
+   * renderer side. The file NAME is the one thing main must judge, because it
+   * becomes a path — `isSceneName` is that judgement, shared by both ends.
+   */
+  /** editor -> main (invoke): write one scene under a name. Also pins it as the last scene. */
+  sceneSave: 'scene:save',
+  /** editor -> main (invoke): the raw JSON stored under a name, or null. Pins it as the last scene. */
+  sceneLoad: 'scene:load',
+  /** editor -> main (invoke): the last scene's name and raw JSON, or null. Read once at launch. */
+  sceneStored: 'scene:stored',
   /** output -> main -> editor: HUD numbers, for the editor's always-on text mirror (C4). */
   metrics: 'metrics:report',
   /** editor -> main (invoke): enumerate displays. */
@@ -303,6 +317,37 @@ export interface CalibrationSet {
 export interface SurfacesSet {
   version: number;
   surfaces: unknown[];
+}
+
+/**
+ * A scene file's name — the part between `scenes/` and `.json`. It is a path
+ * segment written by main, so it is judged, not sanitized: a name that fails is
+ * refused with the reason, never rewritten into something the operator did not
+ * type. Lower-case letters, digits, `-` and `_`, up to 64, starting with a
+ * letter or digit. `reel` is the sprint's.
+ */
+export const SCENE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+export function isSceneName(v: unknown): v is string {
+  return typeof v === 'string' && SCENE_NAME_PATTERN.test(v);
+}
+
+/** editor -> main: the scene to write. Main does not interpret `scene`. */
+export interface SceneSaveRequest {
+  name: string;
+  scene: unknown;
+}
+
+export type SceneSaveResult = { ok: true; path: string } | { ok: false; reason: string };
+
+export interface SceneLoadRequest {
+  name: string;
+}
+
+/** What main hands back for a stored scene: the raw file, canonicalized by the caller. */
+export interface StoredScene {
+  name: string;
+  scene: unknown;
 }
 
 /** editor -> main: what to search for. */

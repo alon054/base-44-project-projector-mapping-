@@ -33,6 +33,12 @@ export interface Settings {
   /** Uncapped measurement mode; applied at launch, needs a relaunch to change (ADD-2). */
   measurementMode: boolean;
   editorBounds: { x: number; y: number; width: number; height: number } | null;
+  /**
+   * S1. The name of the scene the editor opens on — `scenes/<lastScene>.json`.
+   * `config/` is the right home (D5's reasoning): it is neither the scene nor
+   * the room, it is which of them this installation was last looking at.
+   */
+  lastScene: string | null;
 }
 
 const DEFAULTS: Settings = {
@@ -41,6 +47,7 @@ const DEFAULTS: Settings = {
   hudVisible: false,
   measurementMode: false,
   editorBounds: null,
+  lastScene: null,
 };
 
 function settingsPath(): string {

@@ -42,6 +42,11 @@ import {
   type SceneFailure,
   type CalibrationSet,
   type SurfacesSet,
+  type SceneSaveRequest,
+  type SceneSaveResult,
+  type SceneLoadRequest,
+  type StoredScene,
+  isSceneName,
   type ClockSet,
   type SceneSet,
   type CatalogAddRequest,
@@ -60,6 +65,7 @@ import {
   saveCalibrationRaw,
   saveSurfacesRaw,
 } from './calibration';
+import { loadSceneRaw, saveSceneRaw } from './scenes';
 import { addFromCatalog, libraryEntries, listCatalogFiles, resolveLibraryRequest, searchCatalog } from './catalog';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
@@ -668,6 +674,38 @@ function wireIpc(): void {
   });
 
   ipcMain.handle(CH.surfacesGet, (): unknown => lastSurfaces ?? loadSurfacesRaw());
+
+  // S1. Scene persistence, on the same terms as the room: main writes the JSON
+  // it is handed and reads it back, and interprets none of it. The name is the
+  // one thing judged here, because it becomes a path (`isSceneName`). A save
+  // or a load pins the name as the last scene, which is what a cold start
+  // opens on — `config/` holds the pointer, `scenes/` holds the show, and
+  // `calibration/` is untouched by either (I-5).
+  ipcMain.handle(CH.sceneSave, (_e, payload: SceneSaveRequest): SceneSaveResult => {
+    const req = assertJsonOnly(payload);
+    if (!isSceneName(req.name)) {
+      return { ok: false, reason: `not a scene name: ${JSON.stringify(req.name)}` };
+    }
+    const result = saveSceneRaw(req.name, req.scene);
+    if (result.ok) saveSettings({ lastScene: req.name });
+    return result;
+  });
+
+  ipcMain.handle(CH.sceneLoad, (_e, payload: SceneLoadRequest): StoredScene | null => {
+    const req = assertJsonOnly(payload);
+    if (!isSceneName(req.name)) return null;
+    const scene = loadSceneRaw(req.name);
+    if (scene === null) return null;
+    saveSettings({ lastScene: req.name });
+    return { name: req.name, scene };
+  });
+
+  ipcMain.handle(CH.sceneStored, (): StoredScene | null => {
+    const name = loadSettings().lastScene;
+    if (name === null || !isSceneName(name)) return null;
+    const scene = loadSceneRaw(name);
+    return scene === null ? null : { name, scene };
+  });
 
   // The online catalog and the downloaded library. JSON both ways; the bytes
   // go to disk and come back through the `library:` protocol (I-7).

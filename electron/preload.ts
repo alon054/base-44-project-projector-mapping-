@@ -26,6 +26,10 @@ import type {
   ProvocationKind,
   SceneFailure,
   SceneSet,
+  SceneSaveRequest,
+  SceneSaveResult,
+  SceneLoadRequest,
+  StoredScene,
 } from './ipc';
 
 export interface WarningMessage {
@@ -153,6 +157,17 @@ const api = {
   /** The stored surface tree as raw JSON, or null. Canonicalized by the caller. */
   getSurfaces(): Promise<unknown> {
     return ipcRenderer.invoke(CH.surfacesGet) as Promise<unknown>;
+  },
+  // S1. Scenes on disk. Raw JSON both ways; `canonicalizeScene` is the caller's.
+  saveScene(req: SceneSaveRequest): Promise<SceneSaveResult> {
+    return ipcRenderer.invoke(CH.sceneSave, assertJsonOnly(req)) as Promise<SceneSaveResult>;
+  },
+  loadScene(req: SceneLoadRequest): Promise<StoredScene | null> {
+    return ipcRenderer.invoke(CH.sceneLoad, assertJsonOnly(req)) as Promise<StoredScene | null>;
+  },
+  /** The last saved or loaded scene, read once at launch. Null on a fresh install. */
+  storedScene(): Promise<StoredScene | null> {
+    return ipcRenderer.invoke(CH.sceneStored) as Promise<StoredScene | null>;
   },
   // output -> editor: I-13 flags for the layer list
   reportSceneFailures(f: SceneFailure[]): void {

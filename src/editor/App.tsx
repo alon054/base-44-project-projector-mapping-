@@ -16,6 +16,7 @@ import {
   type DisplayInfo,
   type MetricsReport,
   type SceneFailure,
+  isSceneName,
 } from '@shared/ipc';
 import {
   MAX_RENDER_FRACTION,
@@ -44,6 +45,7 @@ import {
   createPhase4ReferenceScene,
 } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
+import { readSceneFile } from '../core/sceneFile';
 import { ForcePanel } from './ForcePanel';
 import {
   calibrationFor,
@@ -209,6 +211,79 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => window.engine.onSceneFailures(setFailures), []);
+
+  /**
+   * S1. The scene on disk — `scenes/<sceneFile>.json`. One name, one Save,
+   * one Load; the picker, the bank and the cross-fade stay P8-C and P8-E.
+   *
+   * `sceneNote` is what the last save or load said, shown beside the buttons,
+   * because a refusal that goes only to the console is a refusal the operator
+   * discovers at the wall.
+   */
+  const [sceneFile, setSceneFile] = useState('reel');
+  const [sceneNote, setSceneNote] = useState('');
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+
+  const saveScene = useCallback(() => {
+    if (!isSceneName(sceneFile)) {
+      setSceneNote(`refused: "${sceneFile}" is not a scene name (a-z, 0-9, - and _)`);
+      return;
+    }
+    void window.engine
+      .saveScene({ name: sceneFile, scene: sceneRef.current })
+      .then((r) => setSceneNote(r.ok ? `saved ${sceneFile}.json` : `refused: ${r.reason}`))
+      .catch((err: unknown) => setSceneNote(`save failed: ${String(err)}`));
+  }, [sceneFile]);
+
+  const loadScene = useCallback(() => {
+    if (!isSceneName(sceneFile)) {
+      setSceneNote(`refused: "${sceneFile}" is not a scene name (a-z, 0-9, - and _)`);
+      return;
+    }
+    void window.engine
+      .loadScene({ name: sceneFile })
+      .then((stored) => {
+        if (stored === null) {
+          setSceneNote(`no scenes/${sceneFile}.json`);
+          return;
+        }
+        const read = readSceneFile(stored.scene);
+        if (!read.ok) {
+          // The scene on screen is left exactly as it was (I-13).
+          setSceneNote(`refused ${sceneFile}.json: ${read.reason}`);
+          return;
+        }
+        setScene(read.scene);
+        setSceneNote(`loaded ${sceneFile}.json`);
+      })
+      .catch((err: unknown) => setSceneNote(`load failed: ${String(err)}`));
+  }, [sceneFile]);
+
+  // S1. The last scene, once at launch — the same shape as the room's read
+  // below. A `PROJENGINE_SCENE` measurement run keeps its named scene: the
+  // stored one applies only if no named scene has, and a named scene arriving
+  // later still wins (it always sets). A file that fails to read leaves the
+  // built-in default on screen, with the reason beside the Save button.
+  useEffect(() => {
+    void window.engine
+      .storedScene()
+      .then((stored) => {
+        if (stored === null) return;
+        setSceneFile(stored.name);
+        const read = readSceneFile(stored.scene);
+        if (!read.ok) {
+          setSceneNote(`refused ${stored.name}.json at launch: ${read.reason}`);
+          return;
+        }
+        if (namedSceneApplied.current) return;
+        setScene(read.scene);
+        setSceneNote(`opened ${stored.name}.json`);
+      })
+      .catch((err: unknown) => {
+        console.error(`[scenes] could not read the stored scene: ${String(err)}`);
+      });
+  }, []);
 
   /**
    * P5-E. The output window's shortcuts, pressed from here.
@@ -602,6 +677,47 @@ export function App(): React.JSX.Element {
         >
           Wall grid ⇄
         </button>
+        {/* S1. The show on disk. One name, Save, Load — nothing more before P8-C. */}
+        <input
+          type="text"
+          value={sceneFile}
+          aria-label="scene file name"
+          spellCheck={false}
+          maxLength={64}
+          onChange={(e) => setSceneFile(e.currentTarget.value)}
+          title="scenes/<name>.json — a-z, 0-9, - and _"
+          style={{
+            width: 72,
+            background: '#0d1013',
+            color: '#c7ced4',
+            border: '1px solid #2a3138',
+            borderRadius: 3,
+            padding: '2px 5px',
+            font: 'inherit',
+            fontSize: 12,
+          }}
+        />
+        <button
+          type="button"
+          onClick={saveScene}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="Write the layers, groups, roles and durations to scenes/<name>.json. The room is not in it (I-15)."
+        >
+          Save scene
+        </button>
+        <button
+          type="button"
+          onClick={loadScene}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="Replace the scene on screen with scenes/<name>.json. The room is untouched."
+        >
+          Load
+        </button>
+        {sceneNote !== '' && (
+          <span style={{ fontSize: 12, color: sceneNote.startsWith('refused') || sceneNote.includes('failed') ? '#d8b45a' : '#8b939b' }}>
+            {sceneNote}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setLibraryOpen(true)}

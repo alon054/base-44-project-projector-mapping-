@@ -7204,3 +7204,51 @@ This touched P5-F's panels, a passed phase. CLAUDE.md says log rather than
 refactor; the operator asked for the pass by name ("go all over the UX/UI,
 find problems, make it easier") and this entry is the log. Nothing in the
 engine changed.
+
+## 2026-09-07 — Sprint (pre-reel S1) — minimal scene persistence
+- DID: `scenes/<name>.json`, written by a dumb main-side store
+  (`electron/scenes.ts`, the shape of `electron/calibration.ts`) and read back
+  through the EXISTING `canonicalizeScene`; `lastScene` in
+  `config/settings.json`, opened at launch (a `PROJENGINE_SCENE` run still
+  wins); one name field, `Save scene`, `Load`, and a note that says what
+  happened. `core/sceneFile.ts` (never throws; a refusal names the value).
+  `canonicalizeScene` now refuses a `surfaces` key whole, naming I-15.
+  `isSceneName` in `ipc.ts`, one pattern for both ends. Three IPC channels
+  (`scene:save`, `scene:load`, `scene:stored`), invoke-shaped, JSON only.
+- MEASURED: npm test 1118 → 1136 (43 → 44 files, +18 in
+  `sceneFile.test.ts`); test:render 52 / 52, 43 pre-fill goldens
+  byte-identical; typecheck clean both sides. Electron link driven once over
+  CDP (`ui-shot.mjs`): Save → `scenes/reel.json` on disk (version 1, 4 layers,
+  no surface-shaped key), settings gained `lastScene: reel`; relaunch → note
+  `opened reel.json`. Mutation table: I-15 refusal dropped → 2 fail; `/`
+  allowed in a name → 2 fail; reason swallowed → 3 fail; compact bytes → 1 fail.
+- BLOCKER: -
+- NEXT: S2 — debounce the rebuild-path text writes (role, name, fillRole,
+  travelRole) at 250 ms through one mechanism.
+
+DECISION — no second envelope. `UI_PLAN.md`'s S1 prompt says "through the
+existing versioned reader in `render/calibration.ts` (`readVersionedList`)".
+That reader is for a `{version, <list>}` envelope; a scene is one object that
+has carried its own `version` since Phase 1 and whose canonicalizer is
+documented as "the single entry point for untrusted scene data — a file on
+disk". Wrapping a scene in a list-of-one to fit the room's reader would have
+been the second format the same prompt forbids. The spirit — one reader, one
+format, refuse a future version whole — is met by the scene's own; the letter
+was not followed, and this is the line that says so.
+
+SHORTCUT — the smoke's `scenes/reel.json` was deleted after the check. It held
+the default scene; W2 writes the real one. `settings.json` still points at
+`reel`, which resolves to null until W2 saves it — by design, not by accident.
+
+RISK — the launch sequence now has three async arrivals (config with a named
+scene, the stored scene, the room). The stored scene applies only if no named
+scene has, and a named scene always applies; a stored scene arriving before
+config is sent to the output by the existing "first config" resend. Verified
+once from the machine, not under a measurement run — a `PROJENGINE_SCENE` run
+with a `lastScene` set is the case to watch, and the code prefers the named
+scene in both orders.
+
+I-13 — a scene naming a library asset that is not on this machine loads. The
+file is not the place to know what the library holds; the renderer flags the
+layer, as it already does for a missing provider. H15 (an asset manifest per
+scene) stays owed.

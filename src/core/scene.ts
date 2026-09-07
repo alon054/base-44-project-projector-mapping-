@@ -195,6 +195,17 @@ export function canonicalizeScene(raw: unknown): Scene {
   if (typeof o['id'] !== 'string' || o['id'] === '') {
     throw new SceneFormatError('scene.id must be a non-empty string');
   }
+  // I-15, S1. A scene file carrying the room is a file from a build this one
+  // does not understand — or a hand-merge of the two trees — and either way it
+  // is refused whole rather than loaded with the geometry quietly dropped. The
+  // room and the show are two files in two directories; a scene must be
+  // loadable in a room it has never seen. Refuse, name it, keep the session
+  // (the P5-A pattern: clamp what drifts, refuse what is wrong).
+  if (o['surfaces'] !== undefined) {
+    throw new SceneFormatError(
+      'scene.surfaces is not a scene field: surface geometry belongs to the room and never enters a scene file (I-15)',
+    );
+  }
   const rawLayers = o['layers'];
   if (rawLayers !== undefined && !Array.isArray(rawLayers)) {
     throw new SceneFormatError('scene.layers must be an array');
