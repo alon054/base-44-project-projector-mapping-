@@ -7354,3 +7354,40 @@ NOT verified from the machine: the gesture on the real room. The live
 `calibration/surfaces.json` is the operator's and sits modified on purpose; a
 scripted delete-and-undo over CDP against it was not worth the risk of being
 wrong once. Owed to the builder, one line, in the handoff.
+
+## 2026-09-07 — Sprint (pre-reel, close) — S1–S3 done; U-A and after wait for the sprint to close
+- DID: no code. Closed the "Pre-reel fixes" heading in `SPRINT_CHECKLIST.md`;
+  added a line under W1's "this is the undo" so it is not read as current;
+  recorded the two decisions below.
+- MEASURED: the session as a whole — npm test 1118 → 1161 (43 → 46 files,
+  +43); test:render 52 / 52 throughout, the 43 pre-fill goldens byte-identical
+  after every block. Four commits: S1, the plan, S2, S3.
+- BLOCKER: -
+- NEXT: W1 — the wall. Nothing in this session lit a box.
+
+DECISION (H10) — the per-group repeat flag will be named `repeat`, not
+`loop`. `CHECKLIST.md` P7-A asks for `loop (default true)` on the group node
+and `group.<id>.loop` in the registry. `RouteMotion.endBehavior` already owns
+the word `loop`, `CLAUDE.md` rule 3 forbids renaming it, and `groups.test.ts`
+greps the group code for a `loop` field on purpose. `repeat: true` is the same
+semantics with no collision and no rename. `CHECKLIST.md` is not edited during
+the sprint; when P7-A opens, it reads `loop` there and builds `repeat`, citing
+this line. If the human prefers otherwise, the place to say so is `SPEC.md`.
+
+DECISION — U-A is not pulled into the sprint. It adds fields to `Group`, and
+the sprint's own test pins that shape to R4 (`id`, `mode`, `children`,
+nothing else). Reopening R4 inside the sprint is what the sprint rules
+forbid, and the plan schedules U-A after day 4 in any case. The operator's
+"finish everything" was read as the plan's pre-reel list, which is finished;
+the rest is scheduled, not skipped.
+
+IDEAS — three things this session noticed and did not do:
+1. The launch sequence now has three async arrivals (config, stored scene,
+   room). A single "launch state" reducer would make the ordering a test
+   instead of a comment. Day 4 or later.
+2. `readSceneFile` and `readVersionedList` are the same policy in two shapes.
+   If a third file type appears, that is when `defineSubject` (UI_PLAN.md
+   §4-D) earns itself — not before.
+3. The rotating snapshot slot restarts at zero per launch. A timestamped name
+   would make the files self-describing at the cost of a directory that grows;
+   the rotation was chosen so the directory cannot grow. Noted, not changed.
