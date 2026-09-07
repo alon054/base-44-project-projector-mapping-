@@ -743,9 +743,9 @@ export function App(): React.JSX.Element {
           type="button"
           onClick={() => window.engine.sendOutputKey({ key: shortcutFor('wallGrid').key })}
           style={{ ...buttonStyle, marginTop: 0 }}
-          title="White reference grid on the projection. Toggle — press again to clear it. NOT for a take."
+          title="The white grid and face guides ON THE PROJECTOR. Toggle — press again to clear it. Same as g on the output. Off before a take."
         >
-          Wall grid ⇄
+          Projector grid ⇄
         </button>
         {/* S1. The show on disk. One name, Save, Load — nothing more before P8-C. */}
         <input

@@ -7516,3 +7516,21 @@ The blank page: the builder's "no tree or water" is a first impression, and
 the Phase-1 scene was the first thing on the wall at every launch for seven
 phases because nobody but the builder had ever opened the app. Gate 9's "a
 person who is not the builder" starts with an empty page now.
+
+## 2026-09-07 — Sprint (W1 fixes, follow-up 3) — two grids, two controls, side by side
+- DID: the preview's "grid" checkbox is now labelled **preview grid** with a
+  title saying it never reaches the projector, and a **projector grid ⇄**
+  button sits beside it sending `g` to the output — the same handler as the
+  top-bar button, which is renamed to match. No mechanism changed.
+- MEASURED: npm test 1185 → 1186. Typecheck clean.
+- BLOCKER: -
+- NEXT: the builder — press projector grid ⇄ once; the wall's grid and face
+  guides go, and the log says `[grid] off`.
+
+The builder's report: "when I toggle the grid on and off from the scene
+space it doesn't turn it off." The checkbox they used is D11's scene-space
+grid in the preview; the projector's guides are the output window's, toggled
+by `g` or the top-bar button. They are different on purpose (hard rule 9 —
+nothing drawn in the preview reaches the wall), and merging them would need
+the output to report grid state back, which is not plumbed. So: named
+honestly, and put in the same row.

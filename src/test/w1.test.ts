@@ -280,3 +280,18 @@ describe('W1 follow-up — a blank page at launch', () => {
     expect(app).toMatch(/setScene\(createDefaultScene\(\)\)/);
   });
 });
+
+describe('W1 follow-up — two grids, two controls, labelled and side by side', () => {
+  it('the preview checkbox says preview; the projector control sits beside it and sends g', () => {
+    const src = read('src/editor/PreviewCanvas.tsx');
+    const box = src.indexOf('preview grid');
+    const btn = src.indexOf('projector grid ⇄');
+    expect(box).toBeGreaterThan(0);
+    expect(btn).toBeGreaterThan(box);
+    expect(btn - box).toBeLessThan(700);
+    expect(src.slice(box, btn + 100)).toMatch(/sendOutputKey\(\{ key: shortcutFor\('wallGrid'\)\.key \}\)/);
+    // The preview's grid still never reaches the output: the import-graph test
+    // covers the mechanism; this covers the words.
+    expect(src).not.toMatch(/setWallGrid\(/);
+  });
+});

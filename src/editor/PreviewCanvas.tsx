@@ -28,6 +28,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRenderHost, type RenderHost } from '../render/host';
+import { shortcutFor } from './outputKeys';
 import { downloadedEntries, onLibraryChange } from './assets';
 import type { Clock, ClockTransport } from '../core/clock';
 import type { Scene } from '../core/scene';
@@ -784,14 +785,33 @@ function RegionSurface({
             </select>
           </>
         )}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#8b939b' }}>
+        {/*
+          W1 follow-up. Two grids, two controls, side by side — the builder
+          toggled this checkbox and expected the projector's grid to go, and it
+          did not, because this one is the PREVIEW's scene-space grid (D11) and
+          the projector's guides are the output window's (`g`). They are
+          different by design (hard rule 9: nothing drawn here reaches the
+          wall), so they are not merged; they are labelled and put together.
+        */}
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#8b939b' }}
+          title="The grid in THIS preview only. It never reaches the projector."
+        >
           <input
             type="checkbox"
             checked={showGrid}
             onChange={(e) => setShowGrid(e.currentTarget.checked)}
           />
-          grid
+          preview grid
         </label>
+        <button
+          type="button"
+          onClick={() => window.engine.sendOutputKey({ key: shortcutFor('wallGrid').key })}
+          style={PROJECTOR_GRID_STYLE}
+          title="The white grid and face guides ON THE PROJECTOR. Toggle — press again to clear. Same as g on the output. Off before a take."
+        >
+          projector grid ⇄
+        </button>
         {!wallMode && (
           <>
             <label htmlFor="place-kind" style={{ color: '#8b939b' }}>
@@ -1165,3 +1185,14 @@ function PathOverlay({
     </g>
   );
 }
+
+const PROJECTOR_GRID_STYLE: React.CSSProperties = {
+  background: '#16303a',
+  color: '#c7ced4',
+  border: '1px solid #2f7f92',
+  borderRadius: 3,
+  padding: '1px 6px',
+  font: 'inherit',
+  fontSize: 11,
+  cursor: 'pointer',
+};
