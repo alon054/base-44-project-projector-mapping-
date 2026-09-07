@@ -7696,3 +7696,49 @@ One caught by the suite: the first draft of `withoutOwnFillLayers` listed
 with `layers.filter` before reducing through `removeLayer`, and P5-B's
 one-structural-removal test flagged the file. Rewritten as a reduce. The
 test did what it exists for.
+
+## 2026-09-07 — Sprint (operator additions, 5) — the Photoshop layout: stage and Layers column
+- DID: wall mode is a stage plus a right column. `editor/layerTreeModel.ts`
+  (pure: `buildLayerTree`, `flattenTree`, `dropLayer`, `applyChoiceToFolder`,
+  `folderLabel`) and `editor/LayerTree.tsx` (rows, folders, drag, eye,
+  rename, inline picker, folder picker). `core/sceneEdit.ts` gains
+  `reorderChild` and `renameLayer`. `ParamControl` gains `compact`. `App`
+  measures the stage column with a `ResizeObserver` and feeds the preview's
+  size; Layers | Room tabs; Properties under the tree; the four steps fold
+  shut by default. `Everything` mode untouched.
+- MEASURED: npm test 1203 → 1215, 49 files (+12, `layerTree.test.ts`).
+  test:render 52 / 52, 43 byte-identical. Mutation checks, the new file
+  alone (12 tests):
+  | Mutation | Result |
+  |---|---|
+  | "before" reorders but never joins the target's folder | 2 failed / 12 |
+  | an in-turn folder lists draw order instead of block order | 1 failed / 12 |
+  Seen at 1440×900 through `ui-shot.mjs`: two layers dragged into an
+  in-turn folder, numbered; the folder's picker open; the column inside the
+  window with and without a scrollbar.
+- BLOCKER: -
+- NEXT: unchanged — the builder saves the reel scene, then Day 3.
+
+DECISION: `UI_PLAN.md` stage 2 was gated on the sprint closing because R4
+pins `Group`. The operator asked for the layout directly, so the part that
+needs no new field is built now and the part that does is not: no `name`,
+`target`, `fill` or `motion` on `Group`; a folder is labelled from its id; a
+folder's picker applies the choice to each child (SHORTCUT — U-B's
+inheritance, later); no face sub-list under a folder (needs `target`). R4 is
+not reopened and `groups.test.ts` still pins the shape.
+
+DECISION: two orders, one list. Root and together rows in draw order, front
+first, as Photoshop reads; an in-turn folder's rows in block order with
+numbers, because that order IS the folder. A drop "above" a row writes the
+order that row's list is in and joins its folder. The file header states
+it; the tests pin it.
+
+Learned: `layerTree.ts` beside `LayerTree.tsx` fails `tsc` on this disk
+(case-insensitive), hence `layerTreeModel.ts`. And synthetic `DragEvent`s
+fired in one tick never land — React has not stored the drag yet — so the
+capture spaces them; the first capture's "nothing moved" was the harness,
+not the code.
+
+SHORTCUT: the eye is a checkbox (`ParamControl compact`), not an icon; the
+folder's name is `Folder N`; the Properties panel repeats the row's picker
+(EntityPanel's own). All three are cosmetic and none blocks a take.

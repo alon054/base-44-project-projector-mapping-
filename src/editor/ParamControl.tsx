@@ -27,6 +27,12 @@ interface Props {
   paramKey: string;
   /** Overrides the definition's own label. For a row whose group already says it. */
   label?: string;
+  /**
+   * The bare control and nothing else — no label row, no key — for a tree
+   * row where the label is the row (the eye, a folder's mode). Same `write`,
+   * same one door: this is a display variant, not a second writer.
+   */
+  compact?: boolean;
 }
 
 /**
@@ -34,7 +40,7 @@ interface Props {
  * holds, and scene state is React state in `App`, so the re-render is the
  * write's own consequence and there is no change callback to forget to pass.
  */
-export function ParamControl({ registry, paramKey, label }: Props): React.JSX.Element | null {
+export function ParamControl({ registry, paramKey, label, compact = false }: Props): React.JSX.Element | null {
   const def = registry.definition(paramKey);
   if (!def) return null;
 
@@ -43,6 +49,48 @@ export function ParamControl({ registry, paramKey, label }: Props): React.JSX.El
   };
 
   const shown = label ?? def.label;
+
+  if (compact) {
+    return (
+      <span style={compactStyle} title={`${shown} · ${paramKey}`}>
+        {def.kind === 'boolean' && (
+          <input
+            type="checkbox"
+            aria-label={shown}
+            checked={registry.read(paramKey) as boolean}
+            onChange={(e) => write(e.currentTarget.checked)}
+          />
+        )}
+        {def.kind === 'enum' && (
+          <select
+            aria-label={shown}
+            value={registry.read(paramKey) as string}
+            style={selectStyle}
+            onChange={(e) => write(e.currentTarget.value)}
+          >
+            {def.options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        )}
+        {def.kind === 'number' && (
+          <input
+            type="range"
+            aria-label={shown}
+            min={def.min}
+            max={def.max}
+            step={def.step}
+            value={registry.read(paramKey) as number}
+            style={{ width: 70 }}
+            onChange={(e) => write(Number(e.currentTarget.value))}
+          />
+        )}
+        {def.kind === 'number' && <span style={valueStyle}>{formatValue(registry.read(paramKey), def.kind)}</span>}
+      </span>
+    );
+  }
 
   return (
     <div style={rowStyle}>
@@ -142,6 +190,8 @@ const rowStyle: React.CSSProperties = {
 };
 
 const labelStyle: React.CSSProperties = { fontSize: 12, color: '#c7ced4' };
+
+const compactStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4 };
 
 const keyStyle: React.CSSProperties = {
   fontSize: 10,

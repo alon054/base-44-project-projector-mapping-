@@ -321,6 +321,36 @@ export function moveChild(scene: Scene, groupId: string, layerId: string, delta:
 }
 
 /**
+ * Moves a child to an absolute position in its group's order — the drag form
+ * of `moveChild`, as `reorderLayer` is of `moveLayer`, with the same rule:
+ * out-of-range destinations are clamped, because a drag past the end asks
+ * for the end.
+ */
+export function reorderChild(scene: Scene, groupId: string, layerId: string, toIndex: number): Scene {
+  const group = scene.groups.find((g) => g.id === groupId);
+  if (!group) return scene;
+  const from = group.children.findIndex((c) => c.id === layerId);
+  if (from < 0) return scene;
+  const to = Math.max(0, Math.min(group.children.length - 1, Math.floor(toIndex)));
+  if (to === from) return scene;
+  const children = [...group.children];
+  const [moved] = children.splice(from, 1);
+  children.splice(to, 0, moved as GroupChild);
+  return { ...scene, groups: scene.groups.map((g) => (g.id === groupId ? { ...g, children } : g)) };
+}
+
+/**
+ * Renames a layer. A name is not a parameter (nothing modulates it, nothing
+ * would MIDI-map it), so it is a structural edit here and not a registry key.
+ * An empty name falls back to the id, as a surface's does (`withSurfaceName`).
+ */
+export function renameLayer(scene: Scene, id: string, name: string): Scene {
+  const next = name.trim() === '' ? id : name.trim();
+  if (!scene.layers.some((l) => l.id === id && l.name !== next)) return scene;
+  return { ...scene, layers: scene.layers.map((l) => (l.id === id ? { ...l, name: next } : l)) };
+}
+
+/**
  * Sets a group's mode — the registry's `group.<id>.mode` write lands here.
  *
  * Switching TO `sequence` fills any child that never stated a duration with

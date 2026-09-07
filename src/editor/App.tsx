@@ -64,6 +64,8 @@ import { SurfacePanel } from './SurfacePanel';
 import { FillPanel } from './FillPanel';
 import { ensureOwnFillLayer, withOwnFillRole, withSharedFillRole, withoutOwnFillLayers } from './ownFill';
 import { GroupPanel } from './GroupPanel';
+import { LayerTree } from './LayerTree';
+import { ParamControl } from './ParamControl';
 import { LibraryDrawer } from './LibraryDrawer';
 import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
 
@@ -150,6 +152,36 @@ export function App(): React.JSX.Element {
    * not reach a saved file, and there is nothing that copies it into one.
    */
   const [wallMode, setWallMode] = useState(true);
+
+  /**
+   * The Photoshop layout (UI_PLAN.md §3, the part R4 allows): the stage fills
+   * its column and the right column holds Layers and Room as tabs. The
+   * preview's backing store follows the column's width — measured, not
+   * assumed, and rounded to 16 px so a window drag does not rebuild every
+   * mask at every pixel. Selection of a folder is panel state like a layer's.
+   */
+  const [rightTab, setRightTab] = useState<'layers' | 'room'>('layers');
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageWidth, setStageWidth] = useState<number>(WALL_PREVIEW_SIZE.width);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      // The Panel around the canvas is 12 px padding + 1 px border a side,
+      // and 16 px more is left for the scrollbar a tall column brings, so the
+      // stage never pushes the column off the window when one appears.
+      const w = (entries[0]?.contentRect.width ?? 0) - 26 - 16;
+      const snapped = Math.max(480, Math.floor(w / 16) * 16);
+      setStageWidth((prev) => (prev === snapped ? prev : snapped));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [wallMode]);
+  const stageSize = useMemo(
+    () => ({ width: stageWidth, height: Math.round((stageWidth * 9) / 16) }),
+    [stageWidth],
+  );
   /**
    * The downloaded library's version — a memo dependency for the pickers, not
    * a copy of the library. Pulled at startup (`library:list`), then advanced
@@ -172,7 +204,7 @@ export function App(): React.JSX.Element {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const closeLibrary = useCallback(() => setLibraryOpen(false), []);
   /** The four-step card in wall mode, folded once it has been read. */
-  const [showSteps, setShowSteps] = useState(true);
+  const [showSteps, setShowSteps] = useState(false);
 
   /**
    * True once the config has been consulted, so the FIRST scene this editor
@@ -712,7 +744,7 @@ export function App(): React.JSX.Element {
         setScene={setScene}
         surfaces={surfaces}
         onSurfaces={applySurfaces}
-        size={wallMode ? WALL_PREVIEW_SIZE : PREVIEW_SIZE}
+        size={wallMode ? stageSize : PREVIEW_SIZE}
         wallMode={wallMode}
       />
     </Panel>
@@ -857,13 +889,14 @@ export function App(): React.JSX.Element {
 
       {wallMode ? (
         /*
-          Wall mode: the preview on the left, the room beside it. The builder's
-          eye moves preview → face list → fill → groups without scrolling, and
-          the warp and transport fold under them for the moment they are needed
-          (W1 starts by warping, and did not have the panel).
+          The stage and the column. The preview takes the width it is given
+          (measured above); the column on the right is Layers — folders, rows,
+          drag, an eye and a picker per row — or Room, the faces. The four
+          steps fold under the stage, shut by default, one click away.
         */
-        <div style={wallLayout}>
-          <div style={{ flex: '0 1 888px', minWidth: 0, display: 'grid', gap: 12 }}>
+        <div style={stageLayout}>
+          <div ref={stageRef} style={{ flex: '1 1 0', minWidth: 0, display: 'grid', gap: 10, alignContent: 'start' }}>
+            {previewPanel}
             <details open={showSteps} onToggle={(e) => setShowSteps(e.currentTarget.open)} style={stepsCard}>
               <summary style={summaryStyle}>How to mark a face — four steps</summary>
               <ol style={stepsStyle}>
@@ -877,7 +910,7 @@ export function App(): React.JSX.Element {
                 <li>
                   On the projector every marked face shows a white guide grid (the grid is on from
                   launch; <kbd style={kbdStyle}>g</kbd> toggles it — <strong>off before a take</strong>).
-                  Pick an animation for role <code>panel</code> under Fill and every face tagged{' '}
+                  Pick an animation for a layer under <strong>Layers</strong> and every face tagged{' '}
                   <code>panel</code> shows it, including ones you mark later.
                 </li>
                 <li>
@@ -887,24 +920,89 @@ export function App(): React.JSX.Element {
                   a point it removes the face.
                 </li>
                 <li>
-                  Change what the faces show under <strong>Fill</strong>; fetch new loops with{' '}
-                  <strong>Library</strong> (top bar). <strong>Wall grid</strong> helps you place things and{' '}
-                  <strong>must be off for a take</strong>.
+                  Give a face its own animation with <strong>own</strong> under <strong>Room</strong>;
+                  fetch new loops with <strong>Library</strong> (top bar). <strong>Wall grid</strong>{' '}
+                  helps you place things and <strong>must be off for a take</strong>.
                 </li>
               </ol>
             </details>
-            {previewPanel}
           </div>
-          <div style={{ flex: '1 1 520px', minWidth: 520, display: 'grid', gap: 12, alignContent: 'start' }}>
-            {roomPanel}
-            {fillPanel}
-            {groupsPanel}
-            <details style={foldStyle} open={!calibration.enabled}>
-              <summary style={summaryStyle}>
-                Warp — square the frame to the wall{calibration.enabled ? ' (on)' : ' (off)'}
-              </summary>
-              <div style={{ paddingTop: 8 }}>{warpBody}</div>
-            </details>
+          <div style={{ flex: '0 1 420px', minWidth: 340, display: 'grid', gap: 10, alignContent: 'start' }}>
+            <div style={segmentStyle} role="tablist" aria-label="right column">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === 'layers'}
+                onClick={() => setRightTab('layers')}
+                style={{ ...segmentButton, flex: 1, ...(rightTab === 'layers' ? segmentOn : {}) }}
+              >
+                Layers
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === 'room'}
+                onClick={() => setRightTab('room')}
+                style={{ ...segmentButton, flex: 1, ...(rightTab === 'room' ? segmentOn : {}) }}
+              >
+                Room · {surfaces.length} face{surfaces.length === 1 ? '' : 's'}
+              </button>
+            </div>
+            {rightTab === 'layers' ? (
+              <>
+                <Panel title="Layers — front on top">
+                  <LayerTree
+                    scene={scene}
+                    setScene={setScene}
+                    registry={registry}
+                    surfaces={surfaces}
+                    failures={failures}
+                    selectedLayerId={selectedLayerId(panelUi, scene)}
+                    selectedGroupId={selectedGroupId}
+                    onSelectLayer={(id) => {
+                      setSelectedGroupId(null);
+                      setPanelUi({ ...panelUi, selectedLayerId: id });
+                    }}
+                    onSelectGroup={setSelectedGroupId}
+                    libraryVersion={libraryVersion}
+                  />
+                </Panel>
+                {selectedGroupId === null && selectedLayerId(panelUi, scene) !== null && (
+                  <Panel title="Properties — the selected layer">
+                    <EntityPanel
+                      scene={scene}
+                      setScene={setScene}
+                      registry={registry}
+                      layerId={selectedLayerId(panelUi, scene)}
+                      ui={panelUi}
+                      setUi={setPanelUi}
+                      libraryVersion={libraryVersion}
+                    />
+                  </Panel>
+                )}
+                {selectedGroupId !== null && scene.groups.some((g) => g.id === selectedGroupId) && (
+                  <Panel title="Properties — the selected folder">
+                    <ParamControl registry={registry} paramKey={`group.${selectedGroupId}.mode`} />
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6f767d' }}>
+                      Together: every layer inside runs at once. In turn: one after another, each for
+                      its seconds (set on the row), looping. The ▦ on the folder row picks one
+                      animation for every layer inside.
+                    </p>
+                  </Panel>
+                )}
+              </>
+            ) : (
+              <>
+                {roomPanel}
+                {fillPanel}
+                <details style={foldStyle} open={!calibration.enabled}>
+                  <summary style={summaryStyle}>
+                    Warp — square the frame to the wall{calibration.enabled ? ' (on)' : ' (off)'}
+                  </summary>
+                  <div style={{ paddingTop: 8 }}>{warpBody}</div>
+                </details>
+              </>
+            )}
             <details style={foldStyle}>
               <summary style={summaryStyle}>Transport — pause, scrub, rate</summary>
               <div style={{ paddingTop: 8 }}>
@@ -1129,11 +1227,10 @@ const WHITE_FILL_ROLE = 'panel';
  */
 const WALL_PREVIEW_SIZE = { width: 864, height: 486 } as const;
 
-const wallLayout: React.CSSProperties = {
+const stageLayout: React.CSSProperties = {
   display: 'flex',
   gap: 12,
   alignItems: 'flex-start',
-  flexWrap: 'wrap',
 };
 
 const segmentStyle: React.CSSProperties = {
