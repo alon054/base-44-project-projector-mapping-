@@ -7811,3 +7811,15 @@ showed it before the cause was read off the layout rather than guessed.
 - BLOCKER: -
 - NEXT: unchanged — Day 3. The tree now shows `scenes/reel.json` opened at
   launch, with clips on the faces: the builder saved it.
+
+## 2026-09-07 — Sprint (documents) — the plan and the checklist brought current after the evening's six commits
+- DID: no code. `UI_PLAN.md` gains a night status block above the evening
+  one (what of stage 2 shipped and in what shape, what did not, H-items
+  closed or open). `SPRINT_CHECKLIST.md` "State now" gains a night addendum
+  (the layout, a face is a layer, folders, the shared role in Advanced, the
+  reel scene on disk, nothing seen at the wall). W2's reel.json line now
+  says the file exists and is uncommitted.
+- MEASURED: npm test 1221 / 1221, 50 files. test:render 52 / 52.
+- BLOCKER: -
+- NEXT: the builder at the wall with the new column — trace, pick, cover —
+  and `git add scenes/reel.json` when they say so. Then Day 3.
