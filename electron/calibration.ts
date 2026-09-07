@@ -104,3 +104,21 @@ export function calibrationFilePath(): string {
 export function surfacesFilePath(): string {
   return calibrationDirFile(SURFACES_FILE);
 }
+
+/**
+ * S3. `calibration/surfaces.history/NN.json` — the room as it was before a
+ * gesture began, rotating over `ROOM_HISTORY_DEPTH` slots. Same directory
+ * helper, same dumb write, same "never throws": a snapshot that fails to land
+ * costs one backup, never the write it accompanies (I-13). WHEN a snapshot is
+ * taken is not decided here — `roomHistory.ts` holds that rule, and main
+ * applies it in the one handler that already writes `surfaces.json`.
+ */
+const SURFACES_HISTORY_DIR = 'surfaces.history';
+
+export function saveSurfacesSnapshotRaw(index: number, data: unknown): void {
+  saveRaw(join(SURFACES_HISTORY_DIR, `${String(index).padStart(2, '0')}.json`), data);
+}
+
+export function surfacesHistoryDirPath(): string {
+  return calibrationDirFile(SURFACES_HISTORY_DIR);
+}

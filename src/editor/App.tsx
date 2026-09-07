@@ -46,6 +46,8 @@ import {
 } from '../core/defaultScene';
 import type { Scene } from '../core/scene';
 import { readSceneFile } from '../core/sceneFile';
+import { createRoomHistory, recordWrite, redo as redoRoomHistory, undo as undoRoomHistory, type RoomHistory } from '@shared/roomHistory';
+import { isTypingTarget } from './outputKeys';
 import { ForcePanel } from './ForcePanel';
 import {
   calibrationFor,
@@ -341,7 +343,10 @@ export function App(): React.JSX.Element {
       .getSurfaces()
       .then((raw) => {
         const tree = readSurfaces(raw, canonicalizeSurface);
-        if (tree.length > 0) setSurfaces(tree);
+        if (tree.length > 0) {
+          surfacesRef.current = tree;
+          setSurfaces(tree);
+        }
         console.log(describeSurfaces(tree));
       })
       .catch((err: unknown) => {
@@ -365,9 +370,59 @@ export function App(): React.JSX.Element {
    * shapes to keep in step. Normalized points only — no pixels cross (I-1, I-7).
    */
   const applySurfaces = useCallback((next: SurfaceTree) => {
+    // S3. The room before this write goes into the ring if the write starts
+    // a gesture (`roomHistory.ts`, the one rule; main applies the same one to
+    // the snapshot files). Every sample of a drag still writes; only the
+    // first records.
+    roomHistory.current = recordWrite(roomHistory.current, surfacesRef.current, Date.now());
+    surfacesRef.current = next;
     setSurfaces(next);
     window.engine.setSurfaces(writeSurfaces(next));
   }, []);
+
+  /**
+   * S3. Room history — a backup for calibration, NOT undo for content
+   * (SPEC.md §12 stands for the scene; the `SPEC-CHANGE-PROPOSED` entry in the
+   * log states the distinction). Twenty gestures, in memory, room only.
+   * `Cmd+Z` / `Cmd+Shift+Z`, and two buttons beside the face list. A restore
+   * is a write like any other — it goes to disk and to the wall through the
+   * same path — but it records nothing, or undo would push what it just
+   * popped.
+   */
+  const roomHistory = useRef<RoomHistory<SurfaceTree>>(createRoomHistory<SurfaceTree>());
+  const surfacesRef = useRef<SurfaceTree>(surfaces);
+  const [roomHistoryDepth, setRoomHistoryDepth] = useState<[number, number]>([0, 0]);
+  const restoreRoom = useCallback((next: SurfaceTree, history: RoomHistory<SurfaceTree>) => {
+    roomHistory.current = history;
+    surfacesRef.current = next;
+    setSurfaces(next);
+    setRoomHistoryDepth([history.past.length, history.future.length]);
+    window.engine.setSurfaces(writeSurfaces(next));
+  }, []);
+  const undoRoom = useCallback(() => {
+    const r = undoRoomHistory(roomHistory.current, surfacesRef.current);
+    if (r) restoreRoom(r.tree, r.history);
+  }, [restoreRoom]);
+  const redoRoom = useCallback(() => {
+    const r = redoRoomHistory(roomHistory.current, surfacesRef.current);
+    if (r) restoreRoom(r.tree, r.history);
+  }, [restoreRoom]);
+  useEffect(() => {
+    setRoomHistoryDepth([roomHistory.current.past.length, roomHistory.current.future.length]);
+  }, [surfaces]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key !== 'z' && e.key !== 'Z') return;
+      // A field keeps its own undo; this one is the room's.
+      if (isTypingTarget(e.target as { tagName?: string; isContentEditable?: boolean } | null)) return;
+      e.preventDefault();
+      if (e.shiftKey) redoRoom();
+      else undoRoom();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undoRoom, redoRoom]);
 
   /**
    * Which roles the scene is actually filling, for the surface list's "is this
@@ -545,6 +600,26 @@ export function App(): React.JSX.Element {
             ? 'no layer fills a role yet — nothing will land on a face'
             : `filled roles: ${filledRoles.join(', ')}`}
         </span>
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+        <button
+          type="button"
+          onClick={undoRoom}
+          disabled={roomHistoryDepth[0] === 0}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="Undo the last gesture on the room — a drag, a delete, a mark. ⌘Z. The scene is untouched."
+        >
+          ↶ Undo room{roomHistoryDepth[0] > 0 ? ` (${roomHistoryDepth[0]})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={redoRoom}
+          disabled={roomHistoryDepth[1] === 0}
+          style={{ ...buttonStyle, marginTop: 0 }}
+          title="Redo. ⇧⌘Z"
+        >
+          ↷ Redo{roomHistoryDepth[1] > 0 ? ` (${roomHistoryDepth[1]})` : ''}
+        </button>
       </div>
       <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
       <p style={{ margin: '8px 0 0', fontSize: 11, color: '#6f767d' }}>

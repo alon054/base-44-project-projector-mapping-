@@ -7285,3 +7285,72 @@ DECISION — 250 ms, not blur. A value that lands when focus leaves is a face
 that lights when the builder clicks elsewhere, which B3 refused for the wall.
 A quiet period keeps "the face lights while I type" at the cost of a
 quarter-second, and turns a word into one rebuild.
+
+## 2026-09-07 — Sprint (pre-reel S3, proposal) — room history is not scene undo
+- DID: nothing in the tree yet. This entry is the `SPEC-CHANGE-PROPOSED` that
+  S3 is told to file before it builds.
+- MEASURED: -
+- BLOCKER: -
+- NEXT: build S3 under the reading below; the human ratifies or rejects in
+  `SPEC.md` §12.
+
+SPEC-CHANGE-PROPOSED — `SPEC.md` §12 cuts "Undo/redo and gesture coalescing"
+with the reason "Real work, invisible in three minutes. Save/load covers the
+failure it protects against." That row is about the CONTENT tree, and it
+stands: no layer, group, fill or duration gains an undo, and S1's save/load is
+what covers it. What S3 adds is a backup for the ROOM — `calibration/`, not
+`scenes/` — and the failure it protects against is one save/load does not
+cover: in one B3 session `surfaces.json` was destroyed twice by a press at
+the wall and recovered with `git checkout`, which restored that morning's
+room, not the room before the gesture. The room has no save button by design
+(SPRINT.md §3 R1: every sample writes), so there is no earlier file to load.
+
+The proposal: (1) an in-memory ring of 20 room trees in the editor, `Cmd+Z` /
+`Cmd+Shift+Z`, room only; (2) a rotating `calibration/surfaces.history/NN.json`
+written by the same handler that already writes `surfaces.json`, so there is
+one writer, not two; (3) ONE rule for "an entry", shared by both, and it is a
+gesture rule: a write that arrives more than one second after the previous
+write starts a new entry, and the entry holds the room as it was before that
+write. That is gesture coalescing by quiet period, and the §12 row names
+gesture coalescing. It is proposed anyway, minimally, because a writer that
+fires on every pointer sample makes a ring without it hold 100 ms of one drag,
+and the point of the ring is the state before the gesture. Nothing under
+`scenes/` is touched; `Scene` has no history and gains none. If rejected, the
+ring and the snapshots are one file each to delete and the room writer
+returns to what it was.
+
+## 2026-09-07 — Sprint (pre-reel S3) — room history: a ring, rotating snapshots, one rule
+- DID: `electron/roomHistory.ts` — dependency-free ring of 20 with the
+  gesture rule (a write >1 s after the previous starts an entry holding the
+  room before it); `undo`/`redo` pure. Main's `surfaces:set` handler snapshots
+  the pre-gesture room to `calibration/surfaces.history/NN.json` (rotating
+  slot, `saveSurfacesSnapshotRaw` beside the room's writer in
+  `calibration.ts`); the editor's `applySurfaces` records into the same rule,
+  `restoreRoom` writes without recording; `⌘Z`/`⇧⌘Z` outside typing targets;
+  two buttons with depth counts above the face list. `.gitignore` gains the
+  history dir.
+- MEASURED: npm test 1147 → 1161 (45 → 46 files, +14); test:render 52 / 52;
+  typecheck clean. Mutations: rule inverted → 4 fail; no cap → 1; redo kept on
+  write → 1; snapshot call removed → 1.
+- BLOCKER: -
+- NEXT: the stage-0 list from UI_PLAN.md is done (S1, S2, S3; S4 was already
+  built). Next is the wall — W1 — or, from the machine, U-A (group fields,
+  inert at defaults).
+
+DECISION — the rule lives in `electron/`, not `src/core/`. Main cannot import
+`src/` (`rootDir: electron`), and the rule has to be the same on both sides or
+the in-memory ring and the files would disagree about what a gesture is. The
+`@shared` alias already carries `ipc.ts` the other way for the same reason.
+The ring knows nothing about surfaces — generic `T` — so it is not the
+content tree learning about the room either.
+
+RISK — the main-side slot counter starts at zero each launch, so a relaunch
+overwrites `00.json` first. The files are a backup of the session's gestures,
+which is the failure being covered; a survivor across launches is
+`surfaces.json` itself, committed. Stated so a future session does not "fix"
+it into a persisted counter without asking what it is for.
+
+NOT verified from the machine: the gesture on the real room. The live
+`calibration/surfaces.json` is the operator's and sits modified on purpose; a
+scripted delete-and-undo over CDP against it was not worth the risk of being
+wrong once. Owed to the builder, one line, in the handoff.

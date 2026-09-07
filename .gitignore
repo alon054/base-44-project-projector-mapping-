@@ -12,6 +12,9 @@ config/settings.json
 # machine-local for the same reason settings.json is, and sharing one would be
 # actively wrong: a calibration from another wall is worse than none.
 calibration/warp.json
+# S3: rotating pre-gesture snapshots of the room. A backup of THIS session
+# on THIS machine; the room itself (surfaces.json) is what gets committed.
+calibration/surfaces.history/
 measurements/*.log
 
 # Golden-frame previews: written on every render-test run, for eyeballing a

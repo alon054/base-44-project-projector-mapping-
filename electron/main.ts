@@ -64,8 +64,10 @@ import {
   loadSurfacesRaw,
   saveCalibrationRaw,
   saveSurfacesRaw,
+  saveSurfacesSnapshotRaw,
 } from './calibration';
 import { loadSceneRaw, saveSceneRaw } from './scenes';
+import { ROOM_HISTORY_DEPTH, createRoomHistory, recordWrite, startsGesture, type RoomHistory } from './roomHistory';
 import { addFromCatalog, libraryEntries, listCatalogFiles, resolveLibraryRequest, searchCatalog } from './catalog';
 
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
@@ -587,6 +589,15 @@ let lastCalibration: CalibrationSet | null = null;
  * not know what a face is; the validation boundary is the receiving renderer.
  */
 let lastSurfaces: SurfacesSet | null = null;
+/**
+ * S3. The room's gesture history on the main side, used only for its timing:
+ * when a write starts a gesture, the room it replaces goes to
+ * `calibration/surfaces.history/NN.json`. The slot index rotates in memory
+ * from zero at each launch — the files are a backup of this session's
+ * gestures, and a slot overwritten is by design.
+ */
+let roomHistory: RoomHistory<SurfacesSet> = createRoomHistory<SurfacesSet>();
+let roomSnapshotSlot = 0;
 
 // ---------------------------------------------------------------------------
 // IPC relay. Every payload passes the I-7 guard on the way through.
@@ -668,6 +679,16 @@ function wireIpc(): void {
    */
   ipcMain.on(CH.surfacesSet, (_e: IpcMainEvent, payload: SurfacesSet) => {
     const room = assertJsonOnly(payload);
+    // S3. Before the room is replaced: if this write starts a gesture, the
+    // room it replaces is snapshotted. Same handler as the write, so there is
+    // one writer of `calibration/` on this path, not two.
+    const now = Date.now();
+    const previous = lastSurfaces ?? loadSurfacesRaw();
+    if (previous !== null && startsGesture(roomHistory, now)) {
+      saveSurfacesSnapshotRaw(roomSnapshotSlot, previous);
+      roomSnapshotSlot = (roomSnapshotSlot + 1) % ROOM_HISTORY_DEPTH;
+    }
+    roomHistory = recordWrite(roomHistory, previous as SurfacesSet, now);
     lastSurfaces = room;
     saveSurfacesRaw(room);
     send(outputWin, CH.surfacesSet, room);
