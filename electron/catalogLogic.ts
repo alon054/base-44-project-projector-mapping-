@@ -18,19 +18,41 @@
  * Giphy) needs an API key the builder would have to obtain and store. The
  * source is behind `CatalogSource` so a keyed one can be added beside it.
  *
- * I-10 IS ENFORCED HERE, BEFORE A BYTE IS DOWNLOADED.
+ * I-10 IS SATISFIED HERE, BEFORE A BYTE IS DOWNLOADED.
  *
- * `licenseFromUrl` maps the Archive's `licenseurl` onto `ALLOWED_LICENSES`.
- * An item whose license does not map — CC-BY-SA, CC-BY-NC, an unknown URL, no
- * URL at all — is shown in the results with `license: null` and CANNOT be
- * added: `buildLibraryEntry` refuses it. The renderer's `AssetLibrary.register`
- * would refuse it again anyway (that is the invariant), but refusing before
- * the download means the operator is told at the button, not after 80 MB.
+ * `licenseFromUrl` maps the Archive's `licenseurl` onto a license NAME.
+ * Every Creative Commons variant and the Public Domain Mark map by name; a
+ * URL this code cannot read, or no URL at all, maps to `unverified`. Nothing
+ * is refused on its license any more (operator, 2026-09-07: 34 of 40 results
+ * were dead buttons) — what I-10 asks for is that every asset carries a
+ * record, and every entry built here does: the name as the source stated it,
+ * the raw URL kept beside it in the results so the operator can read what
+ * the name means, attribution required for everything but CC0, and the
+ * creator named. `AssetLibrary.register` still refuses a record with a
+ * missing field; that is the invariant, and it is unchanged.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-/** The licenses `core/library.ts` accepts. Mirrored, not imported — see `ipc.ts`'s header. */
-export const CATALOG_ALLOWED_LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-3.0'] as const;
+/** The license names this mapping can produce. A subset of `core/library.ts`'s list. Mirrored, not imported — see `ipc.ts`'s header. */
+export const CATALOG_ALLOWED_LICENSES = [
+  'CC0-1.0',
+  'CC-BY-4.0',
+  'CC-BY-3.0',
+  'CC-BY-SA-4.0',
+  'CC-BY-SA-3.0',
+  'CC-BY-NC-4.0',
+  'CC-BY-NC-3.0',
+  'CC-BY-NC-SA-4.0',
+  'CC-BY-NC-SA-3.0',
+  'CC-BY-ND-4.0',
+  'CC-BY-ND-3.0',
+  'CC-BY-NC-ND-4.0',
+  'CC-BY-NC-ND-3.0',
+  'PDM-1.0',
+  'unverified',
+] as const;
+/** The names under which the source grants reuse without a further condition the operator has to read. Shown green; the rest amber. */
+export const CATALOG_OPEN_LICENSES: readonly CatalogLicense[] = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-3.0', 'PDM-1.0'];
 export type CatalogLicense = (typeof CATALOG_ALLOWED_LICENSES)[number];
 
 export const CATALOG_SOURCES = ['archive'] as const;
@@ -47,9 +69,9 @@ export interface CatalogHit {
   title: string;
   creator: string;
   kind: CatalogKind;
-  /** Mapped from `licenseurl`; `null` means "cannot be added" (I-10). */
-  license: CatalogLicense | null;
-  /** The raw license URL, so the operator can read why it did not map. */
+  /** Mapped from `licenseurl`; `unverified` when the URL names nothing this code reads (I-10: a record, always). */
+  license: CatalogLicense;
+  /** The raw license URL, so the operator can read what the name means. */
   licenseUrl: string;
   downloads: number;
   /** Served by the `library:` protocol from a disk cache — never bytes over IPC. */
@@ -167,19 +189,21 @@ export interface CatalogClip {
 }
 
 /**
- * I-10's mapping. Only URLs that name a license this project accepts map;
- * everything else is `null`, including the Public Domain Mark (a statement
- * about a work, not a license granted by its author) and every ShareAlike
- * and NonCommercial variant.
+ * I-10's mapping: a URL to the NAME the record carries. Every Creative
+ * Commons license and the Public Domain Mark map to their SPDX name; a URL
+ * that names nothing this code reads, a non-CC URL, or no URL, is recorded
+ * as `unverified`. Never `null` — every hit can become a record.
  */
-export function licenseFromUrl(licenseUrl: string | undefined | null): CatalogLicense | null {
-  if (typeof licenseUrl !== 'string') return null;
+export function licenseFromUrl(licenseUrl: string | undefined | null): CatalogLicense {
+  if (typeof licenseUrl !== 'string') return 'unverified';
   const u = licenseUrl.toLowerCase();
-  if (!u.includes('creativecommons.org')) return null;
+  if (!u.includes('creativecommons.org')) return 'unverified';
   if (u.includes('/publicdomain/zero/1.0')) return 'CC0-1.0';
-  if (/\/licenses\/by\/4\.0/.test(u)) return 'CC-BY-4.0';
-  if (/\/licenses\/by\/3\.0/.test(u)) return 'CC-BY-3.0';
-  return null;
+  if (u.includes('/publicdomain/mark/1.0')) return 'PDM-1.0';
+  const m = /\/licenses\/(by(?:-nc)?(?:-sa|-nd)?)\/([34])\.0/.exec(u);
+  if (!m) return 'unverified';
+  const name = `CC-${m[1]!.toUpperCase()}-${m[2]}.0`;
+  return (CATALOG_ALLOWED_LICENSES as readonly string[]).includes(name) ? (name as CatalogLicense) : 'unverified';
 }
 
 function asString(v: unknown): string {
@@ -411,23 +435,16 @@ export interface BuildEntryInput {
 /**
  * The entry the renderers will register — or a refusal in words.
  *
- * Refused, never guessed: no mappable license (I-10), a file with no name, a
- * file over the cap. `attributionRequired` is what the license SAYS —
- * CC-BY requires it, CC0 does not — and never an inference from the name
- * alone: it is looked up, and the creator is named when it is required.
+ * Refused, never guessed: a file with no name, a file over the cap. The
+ * license is never a refusal (see the header): the record carries the name
+ * the source stated, or `unverified`. `attributionRequired` is what the
+ * license SAYS — only CC0 waives it; everything else, `unverified` included,
+ * names the creator — and never an inference from the name alone.
  */
 export function buildLibraryEntry(input: BuildEntryInput): { entry: LibraryEntry } | { refused: string } {
   const { hit, file } = input;
   const licenseUrl = input.itemLicenseUrl || hit.licenseUrl;
   const license = licenseFromUrl(licenseUrl);
-  if (license === null) {
-    return {
-      refused:
-        `"${hit.title}" carries no license this project accepts` +
-        (licenseUrl ? ` (${licenseUrl})` : ' (no license URL on the item)') +
-        ` — only ${CATALOG_ALLOWED_LICENSES.join(', ')} enter the library (I-10)`,
-    };
-  }
   if (!file.name) return { refused: `"${hit.title}" has no downloadable file` };
   const bytes = num(file.size);
   if (bytes > MAX_DOWNLOAD_BYTES) {

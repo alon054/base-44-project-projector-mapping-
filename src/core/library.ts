@@ -31,8 +31,35 @@
  * lives in `core/` and takes no view of where the bytes came from.
  */
 
-/** Licenses this project will accept into the library. */
-export const ALLOWED_LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-3.0', 'MIT', 'OFL-1.1'] as const;
+/**
+ * License NAMES the record may carry. I-10 demands the record, not a
+ * particular license: the name is what the source SAYS, recorded so the
+ * operator can read it back, never a permission this code grants. The list
+ * was CC0 / CC-BY only until 2026-09-07, when the operator asked for the
+ * catalog's other 34 of 40 results; every Creative Commons variant and the
+ * Public Domain Mark now map by name, and anything the source does not name
+ * is recorded as `unverified` — still a record, still attribution-required,
+ * and still refused if the four fields are not all present.
+ */
+export const ALLOWED_LICENSES = [
+  'CC0-1.0',
+  'CC-BY-4.0',
+  'CC-BY-3.0',
+  'CC-BY-SA-4.0',
+  'CC-BY-SA-3.0',
+  'CC-BY-NC-4.0',
+  'CC-BY-NC-3.0',
+  'CC-BY-NC-SA-4.0',
+  'CC-BY-NC-SA-3.0',
+  'CC-BY-ND-4.0',
+  'CC-BY-ND-3.0',
+  'CC-BY-NC-ND-4.0',
+  'CC-BY-NC-ND-3.0',
+  'PDM-1.0',
+  'MIT',
+  'OFL-1.1',
+  'unverified',
+] as const;
 export type LicenseName = (typeof ALLOWED_LICENSES)[number];
 
 export interface LicenseRecord {

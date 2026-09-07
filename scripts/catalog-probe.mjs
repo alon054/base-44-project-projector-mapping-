@@ -44,9 +44,9 @@ app.whenReady().then(async () => {
   const hits = await catalog.searchCatalog(QUERY);
   process.stdout.write(`search "${QUERY}": ${hits.length} hit(s) in ${Date.now() - t0} ms\n`);
   if (hits.length === 0) return fail('no hits — offline, or archive.org is not answering');
-  const addable = hits.filter((h) => h.license !== null);
-  const refused = hits.length - addable.length;
-  process.stdout.write(`  ${addable.length} addable (CC0/CC-BY), ${refused} without a usable license (I-10)\n`);
+  const addable = hits;
+  const unverified = hits.filter((h) => h.license === 'unverified').length;
+  process.stdout.write(`  ${addable.length} addable, ${unverified} with a license this build cannot name (recorded as unverified, I-10)\n`);
   for (const h of hits.slice(0, 5)) {
     process.stdout.write(`  - ${h.identifier} [${h.kind}] ${h.license ?? 'NO LICENSE'} "${h.title}"\n`);
   }

@@ -188,7 +188,7 @@ export async function searchCatalog(query: string): Promise<CatalogHit[]> {
 
 export type AddResult = { ok: true; entry: LibraryEntry } | { ok: false; reason: string };
 export type FilesResult =
-  | { ok: true; clips: CatalogClip[]; license: string | null; licenseUrl: string }
+  | { ok: true; clips: CatalogClip[]; license: string; licenseUrl: string }
   | { ok: false; reason: string };
 
 interface ItemMeta {
@@ -228,7 +228,7 @@ export async function listCatalogFiles(hit: CatalogHit): Promise<FilesResult> {
 
 /**
  * Bring one hit home: read the item's metadata, pick the file, build the entry
- * (which is where I-10 refuses), download to a `.part` beside the final name,
+ * (which is where I-10's record is built), download to a `.part` beside the final name,
  * rename on completion, write the index. `onProgress` is called at most a few
  * times a second — never per frame, and never on any render thread; this is
  * main.

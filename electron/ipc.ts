@@ -364,7 +364,7 @@ export interface CatalogAddRequest {
 
 /** main -> editor: the clips of one item, best first, or the reason there are none. */
 export type CatalogFilesResult =
-  | { ok: true; clips: CatalogClip[]; license: string | null; licenseUrl: string }
+  | { ok: true; clips: CatalogClip[]; license: string; licenseUrl: string }
   | { ok: false; reason: string };
 
 /** main -> editor: the result of an add, in words when it did not happen. */

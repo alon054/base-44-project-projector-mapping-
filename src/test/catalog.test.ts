@@ -67,24 +67,32 @@ describe('the Archive request URLs', () => {
   });
 });
 
-describe('I-10 — the license mapping refuses everything it cannot name', () => {
+describe('I-10 — the license mapping names everything, and refuses nothing', () => {
   it('maps CC0, CC-BY 4.0 and CC-BY 3.0', () => {
     expect(licenseFromUrl('https://creativecommons.org/publicdomain/zero/1.0/')).toBe('CC0-1.0');
     expect(licenseFromUrl('http://creativecommons.org/licenses/by/4.0/')).toBe('CC-BY-4.0');
     expect(licenseFromUrl('http://creativecommons.org/licenses/by/3.0/us/')).toBe('CC-BY-3.0');
   });
 
-  it('refuses ShareAlike, NonCommercial, the Public Domain Mark, and nothing', () => {
+  it('names ShareAlike, NonCommercial, NoDerivatives and the Public Domain Mark by their SPDX ids', () => {
+    expect(licenseFromUrl('http://creativecommons.org/licenses/by-sa/4.0/')).toBe('CC-BY-SA-4.0');
+    expect(licenseFromUrl('http://creativecommons.org/licenses/by-nc/3.0/')).toBe('CC-BY-NC-3.0');
+    expect(licenseFromUrl('https://creativecommons.org/licenses/by-nc-sa/4.0/')).toBe('CC-BY-NC-SA-4.0');
+    expect(licenseFromUrl('https://creativecommons.org/licenses/by-nd/4.0/')).toBe('CC-BY-ND-4.0');
+    expect(licenseFromUrl('https://creativecommons.org/licenses/by-nc-nd/3.0/')).toBe('CC-BY-NC-ND-3.0');
+    expect(licenseFromUrl('http://creativecommons.org/publicdomain/mark/1.0/')).toBe('PDM-1.0');
+  });
+
+  it('records what it cannot read as `unverified` — a name, never null (operator, 2026-09-07)', () => {
     for (const u of [
-      'http://creativecommons.org/licenses/by-sa/4.0/',
-      'http://creativecommons.org/licenses/by-nc/3.0/',
-      'http://creativecommons.org/publicdomain/mark/1.0/',
       'https://example.com/licenses/by/4.0/',
+      'https://creativecommons.org/licenses/by/2.0/',
+      'https://creativecommons.org/licenses/sampling+/1.0/',
       '',
       undefined,
       null,
     ]) {
-      expect(licenseFromUrl(u)).toBeNull();
+      expect(licenseFromUrl(u)).toBe('unverified');
     }
   });
 
@@ -109,7 +117,7 @@ describe('the search response', () => {
     const hits = parseArchiveSearch(json);
     expect(hits.map((h) => h.identifier)).toEqual(['loop-a', 'pic-b']);
     expect(hits[0]).toMatchObject({ kind: 'video', license: 'CC0-1.0', creator: 'X, Y', downloads: 40 });
-    expect(hits[1]).toMatchObject({ kind: 'still', license: null, licenseUrl: '', downloads: 7 });
+    expect(hits[1]).toMatchObject({ kind: 'still', license: 'unverified', licenseUrl: '', downloads: 7 });
     expect(hits[0]?.thumbUrl).toBe('library://thumbs/loop-a.jpg');
   });
 
@@ -299,7 +307,7 @@ describe('the entry that is built', () => {
 
   it('the item metadata license wins over the search doc', () => {
     const r = buildLibraryEntry({
-      hit: hit({ license: null, licenseUrl: '' }),
+      hit: hit({ license: 'unverified', licenseUrl: '' }),
       file,
       itemLicenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
       today: '2026-09-07',
@@ -308,13 +316,31 @@ describe('the entry that is built', () => {
     expect(r.entry.license.license).toBe('CC0-1.0');
   });
 
-  it('refuses, in words, an item with no usable license — before a byte is downloaded (I-10)', () => {
+  it('an NC item is added with its real name and the creator credited — no license refuses (I-10 is the record)', () => {
     const r = buildLibraryEntry({
-      hit: hit({ license: null, licenseUrl: 'http://creativecommons.org/licenses/by-nc/4.0/' }),
+      hit: hit({ license: 'CC-BY-NC-4.0', licenseUrl: 'http://creativecommons.org/licenses/by-nc/4.0/' }),
       file,
       today: '2026-09-07',
     });
-    expect('refused' in r && r.refused).toMatch(/by-nc.*I-10/);
+    if (!('entry' in r)) throw new Error(r.refused);
+    expect(r.entry.license).toMatchObject({ license: 'CC-BY-NC-4.0', attributionRequired: true, attribution: 'Someone' });
+  });
+
+  it('an item with no license URL at all is added as `unverified`, attribution required, and the library door accepts the record', () => {
+    const r = buildLibraryEntry({ hit: hit({ license: 'unverified', licenseUrl: '', creator: '' }), file, today: '2026-09-07' });
+    if (!('entry' in r)) throw new Error(r.refused);
+    expect(r.entry.license).toMatchObject({ license: 'unverified', attributionRequired: true });
+    // Nobody named on the item: the identifier stands in, so the record is still complete.
+    expect(r.entry.license.attribution).toBe(r.entry.origin.identifier);
+    const lib = new AssetLibrary();
+    expect(() => lib.register(canonicalizeLibraryEntry(r.entry as unknown as Record<string, unknown>))).not.toThrow();
+  });
+
+  it('no license URL of any shape can make buildLibraryEntry refuse — every shape yields an entry', () => {
+    for (const licenseUrl of ['', 'https://example.com/terms', 'http://creativecommons.org/licenses/by-sa/3.0/', 'gibberish']) {
+      const r = buildLibraryEntry({ hit: hit({ licenseUrl }), file, itemLicenseUrl: licenseUrl, today: '2026-09-07' });
+      expect('entry' in r, licenseUrl).toBe(true);
+    }
   });
 
   it('refuses a file over the cap, naming the size', () => {

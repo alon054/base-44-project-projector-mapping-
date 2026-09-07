@@ -7626,3 +7626,38 @@ builder was at a wall in the dark — and both are one action each to close.
 none). W1's and W2's "commit warp.json" lines were written before that rule
 was applied to the file and cannot be done as written. Logged, not changed:
 `SPRINT_CHECKLIST.md`'s lines now say so inline.
+
+## 2026-09-07 — Sprint (operator additions, 3) — the license gate opened; I-10 kept as a record
+- DID: the catalog no longer refuses an item on its license. `licenseFromUrl`
+  maps every CC variant and the Public Domain Mark to an SPDX name and
+  anything else to `unverified`, never `null`; `buildLibraryEntry` drops the
+  license refusal and names the creator (or the identifier) on every
+  non-CC0 record; `core/library.ts` `ALLOWED_LICENSES` gains the same names
+  plus `unverified`; the catalog panel's "not addable" state is gone and the
+  badge is green (CC0 / CC-BY / PDM) or amber (a condition to read). Probe
+  script counts `unverified` instead of refused.
+- MEASURED: npm test 1189 → 1192, 47 files. Typecheck clean on both
+  targets. Mutation checks, catalog.test.ts alone (34 tests):
+  | Mutation | Result |
+  |---|---|
+  | `buildLibraryEntry` refuses `unverified` again | 2 failed / 34 |
+  | NC / SA / ND URLs map to `unverified` again | 2 failed / 34 |
+- BLOCKER: -
+- NEXT: unchanged — the builder saves the reel scene (`scenes/reel.json`),
+  then Day 3.
+
+DECISION: the operator asked to "remove the license thing". Read against
+SPEC.md, I-10 says *every library asset carries a `license` record (source,
+license name, attribution flag, retrieved-at), enforced at the library API*,
+and §8 says the API *rejects an asset with no license record*. Neither names
+CC0 / CC-BY; that list was the operator additions' own choice (`I-10 at the
+button`), made when the goal was a reel with nothing to answer for. So this
+is not an INVARIANT-TENSION: the record is still mandatory, the door still
+refuses a record with a missing field or a name off the list, and what
+changed is that the name may now be `CC-BY-NC-4.0` or `unverified` instead
+of the item being a dead button. The consequence is the operator's to carry:
+an amber badge means a condition (NonCommercial, ShareAlike, NoDerivatives)
+or no license stated, and the record exists precisely so that can be read
+before a public showing. Not run: `scripts/catalog-probe.mjs` — it reaches
+archive.org and downloads a clip into the library, and the unit suite covers
+every decision the probe would exercise.

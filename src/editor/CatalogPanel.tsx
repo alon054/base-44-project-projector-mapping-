@@ -4,8 +4,8 @@
  *
  * Operator-requested, ahead of SPEC.md's Phase 8 and against §12's cut of
  * catalog APIs — recorded as a SPEC-CHANGE-PROPOSED in BUILD_LOG.md. What it
- * does NOT change: I-10 (every asset that lands carries a license record or is
- * refused before download — see `electron/catalogLogic.ts`), I-7 (no bytes
+ * does NOT change: I-10 (every asset that lands carries a license record —
+ * the name the source stated, or `unverified`; see `electron/catalogLogic.ts`), I-7 (no bytes
  * cross IPC; the renderer loads `library://` files main serves from disk), and
  * the picker (a downloaded asset is a `BundledAsset` like any other and goes
  * through the same door).
@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { CatalogClip, CatalogHit, CatalogProgress } from '@shared/ipc';
+import { CATALOG_OPEN_LICENSES } from '@shared/catalogLogic';
 import { registerLibraryEntries } from './assets';
 
 const PRESETS = ['vj loops', 'abstract animation loop', 'particles loop', 'fire loop', 'light leaks'] as const;
@@ -137,7 +138,9 @@ export function CatalogPanel({ onAdded }: Props): React.JSX.Element {
         ))}
       </div>
       <p style={{ margin: 0, fontSize: 11, color: '#6f767d' }}>
-        Only CC0 and CC-BY items can be added (I-10). Video loops come home as the smallest MP4 the
+        Every item can be added; its license is recorded as the Archive states it (I-10). Green is CC0 / CC-BY /
+        public domain; amber carries a condition (NC, SA, ND) or names no license — read it before it leaves this
+        room. Video loops come home as the smallest MP4 the
         projector can play; one instance per face means one decoder per face — keep video on
         single-face roles. Abstract content only: skew is invisible in fire and particles.
       </p>
@@ -163,11 +166,11 @@ export function CatalogPanel({ onAdded }: Props): React.JSX.Element {
                     position: 'absolute',
                     right: 4,
                     top: 4,
-                    color: hit.license ? '#7CFFB2' : '#ffb4b4',
+                    color: CATALOG_OPEN_LICENSES.includes(hit.license) ? '#7CFFB2' : '#ffd27c',
                   }}
-                  title={hit.licenseUrl || 'no license URL on the item'}
+                  title={hit.licenseUrl || 'no license URL on the item — recorded as unverified'}
                 >
-                  {hit.license ?? 'no license'}
+                  {hit.license}
                 </span>
               </div>
               <div style={{ fontSize: 12, color: '#e6ebf0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hit.title}>
@@ -183,24 +186,18 @@ export function CatalogPanel({ onAdded }: Props): React.JSX.Element {
               ) : (
                 <button
                   type="button"
-                  style={{ ...buttonStyle, opacity: hit.license ? 1 : 0.5 }}
-                  disabled={!hit.license || done !== undefined || listing === hit.identifier}
-                  title={
-                    hit.license
-                      ? 'List the clips in this item; a single clip downloads into assets/library straight away'
-                      : `Cannot add: ${hit.licenseUrl || 'no license'} is not CC0 / CC-BY (I-10)`
-                  }
+                  style={buttonStyle}
+                  disabled={done !== undefined || listing === hit.identifier}
+                  title={`List the clips in this item; a single clip downloads into assets/library straight away (license: ${hit.license})`}
                   onClick={() => void open(hit)}
                 >
                   {done
                     ? 'in library ✓'
                     : listing === hit.identifier
                       ? 'reading…'
-                      : hit.license
-                        ? clips[hit.identifier]
-                          ? `${clips[hit.identifier]?.length} clips ▾`
-                          : '+ open / add'
-                        : 'not addable'}
+                      : clips[hit.identifier]
+                        ? `${clips[hit.identifier]?.length} clips ▾`
+                        : '+ open / add'}
                 </button>
               )}
               {clips[hit.identifier] && (
