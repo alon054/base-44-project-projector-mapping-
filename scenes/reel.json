@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "id": "blank",
+  "name": "Blank",
+  "seed": 1,
+  "background": 0,
+  "layers": [
+    {
+      "id": "whitefill-1",
+      "name": "face 1 — own fill",
+      "providerId": "bundled",
+      "content": {
+        "assetId": "archive.79_VJ_LOOPS_LIQUID_LIGHT.VJ_LOOPS_LIQUID_LIGHT_42_512kb",
+        "tint": 16777215
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 0.5,
+        "rotation": 0
+      },
+      "zOrder": 0,
+      "opacity": 1,
+      "blendMode": "normal",
+      "depth": 0.5,
+      "visible": true,
+      "seed": 2748904825,
+      "susceptibility": {},
+      "fillRole": "surface-1"
+    },
+    {
+      "id": "whitefill-2",
+      "name": "face 2 — own fill",
+      "providerId": "bundled",
+      "content": {
+        "assetId": "archive.79_VJ_LOOPS_LIQUID_LIGHT.VJ_LOOPS_LIQUID_LIGHT_21_512kb",
+        "tint": 16777215
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 0.5,
+        "rotation": 0
+      },
+      "zOrder": 1,
+      "opacity": 1,
+      "blendMode": "normal",
+      "depth": 0.5,
+      "visible": true,
+      "seed": 2698571968,
+      "susceptibility": {},
+      "fillRole": "surface-2"
+    },
+    {
+      "id": "whitefill-3",
+      "name": "face 3 — own fill",
+      "providerId": "bundled",
+      "content": {
+        "assetId": "archive.turquoise_201503.turquoise",
+        "tint": 16777215
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 0.5,
+        "rotation": 0
+      },
+      "zOrder": 2,
+      "opacity": 1,
+      "blendMode": "normal",
+      "depth": 0.5,
+      "visible": true,
+      "seed": 2715349587,
+      "susceptibility": {},
+      "fillRole": "surface-3"
+    },
+    {
+      "id": "whitefill-4",
+      "name": "face 4 — own fill",
+      "providerId": "bundled",
+      "content": {
+        "assetId": "archive.FREE_VJ_LOOPS-from_www.vjloops.tv.bubblebath_ca890_512kb",
+        "tint": 16777215
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 0.5,
+        "rotation": 0
+      },
+      "zOrder": 3,
+      "opacity": 1,
+      "blendMode": "normal",
+      "depth": 0.5,
+      "visible": true,
+      "seed": 2799237682,
+      "susceptibility": {},
+      "fillRole": "surface-4"
+    },
+    {
+      "id": "whitefill-5",
+      "name": "face 5 — own fill",
+      "providerId": "bundled",
+      "content": {
+        "assetId": "archive.TextureLoopsCreatedWithAxogonMutator_727.HTB071",
+        "tint": 16777215
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 0.5,
+        "rotation": 0
+      },
+      "zOrder": 4,
+      "opacity": 1,
+      "blendMode": "normal",
+      "depth": 0.5,
+      "visible": true,
+      "seed": 2816015301,
+      "susceptibility": {},
+      "fillRole": "surface-5"
+    }
+  ],
+  "forces": {
+    "wind": {
+      "strength": 0,
+      "direction": 0,
+      "gustiness": 0.4
+    },
+    "rain": {
+      "intensity": 0,
+      "wetness": 0.6
+    },
+    "timeOfDay": {
+      "hour": 12
+    },
+    "temperature": {
+      "warmth": 0.5
+    },
+    "fog": {
+      "density": 0
+    }
+  },
+  "parallax": {
+    "x": 0.5,
+    "y": 0.5
+  },
+  "groups": []
+}
