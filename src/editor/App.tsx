@@ -62,6 +62,7 @@ import {
 import { canonicalizeSurface, describeSurfaces, type SurfaceTree } from '../core/surfaces';
 import { SurfacePanel } from './SurfacePanel';
 import { FillPanel } from './FillPanel';
+import { ensureOwnFillLayer, withOwnFillRole, withSharedFillRole, withoutOwnFillLayers } from './ownFill';
 import { GroupPanel } from './GroupPanel';
 import { LibraryDrawer } from './LibraryDrawer';
 import { libraryVersion as readLibraryVersion, onLibraryChange, registerLibraryEntries } from './assets';
@@ -616,7 +617,26 @@ export function App(): React.JSX.Element {
           ↷ Redo{roomHistoryDepth[1] > 0 ? ` (${roomHistoryDepth[1]})` : ''}
         </button>
       </div>
-      <SurfacePanel surfaces={surfaces} onSurfaces={applySurfaces} filledRoles={filledRoles} />
+      <SurfacePanel
+        surfaces={surfaces}
+        onSurfaces={applySurfaces}
+        filledRoles={filledRoles}
+        // One press, two trees, one write each (`ownFill.ts`): the room through
+        // the same path a typed role takes, the scene through the same updater
+        // every panel uses. Neither half sees the other's tree.
+        onOwnFill={(id) => {
+          const face = surfacesRef.current.find((s) => s.id === id);
+          if (!face) return;
+          applySurfaces(withOwnFillRole(surfacesRef.current, id));
+          setScene((prev) => ensureOwnFillLayer(prev, face));
+        }}
+        onShareFill={(id) => {
+          const face = surfacesRef.current.find((s) => s.id === id);
+          if (!face) return;
+          applySurfaces(withSharedFillRole(surfacesRef.current, id));
+          setScene((prev) => withoutOwnFillLayers(prev, face));
+        }}
+      />
       <p style={{ margin: '8px 0 0', fontSize: 11, color: '#6f767d' }}>
         A role can be several words: <code>panel f1</code> is in the shared fill AND its own
         slot, which is how a sequence lights faces one at a time.

@@ -43,6 +43,7 @@ import {
   type SurfaceTree,
 } from '../core/surfaces';
 import { DebouncedTextInput } from './DebouncedTextInput';
+import { hasOwnFill } from './ownFill';
 import { MASK_MIN_POINTS } from '../render/mask';
 import { roleTokens } from '../core/roles';
 
@@ -56,9 +57,17 @@ interface Props {
    * from the panel rather than only from a dark rectangle on the wall (I-13).
    */
   filledRoles: readonly string[];
+  /**
+   * "Own": this face gets a private role and its own fill, so picking a
+   * picture for it changes nothing else. "Share": back to `panel`. Both halves
+   * — the room's and the scene's — are `App`'s to apply, one per tree
+   * (`ownFill.ts`); this panel only asks.
+   */
+  onOwnFill: (surfaceId: string) => void;
+  onShareFill: (surfaceId: string) => void;
 }
 
-export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): React.JSX.Element {
+export function SurfacePanel({ surfaces, onSurfaces, filledRoles, onOwnFill, onShareFill }: Props): React.JSX.Element {
   if (surfaces.length === 0) {
     return (
       <p style={{ margin: 0, color: '#8b939b', fontSize: 12 }}>
@@ -81,6 +90,7 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
         const tooFew = points < MASK_MIN_POINTS;
         // Any token of the face's role that a layer fills lights it (`roleTokens`).
         const lit = roleTokens(surface.role).some((t) => filledRoles.includes(t));
+        const own = hasOwnFill(surface);
         return (
           <div key={surface.id} style={rowStyle}>
             {/*
@@ -130,6 +140,19 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
               />
               grid
             </label>
+            <button
+              type="button"
+              style={{ ...ownStyle, ...(own ? ownOnStyle : {}) }}
+              aria-label={own ? `share ${surface.name}'s fill again` : `give ${surface.name} its own fill`}
+              title={
+                own
+                  ? `Back to the shared fill: role "${DEFAULT_SURFACE_ROLE}" again, and this face's own fill layer is removed.`
+                  : `Its own animation: this face leaves role "${DEFAULT_SURFACE_ROLE}", gets the role "${surface.id}" and a fill bound to it. Pick what it shows under Fill — nothing else changes.`
+              }
+              onClick={() => (own ? onShareFill(surface.id) : onOwnFill(surface.id))}
+            >
+              {own ? 'own ✓' : 'own'}
+            </button>
             <span style={countStyle} title={surface.id}>
               {points} pt{points === 1 ? '' : 's'}
               {surface.path.closed ? '' : ' · open'}
@@ -151,7 +174,8 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
         Every edit here rewrites <code>calibration/surfaces.json</code> and reaches the output
         window immediately — there is no save button (SPRINT.md §3 R1). Role is a free string:
         leave it <code>{DEFAULT_SURFACE_ROLE}</code> and every face shares one fill; set it to
-        something else and only a layer naming that role fills it.
+        something else and only a layer naming that role fills it. <strong>own</strong> does that
+        in one press: the face gets a private role and its own card under Fill.
       </p>
     </div>
   );
@@ -161,7 +185,7 @@ const rowStyle: React.CSSProperties = {
   display: 'grid',
   // The role field is wide enough for two words (`panel f1`); the status
   // column sizes to its text so 'unfilled' is never clipped to 'unfille'.
-  gridTemplateColumns: 'minmax(80px, 1fr) 120px auto auto 22px',
+  gridTemplateColumns: 'minmax(80px, 1fr) 120px auto auto auto 22px',
   alignItems: 'center',
   gap: 6,
 };
@@ -184,6 +208,24 @@ const guideStyle: React.CSSProperties = {
   color: '#8b939b',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+};
+
+const ownStyle: React.CSSProperties = {
+  padding: '2px 6px',
+  borderRadius: 4,
+  border: '1px solid #2b2f34',
+  background: '#191c1f',
+  color: '#8b939b',
+  font: 'inherit',
+  fontSize: 11,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const ownOnStyle: React.CSSProperties = {
+  borderColor: '#2f7f92',
+  color: '#c7ced4',
+  background: '#16303a',
 };
 
 const countStyle: React.CSSProperties = {

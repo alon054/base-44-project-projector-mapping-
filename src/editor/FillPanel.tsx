@@ -90,7 +90,12 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
     <div style={{ display: 'grid', gap: 10 }}>
       {fills.map((layer) => {
         const role = layer.fillRole as string;
-        const faces = resolveRole(role, surfaces).surfaces.length;
+        const resolved = resolveRole(role, surfaces).surfaces;
+        const faces = resolved.length;
+        // A fill bound to a face's own token (the "own" button in the Room
+        // panel) reads by the face's name, which is what the builder is
+        // looking at on the wall — not by the token.
+        const ownOf = resolved.length === 1 && resolved[0]!.id === role ? resolved[0]! : undefined;
         const chosen = currentChoiceId(scene, layer.id, choices);
         const asset = assets.find((a) => a.id === layer.content['assetId']);
         const cap = asset && PER_INSTANCE_COST.has(asset.kind)
@@ -103,8 +108,9 @@ export function FillPanel({ scene, setScene, surfaces, libraryVersion }: Props):
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <strong style={{ fontSize: 12, color: '#e6ebf0' }}>{layer.name}</strong>
               <code style={{ fontSize: 11, color: faces === 0 ? '#d8b45a' : '#6f767d' }}>
-                fills role “{role}” · {faces} face{faces === 1 ? '' : 's'}
-                {faces === 0 ? ' — no face carries this role yet' : ''}
+                {ownOf
+                  ? `only on “${ownOf.name}”`
+                  : `fills role “${role}” · ${faces} face${faces === 1 ? '' : 's'}${faces === 0 ? ' — no face carries this role yet' : ''}`}
               </code>
             </div>
             <ContentPicker

@@ -7661,3 +7661,38 @@ or no license stated, and the record exists precisely so that can be read
 before a public showing. Not run: `scripts/catalog-probe.mjs` — it reaches
 archive.org and downloads a clip into the library, and the unit suite covers
 every decision the probe would exercise.
+
+## 2026-09-07 — Sprint (operator additions, 4) — a face with its own animation, as one button
+- DID: `src/editor/ownFill.ts` — four pure functions, two per tree.
+  Room: `withOwnFillRole` re-tags a face with its own id (replacing the
+  role, not adding to it); `withSharedFillRole` puts `panel` back. Scene:
+  `ensureOwnFillLayer` adds one white fill bound to the token, named after
+  the face, identity if one exists; `withoutOwnFillLayers` removes it
+  through `removeLayer`. `SurfacePanel` gets an **own / own ✓** button per
+  face; `App` applies each half down its own path (`applySurfaces`,
+  `setScene`); `FillPanel`'s card for an own fill reads *only on "<face>"*.
+  `addWhiteFill` gains an optional name.
+- MEASURED: npm test 1192 → 1203, 48 files (+11, `ownFill.test.ts`).
+  test:render 52 / 52, 43 pre-fill byte-identical. Mutation checks, the new
+  file alone (11 tests):
+  | Mutation | Result |
+  |---|---|
+  | "own" appends the token instead of replacing the role | 4 failed / 11 |
+  | `ensureOwnFillLayer` stacks a fill on every press | 1 failed / 11 |
+- BLOCKER: -
+- NEXT: unchanged — the builder saves the reel scene, then Day 3.
+
+DECISION: the token is the face's id, not its name. The name is editable and
+may hold spaces (`roleTokens` splits on whitespace); the id is stable. It is
+still a role string, not a surface reference: the scene file gains nothing
+I-15 forbids, and `surfaces.test.ts`'s import-graph rules stay green with
+`ownFill.ts` in `editor/`, where the two trees already meet in `App`.
+
+DECISION: "own" replaces the role. `panel surface-3` would show the shared
+fill and the own fill added together (I-6), which is a muddle rather than a
+choice. The `panel f1` arrangement for sequences is still typed by hand.
+
+One caught by the suite: the first draft of `withoutOwnFillLayers` listed
+with `layers.filter` before reducing through `removeLayer`, and P5-B's
+one-structural-removal test flagged the file. Rewritten as a reduce. The
+test did what it exists for.

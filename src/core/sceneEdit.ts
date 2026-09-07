@@ -192,10 +192,10 @@ export function addAssetFill(scene: Scene, role: string, assetId: string, name: 
   });
 }
 
-export function addWhiteFill(scene: Scene, role: string): Scene {
+export function addWhiteFill(scene: Scene, role: string, name = `white fill (${role})`): Scene {
   return addLayer(scene, {
     idPrefix: 'whitefill',
-    name: `white fill (${role})`,
+    name,
     providerId: PROCEDURAL_PROVIDER_ID,
     content: { kind: 'rect', tint: 0xffffff },
     rect: { x: 0.5, y: 0.5, width: 0.5, height: 0.5 },
