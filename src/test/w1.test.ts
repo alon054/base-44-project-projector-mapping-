@@ -306,11 +306,12 @@ describe('W1 follow-up — grid off on a face means NO grid line crosses it, the
     expect(drawWallGridCutout(g, [], W, H)).toBe(false);
     expect(g.context.instructions.length).toBe(0);
     expect(drawWallGridCutout(g, [quad('p1'), line('open')], W, H)).toBe(true);
-    // One fill whose path is the frame plus one hole per maskable face (the
-    // open line is not one): the rect and the cut poly, two shapes in one path.
-    const fill = g.context.instructions[0] as { data: { path: { instructions: unknown[] } } };
-    expect(g.context.instructions.length).toBe(1);
-    expect(fill.data.path.instructions.length).toBe(2);
+    // The hole is geometry, asserted as geometry: a point inside the hidden
+    // face is OUTSIDE the mask; a point elsewhere in the frame is inside it.
+    // quad('p1') spans x 0.1–0.4, y 0.2–0.5 of the frame.
+    expect(g.containsPoint({ x: 0.25 * W, y: 0.35 * H })).toBe(false);
+    expect(g.containsPoint({ x: 0.75 * W, y: 0.75 * H })).toBe(true);
+    expect(g.containsPoint({ x: 0.05 * W, y: 0.05 * H })).toBe(true);
   });
 
   it('the wall grid is unmasked while every face shows its guide, and masked once one is switched off', () => {
@@ -318,11 +319,15 @@ describe('W1 follow-up — grid off on a face means NO grid line crosses it, the
     const c = guidedCompositor(tree);
     c.setWallGrid(true);
     const grid = wallGridOf(c);
-    expect(grid.mask).toBeNull();
+    // v8 reads an absent mask as undefined; the compositor writes null to drop it.
+    expect(grid.mask ?? null).toBeNull();
     c.setSurfaces(withSurfaceGuide(tree, 'surface-1', false));
     expect(grid.mask).toBeInstanceOf(Graphics);
+    // The hole is where the switched-off face is.
+    expect((grid.mask as Graphics).containsPoint({ x: 0.25 * W, y: 0.35 * H })).toBe(false);
+    expect((grid.mask as Graphics).containsPoint({ x: 0.9 * W, y: 0.9 * H })).toBe(true);
     c.setSurfaces(withSurfaceGuide(tree, 'surface-1', undefined));
-    expect(grid.mask).toBeNull();
+    expect(grid.mask ?? null).toBeNull();
     c.destroy();
   });
 
@@ -333,7 +338,7 @@ describe('W1 follow-up — grid off on a face means NO grid line crosses it, the
     c.setScene(fillScene('panel'));
     expect(wallGridOf(c).mask).toBeInstanceOf(Graphics);
     c.setScene(fillScene('other'));
-    expect(wallGridOf(c).mask).toBeNull();
+    expect(wallGridOf(c).mask ?? null).toBeNull();
     c.destroy();
   });
 });

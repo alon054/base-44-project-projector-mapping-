@@ -7553,3 +7553,18 @@ running its lines across the face, which to the eye is "the grid is there
 all the time." The switch now means what it says. A filled face, auto-hidden,
 gets the same cut, so the animation sits on a clean face with the wall grid
 around it — which is the picture the builder described on day one.
+
+## 2026-09-07 — Sprint (W1 fixes, follow-up 4b) — the cut-out's tests, as geometry
+- DID: the three cut-out tests now assert the hole with `containsPoint` (a
+  point inside a switched-off face is outside the wall grid's mask; a point
+  elsewhere is inside) and read an absent mask as v8 does (undefined).
+- MEASURED: npm test 1189 / 1189, 47 files. Mutations re-run: cut-out never
+  applied → 2 fail; cut skipped → 2 fail.
+- BLOCKER: -
+- NEXT: the builder — untick grid on a face.
+
+RISK-TRIGGERED — commit 0f5859c landed with three red tests. The shell ran
+`git commit` after the suite regardless of its result, because the two were
+chained with `;`-style sequencing in one command. Not amended: the history
+says what happened. The rule from here: the commit line is `&&`-chained to
+the test run, so a red suite cannot be committed by accident.
