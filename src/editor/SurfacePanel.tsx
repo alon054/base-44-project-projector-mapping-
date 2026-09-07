@@ -41,6 +41,7 @@ import {
   withSurfaceRole,
   type SurfaceTree,
 } from '../core/surfaces';
+import { DebouncedTextInput } from './DebouncedTextInput';
 import { MASK_MIN_POINTS } from '../render/mask';
 import { roleTokens } from '../core/roles';
 
@@ -81,16 +82,22 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
         const lit = roleTokens(surface.role).some((t) => filledRoles.includes(t));
         return (
           <div key={surface.id} style={rowStyle}>
-            <input
-              type="text"
+            {/*
+              S2. Name and role commit 250 ms after the last keystroke
+              (`DebouncedTextInput`), not per character: `role` is in the
+              shape key, so each commit is a full rebuild on the output, and a
+              rebuild per character with a video fill is a decoder per
+              character. The point drags in the preview are NOT debounced —
+              a drag is a reshape and writes every sample (B3).
+            */}
+            <DebouncedTextInput
               value={surface.name}
               aria-label={`name of ${surface.id}`}
               spellCheck={false}
               style={{ ...fieldStyle, gridColumn: '1' }}
-              onChange={(e) => onSurfaces(withSurfaceName(surfaces, surface.id, e.currentTarget.value))}
+              onCommit={(v) => onSurfaces(withSurfaceName(surfaces, surface.id, v))}
             />
-            <input
-              type="text"
+            <DebouncedTextInput
               value={surface.role}
               aria-label={`role of ${surface.id}`}
               placeholder={DEFAULT_SURFACE_ROLE}
@@ -103,7 +110,7 @@ export function SurfacePanel({ surfaces, onSurfaces, filledRoles }: Props): Reac
                 borderColor: lit ? '#2f7f92' : '#4a3a1a',
                 color: lit ? '#c7ced4' : '#d8b45a',
               }}
-              onChange={(e) => onSurfaces(withSurfaceRole(surfaces, surface.id, e.currentTarget.value))}
+              onCommit={(v) => onSurfaces(withSurfaceRole(surfaces, surface.id, v))}
             />
             <span style={countStyle} title={surface.id}>
               {points} pt{points === 1 ? '' : 's'}

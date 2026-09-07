@@ -7252,3 +7252,36 @@ I-13 — a scene naming a library asset that is not on this machine loads. The
 file is not the place to know what the library holds; the renderer flags the
 layer, as it already does for a missing provider. H15 (an asset manifest per
 scene) stays owed.
+
+## 2026-09-07 — Sprint (pre-reel S2) — debounce the rebuild-path text writes
+- DID: `editor/debouncedText.ts` — `TextCommitter`, one quiet-period commit
+  (250 ms), pure and timer-injected; `editor/DebouncedTextInput.tsx` wraps it
+  with a local draft and flushes on Enter, blur and unmount. `SurfacePanel`'s
+  name and role, and every `text` parameter in `ParamControl` (`fillRole`,
+  `travelRole`), now commit through it. Point drags untouched. The commit
+  callback is read through a ref at commit time so a late write is a write of
+  the present tree, not of the tree at the keystroke.
+- MEASURED: npm test 1136 → 1147 (44 → 45 files, +11); test:render 52 / 52;
+  typecheck clean. Appending ` f1` to `panel` on a headless compositor: 3
+  provider views created raw, 1 through the mechanism. Mutations: synchronous
+  commit → 3 fail; ref line deleted → 1 fail; ref line commented → 1 fail
+  (after tightening — see below); raw input restored in ParamControl → 1 fail.
+- BLOCKER: -
+- NEXT: S3 — `SPEC-CHANGE-PROPOSED` for room history, then the ring and the
+  rotating snapshots.
+
+MEASURED — H2 was wider than `UI_PLAN.md` stated. Not only the face `role`
+(shape key → `setScene`) but a layer's `fillRole` (a new scene per character;
+the output's deep-equal guard skips only an identical scene) took the rebuild
+per keystroke. One mechanism covers both, which is the point of it being one.
+
+A test that could not fail, caught. The first source assertion for the
+commit-time ref checked that the file CONTAINED the statement; commenting the
+line out left its text in a comment and the test stayed green. It now matches
+the statement as a line of code. Recorded because it is the class, not the
+instance: a source-grep test must match syntax, not words.
+
+DECISION — 250 ms, not blur. A value that lands when focus leaves is a face
+that lights when the builder clicks elsewhere, which B3 refused for the wall.
+A quiet period keeps "the face lights while I type" at the cost of a
+quarter-second, and turns a word into one rebuild.

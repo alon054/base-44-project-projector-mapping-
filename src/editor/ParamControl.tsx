@@ -20,6 +20,7 @@
  * the selection is corrected in `controls.ts` on the same pass anyway.
  */
 import type { ParameterRegistry } from '../core/parameters';
+import { DebouncedTextInput } from './DebouncedTextInput';
 
 interface Props {
   registry: ParameterRegistry;
@@ -76,26 +77,27 @@ export function ParamControl({ registry, paramKey, label }: Props): React.JSX.El
         />
       )}
       {/*
-        B3. A free string, for `fillRole` (SPRINT.md §3 R2).
+        B3. A free string, for `fillRole` and `travelRole` (SPRINT.md §3 R2).
 
-        `onChange` and not `onBlur`: the builder is at the wall typing a role,
-        and a value that lands only when focus leaves the field is a face that
-        lights when they click somewhere else. Every keystroke is a
-        `registry.write`, which is a scene edit, which crosses to the output —
-        the same path a slider drag already takes, at a fraction of the rate.
+        Not on blur: the builder is at the wall typing a role, and a value that
+        lands only when focus leaves the field is a face that lights when they
+        click somewhere else. But not per keystroke either (S2): every commit
+        is a `registry.write`, which is a new scene, which the output rebuilds
+        whole — a decoder per character with a video fill. The field commits
+        250 ms after the last keystroke through the editor's one debounce
+        (`debouncedText.ts`); the write itself is still `registry.write`, here.
 
         `def.default` as the placeholder, so an empty field shows what empty
         MEANS rather than looking like a field that failed to load.
       */}
       {def.kind === 'text' && (
-        <input
-          type="text"
+        <DebouncedTextInput
           value={registry.read(paramKey) as string}
           placeholder={def.default === '' ? 'none' : def.default}
           maxLength={def.maxLength}
           spellCheck={false}
           style={textStyle}
-          onChange={(e) => write(e.currentTarget.value)}
+          onCommit={(v) => write(v)}
         />
       )}
       {def.kind === 'enum' && (
