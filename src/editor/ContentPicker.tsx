@@ -65,8 +65,11 @@ export function ContentPicker({
   const current = choices.find((c) => c.id === chosen) ?? null;
 
   return (
-    <div style={{ display: 'grid', gap: 6, flex: 1, minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    // `minmax(0, 1fr)`: a grid's implicit column is as wide as its widest item,
+    // and a <select> is as wide as its longest option — a downloaded clip's
+    // name pushed the whole picker, thumbnails included, past the column.
+    <div style={{ display: 'grid', gap: 6, flex: 1, minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <div style={currentBox} title={current ? `${current.label} — ${groupOf(current)}` : 'nothing picked'}>
           {current ? <Thumb asset={assetOf(current, library)} choice={current} small /> : <span style={badgeStyle}>none</span>}
         </div>
@@ -203,6 +206,7 @@ function Thumb({
 const selectStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
+  width: 0,
   padding: '4px 6px',
   borderRadius: 4,
   border: '1px solid #2b2f34',
@@ -224,7 +228,9 @@ const toggleStyle: React.CSSProperties = {
 
 const gridStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
+  // Three to a row, always — the operator's ask. `minmax(0, 1fr)` so a long
+  // caption cannot widen a column.
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
   gap: 6,
   maxHeight: 236,
   overflowY: 'auto',

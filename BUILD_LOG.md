@@ -7799,3 +7799,15 @@ showed it before the cause was read off the layout rather than guessed.
 - MEASURED: npm test 1221 / 1221, 50 files. Typecheck clean.
 - BLOCKER: -
 - NEXT: unchanged — the builder saves the reel scene, then Day 3.
+
+## 2026-09-07 — Sprint (operator additions, 6c) — the picker: three to a row, inside the column
+- DID: `ContentPicker`'s root grid gets `gridTemplateColumns: minmax(0, 1fr)`
+  and its `<select>` a zero flex-basis width — a downloaded clip's long name
+  was the select's intrinsic width, which widened the root, which widened the
+  thumbnail grid past the column (the fourth tile cut). The thumbnail grid is
+  `repeat(3, minmax(0, 1fr))`: three to a row, the operator's ask.
+- MEASURED: npm test 1221 / 1221, 50 files. Seen at 1440×900 with the
+  builder's reel scene open: three tiles per row, the pictures toggle visible.
+- BLOCKER: -
+- NEXT: unchanged — Day 3. The tree now shows `scenes/reel.json` opened at
+  launch, with clips on the faces: the builder saved it.
